@@ -93,6 +93,9 @@ func verifySealedBytes(path string, data []byte) (VerifiedSegment, error) {
 	if firstSequence != header.startSequence || firstSequence != entries[0].Sequence {
 		return VerifiedSegment{}, fmt.Errorf("%w: sealed WAL first sequence mismatch", ErrIntegrity)
 	}
+	if lastSequence < firstSequence {
+		return VerifiedSegment{}, fmt.Errorf("%w: sealed WAL sequence range is reversed", ErrIntegrity)
+	}
 	if lastSequence != entries[len(entries)-1].Sequence {
 		return VerifiedSegment{}, fmt.Errorf("%w: sealed WAL last sequence mismatch", ErrIntegrity)
 	}

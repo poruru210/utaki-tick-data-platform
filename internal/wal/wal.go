@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -289,6 +290,9 @@ func (s *Store) loadActive() error {
 	}
 	s.entries = append(s.entries, entries...)
 	if len(entries) > 0 {
+		if entries[len(entries)-1].Sequence == math.MaxUint64 {
+			return fmt.Errorf("%w: WAL sequence space exhausted", ErrIntegrity)
+		}
 		s.last = entries[len(entries)-1].EntryHash
 		s.next = entries[len(entries)-1].Sequence + 1
 	}

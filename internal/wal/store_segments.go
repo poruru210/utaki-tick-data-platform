@@ -3,6 +3,7 @@ package wal
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +32,11 @@ func (s *Store) initialize() error {
 	if err != nil {
 		return fmt.Errorf("read active WAL: %w", err)
 	}
-	if len(data) < 30 {
+	expectedHeaderLength := 30 + len(s.gatewayID)
+	if len(data) < expectedHeaderLength {
+		if !matchesIncompleteHeader(data, s.gatewayID, s.next) {
+			return fmt.Errorf("%w: invalid incomplete active WAL header", ErrIntegrity)
+		}
 		file, err := os.OpenFile(s.path, os.O_RDWR|os.O_TRUNC, 0o600)
 		if err != nil {
 			return fmt.Errorf("open incomplete active WAL header: %w", err)
@@ -201,6 +206,9 @@ func (s *Store) Seal() (VerifiedSegment, error) {
 	}
 	first := s.entries[s.activeAt]
 	last := s.entries[len(s.entries)-1]
+	if last.Sequence == math.MaxUint64 {
+		return VerifiedSegment{}, fmt.Errorf("%w: WAL sequence space exhausted", ErrIntegrity)
+	}
 	fileHash := sha256.Sum256(data)
 	trailer := encodeTrailer(first.Sequence, last.Sequence, uint32(activeCount), last.EntryHash, fileHash)
 	if _, err := s.file.Seek(0, io.SeekEnd); err != nil {
@@ -316,6 +324,26 @@ func (s *Store) sealedRoot() string {
 func hasTrailerAtEnd(data []byte) bool {
 	return len(data) >= trailerBytes &&
 		string(data[len(data)-trailerBytes:len(data)-trailerBytes+4]) == trailerMagic
+}
+
+func matchesIncompleteHeader(data []byte, gatewayID string, startSequence uint64) bool {
+	expected := make([]byte, 30+len(gatewayID))
+	copy(expected[0:4], fileMagic)
+	binary.LittleEndian.PutUint16(expected[4:6], walSchemaVersion)
+	binary.LittleEndian.PutUint16(expected[6:8], uint16(len(expected)))
+	binary.LittleEndian.PutUint64(expected[8:16], startSequence)
+	binary.LittleEndian.PutUint32(expected[24:28], 0)
+	binary.LittleEndian.PutUint16(expected[28:30], uint16(len(gatewayID)))
+	copy(expected[30:], gatewayID)
+	for index, value := range data {
+		if index >= 16 && index < 24 {
+			continue
+		}
+		if value != expected[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func filesEqual(left, right string) (bool, error) {

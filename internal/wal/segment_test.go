@@ -1,6 +1,7 @@
 package wal_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -267,7 +268,11 @@ func TestWALRecreatesIncompleteNextActiveHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	activePath := filepath.Join(root, "active.wal")
-	if err := os.WriteFile(activePath, []byte("TWAL\x01\x00"), 0o600); err != nil {
+	header, err := os.ReadFile(activePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(activePath, header[:32], 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -282,6 +287,23 @@ func TestWALRecreatesIncompleteNextActiveHeader(t *testing.T) {
 	}
 	if next.Sequence != 2 || next.PreviousEntryHash != sealed.ChainRoot {
 		t.Fatalf("recreated active WAL did not continue sealed chain: %+v", next)
+	}
+}
+
+func TestWALDoesNotRepairInvalidShortActiveHeader(t *testing.T) {
+	root := t.TempDir()
+	store, err := wal.Open(root, "gateway-test-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "active.wal"), []byte("BROKEN"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wal.Open(root, "gateway-test-01"); err == nil || !errors.Is(err, wal.ErrIntegrity) {
+		t.Fatalf("expected invalid short header integrity stop, got %v", err)
 	}
 }
 
@@ -325,6 +347,60 @@ func TestVerifySealedSegmentStopsOnTrailerMutation(t *testing.T) {
 	}
 	if _, err := wal.Open(root, "gateway-test-01"); err == nil || !errors.Is(err, wal.ErrIntegrity) {
 		t.Fatalf("expected startup integrity stop, got %v", err)
+	}
+}
+
+func TestWALSealDoesNotOverwriteDifferentSegmentAtSameRange(t *testing.T) {
+	root := t.TempDir()
+	fixture, err := fake.BatchFixture()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := wal.Open(root, "gateway-test-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.Append(fixture.Frame, 1710000000, 42); err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := wal.Open(t.TempDir(), "gateway-test-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Append(fixture.Frame, 1710000999, 999); err != nil {
+		t.Fatal(err)
+	}
+	otherSegment, err := other.Seal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Close(); err != nil {
+		t.Fatal(err)
+	}
+	differentBytes, err := os.ReadFile(otherSegment.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(
+		root,
+		"sealed",
+		"segment-00000000000000000001-00000000000000000001.wal",
+	)
+	if err := os.WriteFile(destination, differentBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Seal(); err == nil || !errors.Is(err, wal.ErrIntegrity) {
+		t.Fatalf("Seal error = %v, want ErrIntegrity", err)
+	}
+	remaining, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(remaining, differentBytes) {
+		t.Fatal("failed seal overwrote a different segment")
 	}
 }
 
