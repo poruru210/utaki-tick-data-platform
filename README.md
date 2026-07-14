@@ -4,6 +4,8 @@
 
 M1では、1 brokerと1 exact symbolを対象に、MT5 Serviceからlocalhost TCPでGo Gatewayへ送信し、WAL syncとSQLite journal commitの後にACKを返します。
 
+M2のローカル基盤では、active WALをProtocol V1準拠のsegmentとしてsealし、完全性を再検証したbyte-exactなcopyだけをcontent-addressed outboxへ置きます。
+
 **モノレポ**：Gateway、producer、Protocol、検証ツールを一つのリポジトリで管理する構成です。
 
 **IF**：producerとGatewayの間で交換する、言語に依存しないデータ形式と通信規則です。
@@ -24,14 +26,14 @@ M1では、1 brokerと1 exact symbolを対象に、MT5 Serviceからlocalhost TC
 ## データ経路
 
 ```text
-MT5 producer -> protocol/v1 -> localhost TCP -> Go Gateway -> WAL + durable ACK -> archive/R2 -> delivery
+MT5 producer -> protocol/v1 -> localhost TCP -> Go Gateway -> WAL + durable ACK -> sealed WAL -> local raw outbox -> archive/R2 -> delivery
 ```
 
 producerはデータ源固有の形式をIFへ変換します。
 
 GatewayはIFを検証し、受信済みデータを永続化して後続処理へ渡します。
 
-M1のGatewayはR2、Parquet、HTTP delivery、local pruningを実行しません。
+現在の実装は明示的なWAL sealとローカルoutboxへのpromoteまでを提供し、自動rotation policy、R2、raw-day manifest、Parquet、HTTP delivery、local pruningを実行しません。
 
 Pythonは本番Gatewayの実装には使わず、fixtureと契約の検証に使います。
 

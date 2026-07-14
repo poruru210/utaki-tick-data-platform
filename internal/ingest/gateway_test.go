@@ -159,6 +159,70 @@ func TestGatewayRebuildsJournalWhenCursorStateDiffers(t *testing.T) {
 	}
 }
 
+func TestGatewayRebuildsJournalAcrossSealedAndActiveWAL(t *testing.T) {
+	config := testConfig(t)
+	gateway, client, stop := startGateway(t, config)
+	firstBatch := testBatch(1, 1000, 1, 0)
+	firstAck, err := client.SendBatch(firstBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := gateway.WAL().Seal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBatch := testBatch(2, 2000, 1, 0)
+	secondAck, err := client.SendBatch(secondBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstAck.GatewayIngestSequence != 1 ||
+		secondAck.GatewayIngestSequence != 2 ||
+		secondAck.CommittedCursorMSC != 2000 {
+		t.Fatalf("unexpected ACKs before rebuild: first=%+v second=%+v", firstAck, secondAck)
+	}
+	if secondAck.GatewayIngestSequence != sealed.LastSequence+1 {
+		t.Fatalf("active WAL did not continue after sealed sequence %d", sealed.LastSequence)
+	}
+	_, chainRootBefore := gateway.WAL().Last()
+	_ = client.Close()
+	stop()
+
+	if err := os.Remove(config.JournalPath); err != nil {
+		t.Fatal(err)
+	}
+	gateway, client, stop = startGateway(t, config)
+	defer stop()
+	if gateway.WAL().Count() != 2 {
+		t.Fatalf("reopened WAL count = %d, want 2", gateway.WAL().Count())
+	}
+	if len(gateway.WAL().SealedSegments()) != 1 {
+		t.Fatalf("reopened sealed segment count = %d, want 1", len(gateway.WAL().SealedSegments()))
+	}
+	_, chainRootAfter := gateway.WAL().Last()
+	if chainRootAfter != chainRootBefore {
+		t.Fatalf("chain root changed across rebuild: before=%x after=%x", chainRootBefore, chainRootAfter)
+	}
+	state, err := gateway.Journal().State()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.CommittedCursorMSC != 2000 {
+		t.Fatalf("rebuilt cursor = %d, want 2000", state.CommittedCursorMSC)
+	}
+	firstDuplicate, err := client.SendBatch(firstBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDuplicate, err := client.SendBatch(secondBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstDuplicate.Status != protocol.AckDuplicate || secondDuplicate.Status != protocol.AckDuplicate {
+		t.Fatalf("rebuild did not preserve duplicate identity: first=%+v second=%+v", firstDuplicate, secondDuplicate)
+	}
+}
+
 func TestGatewayRetriesAfterWALSyncBeforeJournalCommit(t *testing.T) {
 	config := testConfig(t)
 	gateway, client, stop := startGateway(t, config)

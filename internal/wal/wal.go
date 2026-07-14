@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"tick-data-platform/internal/protocol"
@@ -26,6 +26,7 @@ const (
 
 var ErrIntegrity = errors.New("gateway WAL integrity failure")
 var ErrUnavailable = errors.New("gateway WAL is unavailable; reopen required")
+var ErrEmptySegment = errors.New("active WAL segment has no entries")
 
 type Entry struct {
 	Offset             int64
@@ -39,19 +40,22 @@ type Entry struct {
 }
 
 type Store struct {
-	mu        sync.Mutex
-	root      string
-	path      string
-	gatewayID string
-	file      *os.File
-	syncFile  func() error
-	statFile  func() (os.FileInfo, error)
-	entries   []Entry
-	last      [32]byte
-	next      uint64
-	start     uint64
-	fileBytes int64
-	poisoned  bool
+	mu          sync.Mutex
+	root        string
+	path        string
+	gatewayID   string
+	file        *os.File
+	syncFile    func() error
+	statFile    func() (os.FileInfo, error)
+	entries     []Entry
+	sealed      []VerifiedSegment
+	last        [32]byte
+	next        uint64
+	start       uint64
+	activeAt    int
+	sealedBytes int64
+	fileBytes   int64
+	poisoned    bool
 }
 
 func Open(root, gatewayID string) (*Store, error) {
@@ -64,38 +68,18 @@ func Open(root, gatewayID string) (*Store, error) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("create WAL root: %w", err)
 	}
-	path := filepath.Join(root, "active.wal")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open WAL: %w", err)
-	}
 	store := &Store{
 		root:      root,
-		path:      path,
+		path:      filepath.Join(root, "active.wal"),
 		gatewayID: gatewayID,
-		file:      file,
-		syncFile:  file.Sync,
-		statFile:  file.Stat,
 		start:     1,
 		next:      1,
 	}
-	info, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("stat WAL: %w", err)
-	}
-	if info.Size() == 0 {
-		if err := store.writeHeader(time.Now().Unix()); err != nil {
-			_ = file.Close()
-			return nil, err
+	if err := store.initialize(); err != nil {
+		if store.file != nil {
+			_ = store.file.Close()
 		}
-	} else if err := store.load(); err != nil {
-		_ = file.Close()
 		return nil, err
-	}
-	if _, err := file.Seek(0, io.SeekEnd); err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("seek WAL end: %w", err)
 	}
 	return store, nil
 }
@@ -113,6 +97,16 @@ func (s *Store) Entries() []Entry {
 	for i, entry := range s.entries {
 		result[i] = entry
 		result[i].Frame = append([]byte(nil), entry.Frame...)
+	}
+	return result
+}
+
+func (s *Store) SealedSegments() []VerifiedSegment {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]VerifiedSegment, len(s.sealed))
+	for i, segment := range s.sealed {
+		result[i] = cloneVerifiedSegment(segment)
 	}
 	return result
 }
@@ -206,7 +200,7 @@ func (s *Store) Append(frame []byte, receiveWallS int64, receiveMonotonicUS uint
 	s.entries = append(s.entries, entry)
 	s.last = entryHash
 	s.next++
-	s.fileBytes = info.Size()
+	s.fileBytes = s.sealedBytes + info.Size()
 	return entry, nil
 }
 
@@ -256,11 +250,11 @@ func (s *Store) writeHeader(createdWallS int64) error {
 	if err := s.file.Sync(); err != nil {
 		return fmt.Errorf("sync WAL header: %w", err)
 	}
-	s.fileBytes = int64(len(header))
+	s.fileBytes = s.sealedBytes + int64(len(header))
 	return nil
 }
 
-func (s *Store) load() error {
+func (s *Store) loadActive() error {
 	if _, err := s.file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("seek WAL start: %w", err)
 	}
@@ -268,67 +262,48 @@ func (s *Store) load() error {
 	if err != nil {
 		return fmt.Errorf("read WAL: %w", err)
 	}
-	if len(data) < 30 || string(data[:4]) != fileMagic {
-		return fmt.Errorf("%w: invalid WAL header", ErrIntegrity)
+	header, err := parseHeader(data, s.gatewayID)
+	if err != nil {
+		return err
 	}
-	if binary.LittleEndian.Uint16(data[4:6]) != walSchemaVersion {
-		return fmt.Errorf("%w: unsupported WAL schema", ErrIntegrity)
+	s.start = header.startSequence
+	s.activeAt = len(s.entries)
+	entries, entriesEnd, partial, err := parseEntries(data, header, nil, true)
+	if err != nil {
+		return err
 	}
-	headerLength := int(binary.LittleEndian.Uint16(data[6:8]))
-	idLength := int(binary.LittleEndian.Uint16(data[28:30]))
-	if headerLength != 30+idLength || headerLength > len(data) || idLength > 255 {
-		return fmt.Errorf("%w: invalid WAL header length", ErrIntegrity)
+	if header.startSequence != s.next {
+		return fmt.Errorf(
+			"%w: active WAL starts at sequence %d, want %d",
+			ErrIntegrity,
+			header.startSequence,
+			s.next,
+		)
 	}
-	if binary.LittleEndian.Uint32(data[24:28]) != 0 || string(data[30:headerLength]) != s.gatewayID {
-		return fmt.Errorf("%w: WAL gateway identity mismatch", ErrIntegrity)
+	if len(entries) > 0 && entries[0].PreviousEntryHash != s.last {
+		return fmt.Errorf(
+			"%w: active WAL chain start mismatch at sequence %d",
+			ErrIntegrity,
+			entries[0].Sequence,
+		)
 	}
-	s.start = binary.LittleEndian.Uint64(data[8:16])
-	if s.start == 0 {
-		return fmt.Errorf("%w: invalid WAL segment start sequence", ErrIntegrity)
-	}
-	s.next = s.start
-	offset := headerLength
-	expectedSequence := s.start
-	var previous [32]byte
-	for offset < len(data) {
-		remaining := len(data) - offset
-		if remaining < 4 {
-			break
-		}
-		entryLength := int(binary.LittleEndian.Uint32(data[offset : offset+4]))
-		if entryLength < entryFixedBytes || entryLength > entryFixedBytes+int(protocol.MaxFrameBytes) {
-			return fmt.Errorf("%w: invalid entry length at offset %d", ErrIntegrity, offset)
-		}
-		if remaining < entryLength {
-			break
-		}
-		entry, err := parseEntry(data[offset : offset+entryLength])
-		if err != nil {
-			return fmt.Errorf("%w: entry at offset %d: %v", ErrIntegrity, offset, err)
-		}
-		if entry.Sequence != expectedSequence {
-			return fmt.Errorf("%w: expected sequence %d, got %d", ErrIntegrity, expectedSequence, entry.Sequence)
-		}
-		if entry.PreviousEntryHash != previous {
-			return fmt.Errorf("%w: previous hash mismatch at sequence %d", ErrIntegrity, entry.Sequence)
-		}
-		entry.Offset = int64(offset)
-		s.entries = append(s.entries, entry)
-		previous = entry.EntryHash
-		expectedSequence++
-		offset += entryLength
-	}
-	if offset < len(data) {
-		if err := s.file.Truncate(int64(offset)); err != nil {
+	if partial {
+		if err := s.file.Truncate(int64(entriesEnd)); err != nil {
 			return fmt.Errorf("truncate incomplete WAL tail: %w", err)
 		}
 		if err := s.file.Sync(); err != nil {
 			return fmt.Errorf("sync truncated WAL tail: %w", err)
 		}
 	}
-	s.last = previous
-	s.next = expectedSequence
-	s.fileBytes = int64(offset)
+	s.entries = append(s.entries, entries...)
+	if len(entries) > 0 {
+		if entries[len(entries)-1].Sequence == math.MaxUint64 {
+			return fmt.Errorf("%w: WAL sequence space exhausted", ErrIntegrity)
+		}
+		s.last = entries[len(entries)-1].EntryHash
+		s.next = entries[len(entries)-1].Sequence + 1
+	}
+	s.fileBytes = s.sealedBytes + int64(entriesEnd)
 	return nil
 }
 
