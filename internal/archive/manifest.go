@@ -197,6 +197,90 @@ func (s ScopeConfig) CanonicalConfigJSON() ([]byte, error) {
 	return protocol.CanonicalJSON(value)
 }
 
+// ScopeConfigFromCanonicalJSON decodes the exact archive-config-v1 document
+// used by campaign-scope descriptors.  It returns normalized protocol limits
+// only after proving that the supplied bytes are the canonical representation.
+func ScopeConfigFromCanonicalJSON(data []byte) (ScopeConfig, error) {
+	value, err := protocol.DecodeCanonicalJSON(data)
+	if err != nil {
+		return ScopeConfig{}, fmt.Errorf("decode archive config: %w", err)
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return ScopeConfig{}, fmt.Errorf("archive config must be a JSON object")
+	}
+	if err := requireExactKeys(object, []string{
+		"broker_server_fingerprint", "campaign_id", "dataset_id", "day_definition_id",
+		"exact_source_symbol", "gateway_build_identity", "producer_build_identity",
+		"protocol_limits", "protocol_version", "provider_id", "publisher_epoch",
+		"publisher_id", "settle_policy", "stable_feed_id",
+	}); err != nil {
+		return ScopeConfig{}, err
+	}
+	var result ScopeConfig
+	for key, destination := range map[string]*string{
+		"broker_server_fingerprint": &result.BrokerServerFingerprint,
+		"campaign_id":               &result.CampaignID,
+		"dataset_id":                &result.DatasetID,
+		"day_definition_id":         &result.DayDefinitionID,
+		"exact_source_symbol":       &result.ExactSourceSymbol,
+		"gateway_build_identity":    &result.GatewayBuildIdentity,
+		"producer_build_identity":   &result.ProducerBuildIdentity,
+		"provider_id":               &result.ProviderID,
+		"publisher_id":              &result.PublisherID,
+		"settle_policy":             &result.SettlePolicy,
+		"stable_feed_id":            &result.StableFeedID,
+	} {
+		parsed, err := stringValue(object, key, true)
+		if err != nil {
+			return ScopeConfig{}, err
+		}
+		*destination = parsed
+	}
+	protocolVersion, err := uint64Value(object, "protocol_version")
+	if err != nil || protocolVersion > uint64(^uint16(0)) {
+		return ScopeConfig{}, fmt.Errorf("protocol_version is outside uint16 range")
+	}
+	result.ProtocolVersion = uint16(protocolVersion)
+	result.PublisherEpoch, err = uint64Value(object, "publisher_epoch")
+	if err != nil {
+		return ScopeConfig{}, err
+	}
+	limits, ok := object["protocol_limits"].(map[string]any)
+	if !ok {
+		return ScopeConfig{}, fmt.Errorf("protocol_limits must be an object")
+	}
+	if err := requireExactKeys(limits, []string{"max_frame_bytes", "max_records", "max_string_bytes"}); err != nil {
+		return ScopeConfig{}, err
+	}
+	maxFrameBytes, err := uint64Value(limits, "max_frame_bytes")
+	if err != nil || maxFrameBytes > uint64(^uint32(0)) {
+		return ScopeConfig{}, fmt.Errorf("max_frame_bytes is outside uint32 range")
+	}
+	maxRecords, err := uint64Value(limits, "max_records")
+	if err != nil || maxRecords > uint64(^uint32(0)) {
+		return ScopeConfig{}, fmt.Errorf("max_records is outside uint32 range")
+	}
+	maxStringBytes, err := uint64Value(limits, "max_string_bytes")
+	if err != nil || maxStringBytes > uint64(^uint16(0)) {
+		return ScopeConfig{}, fmt.Errorf("max_string_bytes is outside uint16 range")
+	}
+	result.ProtocolLimits = ProtocolLimits{
+		MaxFrameBytes:  uint32(maxFrameBytes),
+		MaxRecords:     uint32(maxRecords),
+		MaxStringBytes: uint16(maxStringBytes),
+	}
+	normalized, err := result.normalized()
+	if err != nil {
+		return ScopeConfig{}, err
+	}
+	canonical, err := normalized.CanonicalConfigJSON()
+	if err != nil || !bytes.Equal(canonical, data) {
+		return ScopeConfig{}, fmt.Errorf("archive config bytes are not canonical")
+	}
+	return normalized, nil
+}
+
 func (s ScopeConfig) ConfigHash() ([32]byte, error) {
 	canonical, err := s.CanonicalConfigJSON()
 	if err != nil {

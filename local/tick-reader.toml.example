@@ -1,4 +1,10 @@
-r2_bucket_env = "TICK_READER_R2_BUCKET"
-r2_prefix = "v1"
-cache_root = "./cache"
-read_only_token_env = "TICK_READER_R2_TOKEN"
+reader_config_version = "tick-reader-v1"
+endpoint = "https://example.r2.cloudflarestorage.com"
+bucket_env = "TICK_READER_R2_BUCKET"
+access_key_env = "TICK_READER_R2_ACCESS_KEY_ID"
+secret_key_env = "TICK_READER_R2_SECRET_ACCESS_KEY"
+region = "auto"
+immutable_root = "v1"
+cache_root = "./cache/tick-reader"
+max_metadata_bytes = 1048576
+max_raw_object_bytes = 8589934592
