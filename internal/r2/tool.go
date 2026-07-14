@@ -157,6 +157,23 @@ type commandExecutor interface {
 	run(ctx context.Context, executable string, args ...string) (string, error)
 }
 
+// RcloneExecutorFunc is an in-process command seam for network-free integration tests.
+// Production callers should use NewRcloneRunner or NewRcloneRunnerForPlatform.
+type RcloneExecutorFunc func(ctx context.Context, executable string, args ...string) (string, error)
+
+func (f RcloneExecutorFunc) run(ctx context.Context, executable string, args ...string) (string, error) {
+	return f(ctx, executable, args...)
+}
+
+// NewRcloneRunnerWithExecutor creates a runner with a test-controlled command
+// executor while retaining the same binary and version checks as production.
+func NewRcloneRunnerWithExecutor(binaryPath string, tool RcloneTool, executor RcloneExecutorFunc) (*RcloneRunner, error) {
+	if binaryPath == "" || executor == nil {
+		return nil, fmt.Errorf("rclone test runner dependencies are incomplete")
+	}
+	return &RcloneRunner{binaryPath: binaryPath, tool: tool, executor: executor}, nil
+}
+
 type osCommandExecutor struct{}
 
 func (osCommandExecutor) run(ctx context.Context, executable string, args ...string) (string, error) {

@@ -42,8 +42,9 @@ Parquet、replay-day manifest、part manifest、handover、pruning、Worker、HT
 - [x] M2R-3のCLI testでdatasets、campaigns、snapshots raw、fetch、tick-verify day、tick-verify campaignのstable JSONとnonzero error境界を確認しました。
 - [ ] local環境ではgccとclangが存在しないためrace testは実行せず、mise exec -- go test -race ./internal/delivery ./internal/catalog ./internal/r2 ./internal/archiveはGitHub Windows CIで実行します。
 - [x] M2R-3のArchiveReader、tickctl raw commands、tick-verify day/campaignの実装を完了しました。
-- [ ] M2R-4のintegration、optional real-R2 smoke、CI/race、PR/review readinessは未実装です。
-- [ ] M2全体はM2R-1からM2R-4までの完了を確認するまで未完了です。
+- [x] M2R-4のnetwork-free integration、optional gated real-R2 smoke harness、CI/race workflow、verification record、README、roadmap、PR/review readiness artifactを実装しました。
+- [x] M2R-4のfake-only local gateは完了しましたが、real R2 smokeとGitHub Actionsの実行成功は確認していません。
+- [x] M2全体のlocal implementationはM2R-1からM2R-4まで完了しましたが、optional real R2とCI実行結果は未確認境界として残します。
 
 ## Surprises & Discoveries
 
@@ -56,6 +57,9 @@ Parquet、replay-day manifest、part manifest、handover、pruning、Worker、HT
 - receiptのfinal pathへ直接O_EXCL writeすると、process crash後にpartial finalが残り、same-content retryを妨げるため、archive raw promotionと同じtemporary sync plus hard-link方式が必要です。
 - ArchiveReaderのrevision graphは複数UTC dayのmanifestを一括比較できないため、immutable day manifestのdateごとに完全なrevision graphを検証し、その後campaignのsegment集合を統合します。
 - read-only fetchではS3 remote keyをcampaign-relative canonical keyから毎回Layoutで導出し、local cacheとconsumer outputは検証済みdigest basenameだけを使います。
+- internal/r2 packageのfake testからinternal/deliveryを直接importするとGo testのimport cycleになるため、end-to-end testはdelivery packageのsame-package testとして配置しました。
+- production Publisher APIをnetwork-free end-to-end testから再利用するにはcommand executionだけを注入する必要があるため、pinned runnerの検証とargv規則を保持したRcloneExecutorFunc seamを追加しました。
+- real-R2 smokeをdefault testへ含めるとcredentialとnetworkが通常gateへ混入するため、build tag、明示的confirmation、isolated prefix、synthetic bytesを同時に要求します。
 
 ## Decision Log
 
@@ -111,6 +115,12 @@ Parquet、replay-day manifest、part manifest、handover、pruning、Worker、HT
 - 理由: remote path traversalとcampaign prefixの二重連結を排除し、empty cacheからの復元経路を単純に検証できるためです。
 - 決定: day verificationはarchive.VerifyRawDaySnapshotを実行してもgenesis_verified=falseとanchored_day_sliceを返し、campaign verificationだけがzero genesisからthrough-rootを主張します。
 - 理由: day sliceの前方anchorとcampaign全体のgenesis証明を明確に分離するためです。
+- 決定: M2R-4のnetwork-free end-to-end testはfake conditional backendとfake rcloneを使い、実際のPublisherとArchiveReaderのexported APIを通します。
+- 理由: production APIの接続を確認しつつ、R2 credentialとnetworkをlocal gateへ持ち込まないためです。
+- 決定: real-R2 smokeは`real_r2_smoke` build tagと全てのopt-in条件を満たす場合だけ実行し、remote objectをdelete、move、sync、overwriteしません。
+- 理由: synthetic evidenceの範囲をisolated namespaceへ限定し、既存archiveを破壊しないためです。
+- 決定: GitHub Actionsの通常checkはmise 2026.7.0を使い、Windows raceはCGO_ENABLED=1でingest、WAL、archive、r2、delivery、catalogを対象にします。
+- 理由: local compiler制約を弱めず、managed toolchainの同一性をCIで再現するためです。
 - 決定: Parquet、replay-day、part manifest、handover、pruning、Worker、HTTP、live brokerはM2から除外します。
 - 理由: raw evidence deliveryとderivative replay、運用handover、service runtimeの責務を混ぜないためです。
 
@@ -134,6 +144,14 @@ M2R-2 corrective verificationは異内容raw collision時のno-clobberとdata-be
 
 post-review correction verificationは初回scope descriptor check後のremote mutationを再checkで検出し、manifest不在を確認しました。
 
+M2R-4のfake end-to-end testはverified sealed WALからraw-day manifest、fake publication、empty-cache fetch、BatchFrameV1復元、zero-record error batch、anchored day report、campaign genesis reportまでを一つのnetwork-free testで確認します。
+
+M2R-4のverification recordは初回publication、同内容retry、collision、publisher conflict、data-before-manifest、remote mutation、download failure、revision branch、empty-cache fetchのtest mappingを記録します。
+
+M2R-4はbuild-tag付きoptional real-R2 smoke、通常check workflow、拡張Windows race workflow、README、roadmap、verification recordを追加しました。
+
+M2R-4のreal-R2 smokeは必要なopt-in条件がlocal環境にないためskipし、GitHub Actionsはworkflow定義を追加しただけで成功を主張しません。
+
 M2R-3ではPutIfAbsentを含まないReadBackend、endpoint必須のstrict TOML reader config、canonical scope descriptor discovery、immutable manifest graph resolutionを追加しました。
 
 M2R-3ではraw objectをbounded streaming temporaryへ取得し、sync、size、SHA-256、wal.VerifySealedSegment、no-clobber publishの順でcacheへ保存し、BatchFrameV1とzero-record error batchを復元します。
@@ -146,9 +164,13 @@ M2R-3の指定Go test、mise run check、go vet ./...、git diff --checkは2026-
 
 M2R-3のrace testはgccとclangがlocalに存在しないため実行せず、mise exec -- go test -race ./internal/delivery ./internal/catalog ./internal/r2 ./internal/archiveをGitHub Windows CIへ引き渡します。
 
+M2R-4ではgccとclangの不在を確認したためrace commandを弱めず、mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/catalogをWindows CIへ引き渡します。
+
 実R2 smokeは明示的なenable flag、isolated bucket/prefix、credentialが同時に存在する実行環境を提供されていないため実施せず、remote mutationの実環境確認はM2R-4のoptional smokeへ残します。
 
 local環境にgccとclangがないためrace testは実施せず、mise exec -- go test -race ./internal/r2 ./internal/archiveをGitHub Windows CIで実行する未解決検証項目として残します。
+
+M2R-4のlocal resultはfake-onlyであり、real R2のremote mutationとCI上のrace結果はこの作業環境では未確認です。
 
 M2R-2以降の実装開始時には、このExecPlanのProgress、Surprises & Discoveries、Decision Log、Artifacts and Notesを先に更新します。
 
@@ -342,7 +364,15 @@ M2R-3のCLI testは全requested commandのargument validation、stable JSON、st
 
 M2R-3のrace検証はmise exec -- go test -race ./internal/delivery ./internal/catalog ./internal/r2 ./internal/archiveを実行し、gccとclangがないlocalではGitHub Windows CIへ移します。
 
-M2全体はM2R-1、M2R-2、M2R-3、M2R-4とその未実施境界が全て確認されるまで完了ではありません。
+M2R-4のfocused integration検証はmise exec -- go test ./internal/r2 ./internal/delivery ./cmd/tickctl ./cmd/tick-verify ./internal/archiveで実行し、fake publication、empty-cache fetch、BatchFrameV1復元、zero-record error、day report、campaign reportを確認します。
+
+M2R-4のoptional smoke compile検証はmise exec -- go test -tags real_r2_smoke ./internal/delivery -run TestOptionalRealR2Smoke -count=1で実行し、opt-in条件がない場合は明示理由付きskipとします。
+
+M2R-4のrepository gateはmise run check、mise exec -- go vet ./...、git diff --checkで実行します。
+
+M2R-4のrace検証はmise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/catalogを実行し、gccとclangがないlocalではGitHub Windows CIへ移します。
+
+M2全体のlocal implementationはM2R-1、M2R-2、M2R-3、M2R-4のfake-only境界まで完了とし、real R2 smokeとGitHub Actionsの実行結果は別の未確認証跡として扱います。
 
 ## Idempotence and Recovery
 
@@ -383,6 +413,14 @@ M2R-2のGo artifactはinternal/r2/tool.go、layout.go、claim.go、backend.go、
 M2R-2のtool artifactはtools/tick-data-tools.lock.tomlであり、credential、runtime journal、R2 object、実行用configはcommitしません。
 
 M2R-3のGo artifactはinternal/deliveryのReadBackend reader、fetch、verification、cmd/tickctl、cmd/tick-verify、local/tick-reader.toml.exampleです。
+
+M2R-4のintegration artifactはinternal/delivery/m2_delivery_e2e_test.goとinternal/r2/tool.goのnetwork-free executor seamです。
+
+M2R-4のoptional smoke artifactはinternal/delivery/real_r2_smoke_test.goであり、real_r2_smoke build tag、synthetic bytes、isolated prefix、no-overwrite境界を持ちます。
+
+M2R-4のverification artifactはdocs/verification/m2-raw-offhost-delivery.md、README.md、docs/plan/roadmap.mdです。
+
+M2R-4のCI artifactは.github/workflows/check.ymlと.github/workflows/windows-race.ymlです。
 
 parent plan .agent/tick-data-platform-execplan-revised.mdにはJCSではなくProtocol V1 canonical-json-v1であること、canonical key、chain_objects、monotonic revisionのDecision Logを残します。
 
