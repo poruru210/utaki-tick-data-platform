@@ -20,6 +20,11 @@ producerはHello、Resume、Batch、Ackの手順に従います。
 
 ACKを受信できない場合は、cursorに基づいて再送します。
 
+`TickCaptureService.mq5`には、`EncodeHelloFrameV1`と`EncodeBatchFrameV1`を実装しています。
+
+MQL5 compilerを使ったコンパイル結果は、このrepositoryの自動検証には含めません。
+
+MetaEditorのあるWindows環境で、MQL5のcompiler buildとともに別途確認します。
 接続が切れた場合は再接続し、Gatewayの応答に基づいて送信位置を復元します。
 
 ## 責務の境界

@@ -1,0 +1,8 @@
+{
+  "fixture_id": "batch-unknown-version",
+  "kind": "invalid_frame",
+  "expected_result": "rejected",
+  "base_fixture_id": "batch-v1",
+  "mutation": {"type": "set_u16", "offset": 4, "value": 2},
+  "expected_error_code": "UNSUPPORTED_PROTOCOL_VERSION"
+}

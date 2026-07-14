@@ -1,29 +1,43 @@
 # Protocol V1のconformance
 
-**Conformance**：実装が`protocol/v1/`のwire、message、hash、エラー処理の規則を満たすことを確認する手順です。
+**Conformance**：実装がProtocol V1のbytes、hash、decode結果、失敗コードに適合することを確認する判定です。
 
-## 対象
+## 正常系
 
-conformanceでは、Go Gateway、MQL5 producer、Fake producerが同じ契約を解釈できることを確認します。
+Go decoder、Python decoder、MQL5 encoder、fake producerは、valid fixtureのwire_hexを同じbytesとして扱います。
 
-確認対象には、正常なHello、Resume、Batch、Ack、Errorを含めます。
+BatchのRawMqlTickV1は、全fieldのbit pattern、signedness、time unit、record orderを保持します。
 
-異常系には、unknown version、短いframe、CRC不一致、ACK欠落、重複、境界値、WAL復旧を含めます。
+hashはfixtureのexpected_hashesと一致しなければなりません。
 
-## 判定材料
+## 異常系
 
-判定は、golden bytes、canonical JSON、hash、期待するACKまたはErrorで行います。
+truncated frameはTRUNCATED_FRAME、CRC mutationはCRC_MISMATCH、unknown versionはUNSUPPORTED_PROTOCOL_VERSIONとして拒否します。
 
-実際のtickデータ、credential、broker接続を判定材料にしません。
+unknown messageはUNKNOWN_MESSAGE_TYPE、oversized frameはOVERSIZED_FRAMEとして拒否します。
 
-同じfixtureをGo、MQL5、Pythonから読める構成にします。
+拒否したframeはdecode結果、hash、WAL entry、ACKを生成しません。
 
-## Producer追加時の手順
+## Stateful scenario
 
-新しいproducerを追加するときは、source schemaを定義します。
+duplicate retransmissionとACK loss retryは、同じproducer session、batch sequence、bytesを再入力してDUPLICATE Ackになることを検証します。
 
-次に、正常系と異常系のfixtureを追加します。
+WAL recoveryは、commit marker、entry CRC、entry hash、file hashを検証したentryをREPLAY_COMMITTED_ENTRYとして扱います。
 
-その後、producerとGatewayでconformance caseを実行します。
+short responseとdense boundaryは、source errorまたはdense boundary flagを保持したvalid BatchFrameV1として検証します。
 
-transportの共通規則とsource schemaの固有規則を、別々に失敗として報告できるようにします。
+## 判定順序
+
+まずfixture indexのpathとJSONを検証します。
+
+次にwire bytesをdecoderへ入力し、expected_resultとexpected_error_codeを比較します。
+
+valid fixtureではdecoded fields、canonical JSON、hashを比較します。
+
+同一fixtureをGo、Python、MQL5、fake producerで比較し、実装ごとの期待値を作りません。
+
+## Producer追加
+
+新しいproducerはsource schema、valid fixture、invalid fixture、hash、conformance caseを同時に追加します。
+
+共通transportの規則とsource schemaの規則を別々に判定できるようにします。

@@ -21,13 +21,29 @@ MQL5のコンパイルと実機接続の確認は、MetaTrader 5が動作するW
 
 M0では、実装より先にproducerとGatewayが共有する契約を固定します。
 
-固定対象はwire framing、message layout、hash domain、canonical JSON、WAL、raw manifest、replay manifestです。
+M0ではTCP runtime、live MT5 collection、R2、Parquet、SQLite journal runtime、crash injection、production operationを実行しません。
+
+固定対象はwire framing、message layout、hash domain、canonical JSON、WAL、raw-day manifest、replay-day manifestです。
+
+`part-manifest-v1`の仕様と実装はM3へ延期します。
+
+`producers/fake/`には、決定的かつネットワークを使わないGo製のtest producer/packageを置きます。
 
 Go、MQL5、Pythonが同じ結果を返すcross-language fixtureを作成します。
 
 unknown version、短いframe、CRC不一致、重複、ACK欠落、WAL復旧をfixtureとconformance caseで表現します。
 
 M0の完了条件は、仕様、fixture、Go側検証、MQL5側送信の解釈が一致していることです。
+
+### 2026-07-14時点の進捗
+
+protocol/v1/にwire、message、source schema、WAL、hash domain、canonical JSON、raw/replay manifestの契約を固定しました。
+
+testdata/tickdata/golden/に18 fixtureを追加し、Go decoder、独立Python decoder、fake producerでbytes、hash、正常系、wire異常系、stateful scenarioを検証しました。
+
+MQL5のHello/Batch encoderはMetaEditorで0 errors、0 warningsを確認しました。
+
+MQL5実機でのfixture出力、TCP実通信、live MT5 collection、R2、Parquet、SQLite journal runtimeは実施していません。
 
 ## M1のローカル収集
 

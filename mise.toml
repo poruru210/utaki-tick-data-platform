@@ -19,7 +19,7 @@ run = "go test ./..."
 
 [tasks.test-python]
 description = "Run the independent Python contract and invariant tests"
-run = "uv run pytest tests/unit/test_tick_data_contract.py tests/stateful/test_tick_data_invariants.py"
+run = "uv run pytest tests/unit tests/stateful"
 
 [tasks.fixture]
 description = "Run the independent fixture verifier entry point"

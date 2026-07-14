@@ -1,0 +1,9 @@
+{
+  "fixture_id": "ack-loss-retry",
+  "kind": "stateful_scenario",
+  "expected_result": "accepted",
+  "base_fixture_id": "batch-v1",
+  "scenario": "ACK_LOSS_RETRY",
+  "mutation": {"type": "duplicate_identity"},
+  "expected_ack_status": "DUPLICATE"
+}

@@ -1,0 +1,8 @@
+{
+  "fixture_id": "batch-truncated",
+  "kind": "invalid_frame",
+  "expected_result": "rejected",
+  "base_fixture_id": "batch-v1",
+  "mutation": {"type": "truncate", "size": 10},
+  "expected_error_code": "TRUNCATED_FRAME"
+}

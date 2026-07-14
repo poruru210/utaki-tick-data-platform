@@ -1,0 +1,8 @@
+{
+  "fixture_id": "batch-crc-mismatch",
+  "kind": "invalid_frame",
+  "expected_result": "rejected",
+  "base_fixture_id": "batch-v1",
+  "mutation": {"type": "xor", "offset": 16, "value": 1},
+  "expected_error_code": "CRC_MISMATCH"
+}

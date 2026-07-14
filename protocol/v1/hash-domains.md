@@ -1,31 +1,118 @@
-# Hash domain
+# Protocol V1のhash domain
 
-Hashは、対象データと計算範囲を明確に分けて定義します。
+Hashは、domain prefixと固定された入力bytesから計算します。
 
-同じbytesでも、domainが異なるhashを別の意味に使いません。
+すべてのdigestはSHA-256の32 raw bytesで保持し、公開時はlowercase hexadecimalへ変換します。
 
-## 定義
+## 共通encoding
 
-**`source_payload_fingerprint`**：producerが生成したsource payloadの正規bytesを識別するhashです。
+`LP(value)`は、UTF-8 bytesの長さをU16で書き、その直後にbytesを書きます。
 
-**`observation_hash`**：Gatewayが観測したsource payloadと取得時刻などの観測情報を識別するhashです。
+`LP`の長さは0以上255以下です。
 
-**`gateway_batch_sha256`**：Gatewayが受理したBatchの正規表現を識別するSHA-256です。
+`U32`、`U64`、`I64`はlittle-endianです。
 
-**`wal_entry_hash`**：WALへ記録したentryの正規表現を識別するhashです。
+`H32`は32 bytesのdigestをそのまま書きます。
 
-各hashの入力bytes、canonicalization、アルゴリズム、出力表現はProtocol V1の実装とfixtureで固定します。
+domain prefixに続くfieldは、ここに記載した順序で連結します。
 
-## 境界
+## source_payload_fingerprint
 
-producerが計算するhashとGatewayが計算するhashを混同しません。
+**`source_payload_fingerprint`**：source payloadの内容だけを識別するdigestです。
 
-WAL entryのhashは、raw objectやreplay objectのhashの代わりには使いません。
+入力bytesは次の順序です。
 
-manifestには、対象objectと対象hashのdomainを明示します。
+```text
+"tick-data-platform/source-payload/v1\0"
+LP("mt5.mqltick.v1")
+I64(time)
+U64(bid_bits)
+U64(ask_bits)
+U64(last_bits)
+U64(volume)
+I64(time_msc)
+U32(flags)
+U64(volume_real_bits)
+```
+
+capture_sequence、producer session、batch sequence、取得時刻は入力に含めません。
+
+## observation_hash
+
+**`observation_hash`**：同じpayloadが別の取得occurrenceで現れたことを区別するdigestです。
+
+入力bytesは次の順序です。
+
+```text
+"tick-data-platform/observation/v1\0"
+LP(producer_instance_id)
+LP(producer_session_id)
+U64(batch_sequence)
+U32(record_ordinal)
+U64(capture_sequence)
+H32(source_payload_fingerprint)
+```
+
+## gateway_batch_sha256
+
+**`gateway_batch_sha256`**：Gatewayが受理したBatchFrameV1全体を識別するdigestです。
+
+入力bytesは、prefixの直後にCRCを含むBatchFrameV1の全frame bytesを置いたものです。
+
+```text
+"tick-data-platform/batch/v1\0" || batch_frame_bytes
+```
+
+## wal_entry_hash
+
+**`wal_entry_hash`**：WAL chain内のentry順序とentry内容を識別するdigestです。
+
+入力bytesは次の順序です。
+
+```text
+"tick-data-platform/wal-entry/v1\0"
+U64(gateway_ingest_sequence)
+H32(previous_entry_hash)
+I64(receive_wall_s)
+U64(receive_monotonic_us)
+H32(gateway_batch_sha256)
+batch_frame_bytes
+```
+
+commit markerとentry checksumはhash入力に含めません。
+
+## Manifest digest
+
+raw-day manifestのdigestは次のbytesから計算します。
+
+```text
+"tick-data-platform/raw-day-manifest/v1\0"
+canonical_json_bytes
+```
+
+replay-day manifestのdigestは次のbytesから計算します。
+
+```text
+"tick-data-platform/replay-day-manifest/v1\0"
+canonical_json_bytes
+```
+
+## Canonical JSON
+
+canonical JSONは、UTF-8、BOMなし、空白なし、改行なしで出力します。
+
+object keyはUTF-8 byte列の昇順で並べ、arrayの順序は入力の順序を保持します。
+
+numberは整数だけを許可し、先頭の0、`+`、指数表記、`-0`を使いません。
+
+stringはJSONの引用規則を使い、制御文字、引用符、backslashをescapeします。
+
+ASCII以外のcode pointはlowercase hexadecimalの`\u`形式へ変換し、補助平面はUTF-16 surrogate pairで表します。
+
+同じ入力から異なるcanonical JSONが生成される場合、その実装はProtocol V1に適合しません。
 
 ## 変更規則
 
-hashの入力範囲またはcanonicalizationを変更すると、既存fixtureとの互換性が失われます。
+domain prefix、field順序、encoding、canonical JSONを変更すると、既存digestとの互換性が失われます。
 
-変更時は、schema、wire、manifest、golden fixture、conformance caseをまとめて更新します。
+変更時はwire、schema、manifest、golden fixture、conformance caseを同じ変更単位で更新します。

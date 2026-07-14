@@ -1,0 +1,23 @@
+{
+  "fixture_version": "tick-data-platform.fixture.v1",
+  "fixtures": [
+    {"fixture_id": "hello-v1", "path": "hello-v1.json", "kind": "valid_frame", "expected_result": "accepted"},
+    {"fixture_id": "resume-v1", "path": "resume-v1.json", "kind": "valid_frame", "expected_result": "accepted"},
+    {"fixture_id": "batch-v1", "path": "batch-v1.json", "kind": "valid_frame", "expected_result": "accepted"},
+    {"fixture_id": "batch-short-response-error", "path": "batch-short-response-error.json", "kind": "valid_frame", "expected_result": "accepted"},
+    {"fixture_id": "batch-dense-boundary", "path": "batch-dense-boundary.json", "kind": "valid_frame", "expected_result": "accepted"},
+    {"fixture_id": "ack-v1", "path": "ack-v1.json", "kind": "valid_frame", "expected_result": "accepted"},
+    {"fixture_id": "error-v1", "path": "error-v1.json", "kind": "valid_frame", "expected_result": "accepted"},
+    {"fixture_id": "raw-day-manifest-v1", "path": "raw-day-manifest-v1.json", "kind": "canonical_json", "expected_result": "accepted"},
+    {"fixture_id": "replay-day-manifest-v1", "path": "replay-day-manifest-v1.json", "kind": "canonical_json", "expected_result": "accepted"},
+    {"fixture_id": "wal-entry-v1", "path": "wal-entry-v1.json", "kind": "wal_entry", "expected_result": "accepted"},
+    {"fixture_id": "batch-truncated", "path": "batch-truncated.json", "kind": "invalid_frame", "expected_result": "rejected"},
+    {"fixture_id": "batch-crc-mismatch", "path": "batch-crc-mismatch.json", "kind": "invalid_frame", "expected_result": "rejected"},
+    {"fixture_id": "batch-unknown-version", "path": "batch-unknown-version.json", "kind": "invalid_frame", "expected_result": "rejected"},
+    {"fixture_id": "batch-unknown-message", "path": "batch-unknown-message.json", "kind": "invalid_frame", "expected_result": "rejected"},
+    {"fixture_id": "batch-oversized", "path": "batch-oversized.json", "kind": "invalid_frame", "expected_result": "rejected"},
+    {"fixture_id": "batch-duplicate-identity", "path": "batch-duplicate-identity.json", "kind": "stateful_scenario", "expected_result": "accepted"},
+    {"fixture_id": "ack-loss-retry", "path": "ack-loss-retry.json", "kind": "stateful_scenario", "expected_result": "accepted"},
+    {"fixture_id": "wal-recovery", "path": "wal-recovery.json", "kind": "stateful_scenario", "expected_result": "accepted"}
+  ]
+}

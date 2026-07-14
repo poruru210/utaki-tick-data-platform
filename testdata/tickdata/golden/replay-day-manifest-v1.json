@@ -1,0 +1,7 @@
+{
+  "fixture_id": "replay-day-manifest-v1",
+  "kind": "canonical_json",
+  "expected_result": "accepted",
+  "canonical_json": "{\"campaign_id\":\"campaign-demo\",\"canonical_stream_row_chain_root\":null,\"completeness_status\":\"provisional\",\"conversion_id\":\"conversion-demo-v1\",\"converter_build_id\":\"converter-demo-0.1\",\"dataset_id\":\"demo\",\"date\":\"2024-03-09\",\"day_definition_id\":\"utc-day-v1\",\"dependency_lock_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"format_id\":\"ticks-parquet-v1\",\"manifest_id\":\"replay-demo-20240309-r1\",\"manifest_version\":\"replay-day-manifest-v1\",\"part_manifest_keys\":[],\"part_set_root\":null,\"raw_day_manifest_sha256\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"replay_contract_id\":\"replay-v1\",\"target_platform_contract\":\"parquet-v1\",\"writer_configuration_hash\":\"7777777777777777777777777777777777777777777777777777777777777777\"}",
+  "manifest_sha256": "a0e2827134ff3032bdd0cbcbcdeb0774e5877c7fa5b5e9fad8561ff929b6d308"
+}

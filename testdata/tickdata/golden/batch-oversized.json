@@ -1,0 +1,8 @@
+{
+  "fixture_id": "batch-oversized",
+  "kind": "invalid_frame",
+  "expected_result": "rejected",
+  "base_fixture_id": "batch-v1",
+  "mutation": {"type": "set_u32", "offset": 8, "value": 1048577},
+  "expected_error_code": "OVERSIZED_FRAME"
+}

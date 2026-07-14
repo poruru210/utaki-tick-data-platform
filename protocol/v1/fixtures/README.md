@@ -1,27 +1,50 @@
-# Protocol V1のfixture
+# Protocol V1のfixture形式
 
-fixtureは、producerとGatewayの契約を固定値で検証するための合成データです。
+**Golden fixture**：Protocol V1のbytes、canonical JSON、hash、decode結果を固定する合成入力です。
 
-## 収録するケース
+fixtureは実際のtick data、credential、broker接続に依存しません。
 
-golden fixtureには、正常なHello、Resume、Batch、Ack、Errorを収録します。
+## Fixture index
 
-異常系には、ACK欠落、重複、短いresponse、dense boundary、malformed frame、WAL recoveryを収録します。
+fixture indexは`testdata/tickdata/golden/index.json`に置きます。
 
-fixtureには、wire bytes、canonical JSON、期待するhash、期待するdecode結果を含めます。
+indexのtop-levelは`fixture_version`と`fixtures`を持ちます。
 
-## 共有規則
+fixturesの各要素は`fixture_id`、`path`、`kind`、`expected_result`を持ちます。
 
-fixtureはGo、MQL5、Pythonから参照できる形式にします。
+`kind`は`valid_frame`、`invalid_frame`、`stateful_scenario`、`canonical_json`、`wal_entry`、`manifest`のいずれかです。
 
-fixtureのbytesとhashは、仕様変更の承認なしに書き換えません。
+`expected_result`は`accepted`または`rejected`です。
 
-実際のtickデータ、credential、個人や口座を特定できる値は収録しません。
+## Fixture file
 
-fixtureを追加または更新したときは、対応するconformance caseと契約テストを更新します。
+fixture fileはJSON objectです。
 
-## 配置
+valid frame fixtureは`wire_hex`、`decoded_message_type`、`expected_hashes`、`expected_result`を持ちます。
 
-共有fixtureの実体は`testdata/tickdata/`に置きます。
+manifest fixtureは`canonical_json`、`manifest_sha256`、`expected_result`を持ちます。
 
-このディレクトリの文書は、Protocol V1でfixtureを使う目的と対象を説明します。
+invalid frame fixtureは、変異前の`base_fixture_id`、変異方法、`expected_error_code`を持ちます。
+`mutation`は`type`と必要な引数を持つobjectです。
+`set_u16`と`set_u32`はwire offsetの値を置換し、`xor`は指定offsetの1 byteを反転し、`truncate`は指定長へ切り詰めます。
+duplicate identityのようにframe自体はvalidなcaseでは、`stateful_scenario`と`expected_ack_status`で受理後の結果を固定します。
+
+WAL fixtureは、file header、entry、commit marker、trailerのhex bytesと`expected_hashes`を持ちます。
+
+## 必須case
+
+indexにはHello、Resume、Batch、Ack、Error、WAL entry、raw-day manifest、replay-day manifestを登録します。
+
+異常系にはtruncated frame、CRC mutation、unknown version、unknown message、oversized frameを登録します。
+
+stateful scenarioにはduplicate identity、ACK loss、WAL recovery、dense boundaryを登録できます。
+
+Batch fixtureには少なくとも一つのRawMqlTickV1を含めます。
+
+## 変更規則
+
+fixtureのbytes、canonical JSON、hash、expected error codeはProtocol V1の契約です。
+
+fixtureの変更は仕様変更として扱い、wire、message、schema、hash、manifest、conformanceの影響を確認します。
+
+fixtureのbytesとhashを、仕様変更の承認なしに書き換えません。

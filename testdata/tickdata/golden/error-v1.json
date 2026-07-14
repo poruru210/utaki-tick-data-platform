@@ -1,0 +1,8 @@
+{
+  "fixture_id": "error-v1",
+  "kind": "valid_frame",
+  "expected_result": "accepted",
+  "wire_hex": "5449434b0100050038000000100000000700000300080000000000000015007265636f72645f636f756e74206d69736d61746368a55c00e4",
+  "decoded_message_type": 5,
+  "expected_hashes": {}
+}

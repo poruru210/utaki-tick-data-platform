@@ -1,0 +1,8 @@
+{
+  "fixture_id": "wal-recovery",
+  "kind": "stateful_scenario",
+  "expected_result": "accepted",
+  "base_fixture_id": "wal-entry-v1",
+  "scenario": "WAL_RECOVERY",
+  "expected_recovery": "REPLAY_COMMITTED_ENTRY"
+}

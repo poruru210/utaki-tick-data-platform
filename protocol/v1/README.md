@@ -1,47 +1,49 @@
-# Protocol V1の位置付け
+# Protocol V1の契約
 
-`protocol/v1/`は、producerとGo Gatewayの間で使うIFの正規情報源です。
+`protocol/v1/`は、producerとGatewayが共有するIFの正規仕様です。
 
-**正規情報源**：実装より優先して参照する、契約の基準となる文書とfixtureです。
+**正規仕様**：実装より優先して参照する、固定済みのwire、message、schema、hash、manifestの規則です。
 
-## 分離する責務
+## M0の範囲
 
-Protocol V1は、共通transportとデータ源固有のsource schemaを分けて定義します。
+M0では、Protocol V1の契約とcross-language conformanceに必要な入力を固定します。
 
-共通transportは、frame、message type、cursor、ACK、Error、CRCの規則を定義します。
+M0の対象は、wire envelope、5種類のmessage、`mt5.mqltick.v1`、Gateway WAL entry、canonical JSON、hash domain、raw-day manifest、replay-day manifestです。
 
-source schemaは、データ源のpayload、時刻、属性、取得状態、エラー情報を定義します。
+`part-manifest-v1`はParquetのday-local part chainに属するため、M3へ延期します。
 
-MT5固有の値は`mt5.mqltick.v1`へ置き、共通Batchの型には埋め込みません。
+TCP runtime、live MT5 collection、R2、Parquet、SQLite journal runtime、crash injection、production operationはM0の対象外です。
 
-## 実装との対応
+## 固定値
 
-`internal/protocol/`は、Protocol V1を実装するGo側のdecoder、validator、encoderです。
+wireの固定値は[wire-layout.md](wire-layout.md)に定義します。
 
-producerは`internal/protocol/`を直接importせず、各言語で同じProtocol V1を実装します。
+messageのfield順序とenum値は[messages.md](messages.md)に定義します。
 
-`producers/fake/`は、Protocol V1に従う決定的なテスト入力を提供します。
+MT5固有のpayloadは[schemas/README.md](schemas/README.md)に定義します。
 
-## 文書
+Gateway WALのbytesは[wal-layout.md](wal-layout.md)に定義します。
 
-**[wire-layout.md](wire-layout.md)**：frameの配置、幅、最大値、version規則を定義します。
+fixtureとconformanceの形式は[fixtures/README.md](fixtures/README.md)と[conformance/README.md](conformance/README.md)に定義します。
 
-**[messages.md](messages.md)**：Hello、Resume、Batch、Ack、Errorの意味を定義します。
+hashの入力bytesは[hash-domains.md](hash-domains.md)に定義します。
 
-**[schemas/README.md](schemas/README.md)**：source schemaの境界と識別子を定義します。
+manifestのcanonical JSONは[manifests.md](manifests.md)に定義します。
 
-**[hash-domains.md](hash-domains.md)**：各hashの入力範囲と用途を定義します。
+## 実装境界
 
-**[manifests.md](manifests.md)**：raw-dayとreplay-dayの保存契約を定義します。
+Go Gatewayはこの仕様をdecoder、validator、encoderへ実装します。
 
-**[fixtures/README.md](fixtures/README.md)**：合成fixtureとgolden bytesの用途を定義します。
+PythonはGo実装から独立した検証decoderとして同じbytes、hash、failureを検証します。
 
-**[conformance/README.md](conformance/README.md)**：実装が契約に適合することを確認する方法を定義します。
+MQL5 encoderは`mt5.mqltick.v1`を生成します。
 
-## M0で固定する項目
+fake producerは、ネットワークを使わずに決定的なBatchFrameV1を生成するGo製test producer/packageです。
 
-wireのoffset、width、最大frame長、unknown versionの扱いを固定します。
+共通messageへ`CopyTicks`、`RawMqlTickV1`、MT5固有のcursorを追加しません。
 
-messageの必須フィールド、canonical JSON、CRC、hash domain、manifestの不変性を固定します。
+## 変更規則
 
-Go、MQL5、Pythonで同じfixtureを検証し、実装間の解釈差を検出します。
+固定値を変更するときは、該当する仕様、fixture、Go検証、Python検証、conformance caseを同じ変更単位で更新します。
+
+実装が仕様と異なる場合は、実装を修正し、仕様を実装へ合わせる変更を先に行いません。

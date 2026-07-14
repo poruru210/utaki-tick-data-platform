@@ -1,0 +1,8 @@
+{
+  "fixture_id": "batch-unknown-message",
+  "kind": "invalid_frame",
+  "expected_result": "rejected",
+  "base_fixture_id": "batch-v1",
+  "mutation": {"type": "set_u16", "offset": 6, "value": 99},
+  "expected_error_code": "UNKNOWN_MESSAGE_TYPE"
+}
