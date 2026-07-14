@@ -20,6 +20,7 @@ from tick_protocol import (
     gateway_batch_sha256,
     observation_hash,
     raw_set_root,
+    raw_wal_object_key,
     source_payload_fingerprint,
     wal_entry_hash,
 )
@@ -95,7 +96,7 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
         if not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item):
             raise AssertionError(f"{fixture_id}: invalid {name}")
 
-    if fixture_id == "raw-day-manifest-v1":
+    if fixture_id.startswith("raw-"):
         require_keys(
             {
                 "manifest_version",
@@ -115,6 +116,7 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
                 "terminal_sync_status",
                 "settle_policy",
                 "completeness_status",
+                "chain_objects",
                 "objects",
                 "accepted_record_count",
                 "error_count",
@@ -174,6 +176,44 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
             raise AssertionError(f"{fixture_id}: non-negative field violation")
         if not isinstance(value["objects"], list):
             raise AssertionError(f"{fixture_id}: objects must be array")
+        if not isinstance(value["chain_objects"], list):
+            raise AssertionError(f"{fixture_id}: chain_objects must be array")
+        chain_object_keys = {
+            "key",
+            "sha256",
+            "bytes",
+            "start_ingest_sequence",
+            "end_ingest_sequence",
+        }
+        previous_chain_end = None
+        seen_chain_keys: set[str] = set()
+        for item in value["chain_objects"]:
+            if set(item) != chain_object_keys:
+                raise AssertionError(f"{fixture_id}: chain object keys differ")
+            if not isinstance(item["key"], str):
+                raise AssertionError(f"{fixture_id}: chain object key type")
+            if not isinstance(item["sha256"], str) or not re.fullmatch(
+                r"[0-9a-f]{64}", item["sha256"]
+            ):
+                raise AssertionError(f"{fixture_id}: chain object hash")
+            if item["key"] != raw_wal_object_key(bytes.fromhex(item["sha256"])):
+                raise AssertionError(f"{fixture_id}: noncanonical chain object key")
+            if item["key"] in seen_chain_keys:
+                raise AssertionError(f"{fixture_id}: duplicate chain object")
+            seen_chain_keys.add(item["key"])
+            for name in chain_object_keys - {"key", "sha256"}:
+                if not is_integer(item[name]) or item[name] < 0:
+                    raise AssertionError(f"{fixture_id}: chain object integer")
+            if item["bytes"] == 0 or item["start_ingest_sequence"] == 0:
+                raise AssertionError(f"{fixture_id}: empty chain object")
+            if item["end_ingest_sequence"] < item["start_ingest_sequence"]:
+                raise AssertionError(f"{fixture_id}: reversed chain object")
+            if (
+                previous_chain_end is not None
+                and item["start_ingest_sequence"] != previous_chain_end + 1
+            ):
+                raise AssertionError(f"{fixture_id}: chain object gap or overlap")
+            previous_chain_end = item["end_ingest_sequence"]
         object_keys = {
             "key",
             "sha256",
@@ -196,10 +236,52 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
             for name in object_keys - {"key", "sha256"}:
                 if not is_integer(item[name]) or item[name] < 0:
                     raise AssertionError(f"{fixture_id}: object integer")
+            if item["bytes"] == 0:
+                raise AssertionError(f"{fixture_id}: object bytes must be nonzero")
             start = (item["start_ingest_sequence"], item["first_record_ordinal"])
             end = (item["end_ingest_sequence"], item["last_record_ordinal"])
             if start[0] == 0 or end < start:
                 raise AssertionError(f"{fixture_id}: empty or reversed object range")
+            if item["key"] != raw_wal_object_key(bytes.fromhex(item["sha256"])):
+                raise AssertionError(f"{fixture_id}: noncanonical object key")
+        if not value["objects"]:
+            if value["chain_objects"] or any(
+                value[name] != 0
+                for name in ("chain_slice_start_sequence", "chain_slice_end_sequence")
+            ):
+                raise AssertionError(f"{fixture_id}: empty raw manifest has a chain")
+        else:
+            if not value["chain_objects"]:
+                raise AssertionError(f"{fixture_id}: selected objects lack chain objects")
+            start_sequence = value["chain_slice_start_sequence"]
+            end_sequence = value["chain_slice_end_sequence"]
+            if start_sequence == 0 or end_sequence < start_sequence:
+                raise AssertionError(f"{fixture_id}: invalid chain slice")
+            first = value["chain_objects"][0]
+            last = value["chain_objects"][-1]
+            if not first["start_ingest_sequence"] <= start_sequence <= first["end_ingest_sequence"]:
+                raise AssertionError(f"{fixture_id}: chain start is not contained")
+            if not last["start_ingest_sequence"] <= end_sequence <= last["end_ingest_sequence"]:
+                raise AssertionError(f"{fixture_id}: chain end is not contained")
+            for item in value["objects"]:
+                matches = [
+                    chain
+                    for chain in value["chain_objects"]
+                    if (item["key"], item["sha256"], item["bytes"])
+                    == (chain["key"], chain["sha256"], chain["bytes"])
+                ]
+                if len(matches) != 1:
+                    raise AssertionError(f"{fixture_id}: object range chain binding")
+                chain = matches[0]
+                if not (
+                    chain["start_ingest_sequence"]
+                    <= item["start_ingest_sequence"]
+                    <= item["end_ingest_sequence"]
+                    <= chain["end_ingest_sequence"]
+                    and start_sequence <= item["start_ingest_sequence"]
+                    and item["end_ingest_sequence"] <= end_sequence
+                ):
+                    raise AssertionError(f"{fixture_id}: object range outside chain slice")
     else:
         require_keys(
             {

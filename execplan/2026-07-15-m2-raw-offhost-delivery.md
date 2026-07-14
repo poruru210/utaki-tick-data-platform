@@ -1,280 +1,315 @@
-# M2R-1でraw-day manifest契約を実装する
+# M2 raw off-host delivery living ExecPlan
 
-このExecPlanは生きた文書であり、実装の進行に合わせて`Progress`、`Surprises & Discoveries`、`Decision Log`、`Outcomes & Retrospective`を更新する。
+## Purpose and Big Picture
 
-この計画は、リポジトリから独立して読めるように、用語、入力、出力、検証方法、未実装境界を記述する。
+このExecPlanは、verified sealed WALからimmutable raw snapshotを作り、fake-only環境で検証可能にし、後続のR2配信とread-only検証へ引き渡すM2全体の実装計画です。
 
-この計画は、`C:\Users\AKIRA\.codex\skills\execplan\references\PLANS.md`の方法論に従う。
+M2のraw truthは、Gatewayがdurably acceptedしたBatchFrameV1を含むsealed WAL objectです。
 
-## Purpose / Big Picture
+M2R-1は、canonical raw-day manifest、chain-complete object記述、local semantic verifier、archive scopeをProtocol V1の正本へ固定します。
 
-M2R-1の完了後、verified sealed WALから同じ日付と同じscopeを持つraw-day snapshotを何度buildしても同じcanonical JSON、raw_set_root、manifest digestを得られる。
+M2R-2は、local verified objectとmanifestをpinned rcloneでoptional R2へ公開し、claim、local lock、publication journal、reconcile、receiptを実装します。
 
-strict verifierは、canonical JSONの表現差、unknown key、duplicate key、float、非canonical integer、invalid UTF-8、range違反を受理しない。
+M2R-3は、read-only ArchiveReader、tickctlのraw commands、tick-verify day/campaignを実装します。
 
-raw-day manifestは、選択したrecord rangeとzero-record batch sentinel、accepted record count、CopyTicksErrorのbatch count、campaign chain slice、revision chainを検証可能な形で保存する。
+M2R-4は、integrationとfake test、optional isolated real-R2 smoke、docs、CI、race、PR/review readinessを完成させます。
 
-M2R-1の入力は`wal.VerifySealedSegment`済みの`archive.RawObject`だけであり、active WAL、実tick、credential、wall clockは入力にしない。
+fake-only completionは、実R2、実broker、live MT5、production credentialがなくてもM2R-1の完了を判定できる境界です。
 
-同じlocal scope descriptorを再作成するretryは成功し、同じpathで異なるdescriptor bytesを作ろうとするretryは`archive.ErrIntegrity`になる。
+real R2 smokeはoptionalであり、isolated synthetic namespace、明示的credential、deleteまたはoverwriteをしない運用でのみ実施します。
 
-fake producerのgolden fixtureとlocal sealed WALでこの結果を示し、実R2が存在しない環境でもM2R-1のcompletionを判定できる。
+Parquet、replay-day manifest、part manifest、handover、pruning、Worker、HTTP service、live broker collectionはM2の対象外です。
 
 ## Progress
 
-- [x] (2026-07-15 16:00+09:00) `agent/m2-raw-offhost-delivery`のclean worktreeと`origin/main`起点を確認した。
-- [x] (2026-07-15 16:10+09:00) Protocol V1の既存hash domain、manifest、WAL verifier、raw object promotion、GoとPython fixture verifierを調査した。
-- [x] (2026-07-15 16:40+09:00) `internal/protocol/canonical_json.go`へcanonical encodeとstrict decodeを追加した。
-- [x] (2026-07-15 17:20+09:00) `internal/archive/manifest.go`へScopeConfig、raw_set_root、campaign-scope descriptor、raw-day buildとverifyを追加した。
-- [x] (2026-07-15 17:40+09:00) revision、same-object disjoint range、zero-record sentinel、chain discontinuity、scope descriptor retryのfocused testを追加した。
-- [x] (2026-07-15 17:50+09:00) raw-day golden fixtureとGoとPythonのfixture verifierを更新した。
-- [x] (2026-07-15 18:00+09:00) Protocol V1文書と親ExecPlanのcanonical JSON記述を更新し、JCS記述をDecision Logへ修正した。
-- [x] (2026-07-15 18:15+09:00) `mise run bootstrap`でPython開発依存を同期した。
-- [x] (2026-07-15 18:16+09:00) `mise run fixture`、`mise exec -- go test ./internal/archive ./internal/protocol`、`mise run test-python`、`mise run check`を最終状態で実行した。
-- [x] (2026-07-15 18:20+09:00) 検証成功後にM2R-1 scopeだけをcommitし、commit SHAをhandoffへ記録する。
+- [x] 2026-07-15にbranch agent/m2-raw-offhost-deliveryがcommit 510c014でM2R-1初回実装を完了しました。
+- [x] 510c014でScopeConfig、archive-config hash、campaign-scope descriptor、raw_set_root、revision、canonical JSON、Go/Python fixture verifierを追加しました。
+- [x] 510c014でcross-day batch、same-object disjoint range、zero-record sentinel、CopyTicksError、campaign continuityの初期contractを追加しました。
+- [x] 2026-07-15のcorrective auditで、raw WAL keyをobjects/raw/wal-<64 lowercase sha256>.rtwへ固定しました。
+- [x] 2026-07-15のcorrective auditで、full chain sliceを表すchain_objectsをmanifestへ追加しました。
+- [x] 2026-07-15のcorrective auditで、VerifyRawDaySnapshotとA/B/A chain fixture、missing、tamper、false boundary、forged keyのfocused testを追加しました。
+- [x] 2026-07-15にfixture 19件、Go archive/protocol test、Python test 16件、repository check、go vet、git diff --checkを成功させました。
+- [ ] M2R-2のR2 publication、claim、local lock、journal、reconcile、receiptは未実装です。
+- [ ] M2R-3のArchiveReader、tickctl raw commands、tick-verify day/campaignは未実装です。
+- [ ] M2R-4のintegration、optional real-R2 smoke、CI/race、PR/review readinessは未実装です。
+- [ ] M2全体はM2R-1からM2R-4までの完了を確認するまで未完了です。
 
 ## Surprises & Discoveries
 
-Goとgofmtは通常のPATHに存在しなかったため、repositoryのtoolchain規約どおり`mise exec --`を使う必要があった。
-
-`mise run fixture`はPython環境のpytestに依存せず成功したが、初回のsystem Python相当環境にはpytestがなく、Python testは`mise run bootstrap`後に実行する必要がある。
-
-既存のraw-day fixtureはmanifest digestだけを検証し、revisionとraw_set_rootのdomain bytesを検証していなかった。
-
-既存のparent ExecPlanはcanonical-json-v1とRFC 8785 JCSを同時に要求していたため、Protocol V1の正本と矛盾していた。
-
-sealed WAL verifierはsegment内のchainを検証するが、複数segment間のcampaign continuityはcallerの責務であるため、BuildRawDayManifestでsequence連続性とpredecessor rootを再検証する必要があった。
-
-WAL entryにはdataset identityが暗号学的に含まれないため、ScopeConfigとno-clobber descriptorをoperator trust rootとして扱う限界が残る。
+- sealed WALのobject SHA-256はtrailerを含むfile全体を対象にし、trailerのfile_sha256とは異なるため、両者を混同してはいけません。
+- day-selected rangeだけではcross-day WAL objectを完全に再検証できないため、最初のselected entryから最後のselected entryまでのfull sealed object chainをmanifestへ保持する必要があります。
+- A/B/A campaignではday AのobjectsがAとCだけを参照し、middle Bをchain_objectsだけへ保持することで、raw_set_rootとchain continuityの責務を分離できます。
+- WALから導出できないlogical close time、terminal status、settle policy、publisher identityはBuildRawDayManifestの明示inputとし、wall clockを暗黙使用してはいけません。
+- WALはdataset identityを暗号学的に保持しないため、archive ScopeConfigとno-clobber descriptorがoperator trust rootになります。
+- Protocol V1のcanonical JSONはRFC 8785 JCSではなく、UTF-8 byte順key、integer-only、lowercase Unicode escape、BOMなし、空白なし、末尾改行なしの独自規則です。
 
 ## Decision Log
 
-- Decision: canonical JSONはRFC 8785 JCSではなく、Protocol V1の`canonical-json-v1`を使用する。
-  Rationale: GoとPythonでUTF-8 byte順key、整数のみ、lowercase `\u` escape、末尾改行なし、strict decodeを同じfixtureで検証する必要がある。
-  Date/Author: 2026-07-15 / Codex
-- Decision: canonical JSONのdigestへdigest自身を含めず、既存domain prefixとcanonical bytesからmanifest digestを計算する。
-  Rationale: digestの再帰埋め込みは自己参照になるため、canonical documentとdigestの入力を分離する。
-  Date/Author: 2026-07-15 / Codex
-- Decision: `raw_set_root`はobject keyではなくobject SHA-256、object bytes、inclusive coordinate rangeをbindする。
-  Rationale: object keyの再配置を許しつつ、contentと選択範囲の改変を検出するためである。
-  Date/Author: 2026-07-15 / Codex
-- Decision: non-empty batchはrecord ordinal runとして選択し、zero-record batchはRequestedFromMSC UTC dayのordinal 0 sentinelとして選択する。
-  Rationale: recordがないsource errorを日付snapshotから消さず、same-object cross-day batchの選択範囲を正確に表すためである。
-  Date/Author: 2026-07-15 / Codex
-- Decision: genesis revisionは1とし、successorはprevious revision plus oneとprevious digestを要求する。
-  Rationale: revision chainの分岐、欠落、scope変更をstrict verifierがfail closedで検出できるためである。
-  Date/Author: 2026-07-15 / Codex
-- Decision: BuildRawDayManifestはRawObjectのsource pathを`wal.VerifySealedSegment`で再検証し、verified segment metadataと一致しないobjectを拒否する。
-  Rationale: callerが任意bytesやactive WALをmanifest inputへ混ぜないよう、promotion済みobjectの検証境界を維持するためである。
-  Date/Author: 2026-07-15 / Codex
-- Decision: ScopePathKeyはdataset IDとcampaign IDのexact UTF-8 bytesからlowercase SHA-256 hexを作る。
-  Rationale: Unicode normalization、case folding、separator解釈をせずにWindows safe path componentを作り、同じcampaignのdescriptor衝突を検出するためである。
-  Date/Author: 2026-07-15 / Codex
+- 決定: raw WAL object keyをcampaign-relativeなobjects/raw/wal-<64 lowercase sha256>.rtwへ固定します。
+- 理由: keyのalias、absolute path、dot segment、backslash、drive、UNCを全て同じ厳密な文字列比較で拒否し、content hashとrangeをbindするためです。
+- 決定: RawWALObjectKey([32]byte) stringをlocal promotionとmanifest buildの共通helperにします。
+- 理由: local path、manifest key、strict decoder、Python verifierが同じkey derivationを使い、digest後の再mappingを禁止するためです。
+- 決定: raw-day manifestにobjectsとchain_objectsを別々に持たせます。
+- 理由: raw_set_rootはday-selected rangesだけにbindし、chain_objectsはfull sealed objectのsequenceとhash continuityをbindするためです。
+- 決定: chain_objectsは最初のselected entryから最後のselected entryまでに交差する最小完全集合です。
+- 理由: middle objectを省略したday snapshotをsemantic verifierが受理しないようにするためです。
+- 決定: successor revisionはscope、publisher epoch、chain start、previous prefixを保持し、chain end、objects、chain_objects、counts、watermarksを同じか前方へ単調拡張できます。
+- 理由: late source evidenceを追加するrevisionを許しながら、過去のselected evidenceを変更しないためです。
+- 決定: empty manifestはobjectsとchain_objectsを空配列にし、chain sequenceとrootをzeroにします。
+- 理由: dayに該当するrecordとzero-record sentinelがない状態を曖昧な未初期化値と区別するためです。
+- 決定: canonical JSONのmanifest digestへmanifest digest自身を埋め込みません。
+- 理由: digest再帰を避け、domain prefixとcanonical bytesだけでstable digestを得るためです。
+- 決定: source identity bytesはnormalization、case folding、trimをせずにScopeConfigへ保持します。
+- 理由: exact source symbolとbroker identityの意味を変えず、path componentだけをSHA-256 lowercase hexへ縮約するためです。
+- 決定: M2R-1の完了判定はfake-only local sealed WALとgolden fixtureを必須にし、実R2を必須にしません。
+- 理由: protocol、manifest、semantic verifierをnetworkとcredentialから独立して再現可能にするためです。
+- 決定: M2R-2のR2 smokeはoptional isolated synthetic namespaceに限定します。
+- 理由: 実データ、既存bucket、他publisherのobjectへ影響を与えずにrcloneとreceiptだけを確認するためです。
+- 決定: Parquet、replay-day、part manifest、handover、pruning、Worker、HTTP、live brokerはM2から除外します。
+- 理由: raw evidence deliveryとderivative replay、運用handover、service runtimeの責務を混ぜないためです。
 
 ## Outcomes & Retrospective
 
-実装済みの成果は、Protocol V1共通canonical JSON、raw_set_root、raw-day manifestのrevisionとrange契約、ScopeConfigのconfig hash、campaign-scope descriptorである。
+510c014のM2R-1初回実装で、Protocol V1のcanonical JSON、raw_set_root、ScopeConfig、campaign-scope descriptor、raw-day buildとstrict decodeの基礎が完成しました。
 
-fake-only fixtureとlocal sealed WALで、cross-day batch、same-object disjoint range、zero-record error batch、revision successor、campaign discontinuityを検証できる。
+今回のcorrective taskでは、local raw promotionのlegacy keyを廃止し、manifestとlocal object pathを同一のcanonical keyへ収束させます。
 
-実R2 upload、remote immutable write、download verify、tickctl、tick-verify command、Parquet derivativeはM2R-1の成果ではなく、後続M2R-2からM2R-4の成果である。
+今回のcorrective taskでは、chain_objectsとVerifyRawDaySnapshotにより、day-selected rangeだけでは見えないmiddle WAL objectを含むself-contained snapshotを実装します。
 
-最終検証でfixture 18件、Python test 15件、Go全test、Ruff、gofmt、diff checkが成功した。
+今回のcorrective taskでは、Go semantic verifierが実bytes、segment bounds、entry chain、UTC-day range、sentinel、counts、watermarksを再導出します。
 
-残課題はscope-only commit SHAの記録だけであり、real R2、live MT5、実tick dataはM2R-1のcompletionに不要である。
+M2R-1のfake-only成果は、M2R-2のremote publicationがなくてもreview可能なprotocolとlocal archive contractです。
+
+M2R-2以降の実装開始時には、このExecPlanのProgress、Surprises & Discoveries、Decision Log、Artifacts and Notesを先に更新します。
+
+M2全体の完了時には、real R2 smokeを実施しなかった場合もその理由、scope、未実施境界をOutcomes & Retrospectiveへ記録します。
 
 ## Context and Orientation
 
-`protocol/v1/`はwire、message、hash domain、manifest、fixtureのlanguage-neutralな正本である。
+protocol/v1はwire layout、message、WAL、hash domain、manifest、golden fixture、conformanceのlanguage-neutralな正本です。
 
-`internal/protocol/`はGoのProtocol V1 codecとcanonical JSON実装を持つ。
+internal/walはsealed WALのheader、entry、CRC、chain、trailer、file hash、object hashを検証します。
 
-`internal/wal/`の`VerifySealedSegment`は、header、entry length、CRC、BatchFrameV1、batch hash、entry hash、trailer、file hash、segment内sequenceを検証した`wal.VerifiedSegment`を返す。
+internal/archiveはverified RawObject、ScopeConfig、campaign-scope descriptor、raw-day manifest、local semantic verifierを所有します。
 
-`internal/archive/raw.go`の`PromoteSealedSegment`は、verified sealed WALをbyte-exactかつno-clobberでlocal raw objectへ移し、`archive.RawObject`を返す。
+internal/protocolはProtocol V1 canonical JSONとmessage/frame codecを所有します。
 
-**RawObject**は、content-addressed key、path、SHA-256、byte数、verified sealed segmentをまとめた入力単位であり、BuildRawDayManifestはこれ以外のraw inputを受け付けない。
+tools/tick_protocol.pyとtools/tick_fixture_verify.pyはGo実装から独立したPython canonical JSON、hash、manifest、fixture verifierです。
 
-**ScopeConfig**は、dataset、campaign、provider、stable feed、exact source symbol、broker server fingerprint、gatewayとproducer build identity、day definition、settle policy、publisher IDとepoch、Protocol limitsを持つoperator configである。
+testdata/tickdata/goldenはaccepted wire、WAL、canonical JSON、hash、rejected mutation、stateful scenarioを固定します。
 
-ScopeConfigのcanonical documentはsecret、environment variable名、absolute pathを持たず、`tick-data-platform/archive-config/v1\0`を前置したSHA-256をconfig hashとする。
+M2R-1が扱う入力はwal.VerifySealedSegment済みのRawObjectだけであり、active WAL、unverified path、live broker responseは入力にできません。
 
-**raw-day manifest**は一つのdataset、campaign、UTC day、revisionにおけるverified raw objectのselected range snapshotである。
+BuildRawDayManifestはScopeConfig、UTC date、RawObjects、revision、previous manifest、status、logical close timeを受け取ります。
 
-**campaign chain**はWAL entryのsequenceとPreviousEntryHashからEntryHashへ続く順序であり、segmentをまたぐ場合もsequence連続性とpredecessor root一致を要求する。
-
-**raw_set_root**はmanifestのordered range列をcontent hashとcoordinateでまとめたSHA-256であり、object keyは入力に含めない。
-
-**canonical JSON**はUTF-8、BOMなし、空白なし、末尾改行なし、UTF-8 byte順key、整数のみ、非ASCII lowercase `\u` escapeを持つJSON表現である。
-
-## Milestones
-
-M2R-1では、canonical JSON、ScopeConfig、raw_set_root、raw-day manifest buildとstrict verify、local descriptor、fixtureとfocused testsを完成させる。
-
-M2R-2では、verified raw objectとraw-day manifestをlocal outboxからoptional R2へimmutable publishし、remote bytesをdownload verifyする。
-
-M2R-3では、raw-day manifestからParquet derivative、part manifest、replay-day manifestを構築する。
-
-M2R-4では、read-only fetch、day verifier、campaign verifier、必要なdelivery interfaceを実装する。
-
-M2R-1のcompletion境界はfake producerとlocal verified WALであり、real R2 data、real broker、live MT5、external tick historyがなくても判定できる。
-
-実R2はoptionalな後続検証であり、M2R-1のlocal contract completionを遅延させる条件ではない。
-
-M2R-1の対象外はR2 client、rclone、Cloudflare Worker、Parquet、tickctl、tick-verify、MQL5 compile、live account、strategy logic、既存文書の無関係な改稿である。
+BuildRawDayManifestはwall clock、filesystem traversal、R2 response、environment variableを暗黙参照しません。
 
 ## Plan of Work
 
-`internal/protocol/canonical_json.go`にrestricted JSON valueのencoderを追加し、map keyをUTF-8 byte順に並べ、stringをlowercase `\u`へ変換し、integer以外を拒否する。
+### M2R-1 canonical raw-day manifest and archive semantics
 
-同ファイルのstrict decoderはduplicate keyをparse時に検出し、integer grammarを検査し、UTF-8とsurrogate pairを検査し、再encodeとのbyte比較で空白、raw non-ASCII、uppercase escape、key順違反を拒否する。
+Protocol V1 canonical-json-v1をUTF-8、BOMなし、空白なし、末尾改行なし、UTF-8 byte順key、integer-only、lowercase Unicode escapeとして固定します。
 
-`internal/archive/manifest.go`にScopeConfigのcanonical documentとconfig hashを追加し、configのexact identity bytesを変更しない。
+strict decoderはunknown key、duplicate key、float、leading zero、negative zero、指数表記、invalid UTF-8、noncanonical bytes、schema range違反を拒否します。
 
-同ファイルの`IdentityPathKey`と`ScopePathKey`はlowercase SHA-256 hexだけをpath componentとして返す。
+raw_set_rootはdomain prefix、U32 element count、object SHA-256、object bytes、inclusive sequence、ordinalをordered objects rangeごとにlittle-endianでbindします。
 
-`EnsureCampaignScopeDescriptor`は`campaign-scope-v1/<scope-key>/descriptor.json`をO_EXCLで作成し、既存bytesが同じ場合だけ成功させる。
+manifest digestはraw-day domain prefixとcanonical manifest bytesだけから計算し、digest自身をJSONへ含めません。
 
-`RawSetRoot`はdomain prefix、U32 element count、各ordered rangeのH32、U64、U64、U64、U32、U32をlittle-endianで連結してSHA-256を計算する。
+RawWALObjectKeyはsealed object全体のSHA-256からexact ASCII keyを作ります。
 
-`BuildRawDayManifest`はobjectsをsequence順に並べ、各source pathをsealed verificationし、segment間のsequenceとchain rootを検証し、BatchFrameV1をdecodeしてUTC day別record rangeを生成する。
+local promotionはobjects/raw/wal-<64 lowercase sha256>.rtwへ直接publishし、post-digest remapをしません。
 
-non-empty batchではrecordのTimeMSCからdayを決め、ordinal runをrangeへ変換し、zero-record batchではRequestedFromMSCからdayを決めてordinal 0 sentinelを生成する。
+strict manifest decodeとBuildRawDayManifestはkey、SHA、canonical pathを一対一で照合します。
 
-BuildRawDayManifestはselected record count、selected error batch count、first selected entryのprevious root、last selected entryのentry root、raw_set_root、revision、config hash、explicit logical close timeをmanifestへ入れる。
+RawChainObjectはkey、sha256、bytes、start_ingest_sequence、end_ingest_sequenceだけを持つtop-level chain_objects elementです。
 
-previous manifestがある場合はscope、publisher epoch、objects prefix、watermark、revision successor、previous digestを検証し、current manifestへprevious digestを一度だけ書く。
+chain_objectsはfull sealed WAL objectの最小ordered setであり、sequence gap、overlap、duplicate、slice外、prefix違反を拒否します。
 
-`VerifyRawDayManifest`はcanonical JSONをstrict decodeし、unknown key、field type、hash lowercase、date、schema、revision、range、raw_set_root、chain sliceの規則を検証する。
+objects rangeは同じkey、hash、bytesのchain objectへ正確にbindし、そのobject boundsとchain slice bounds内に限定します。
 
-`tools/tick_protocol.py`と`tools/tick_fixture_verify.py`はGoと同じcanonical JSON、raw_set_root、raw-day fixture schemaを独立実装する。
+zero-record batchはRequestedFromMSCのUTC dayへordinal 0 sentinelとして割り当て、accepted countには加えず、CopyTicksErrorはerror countへ加えます。
 
-`testdata/tickdata/golden/raw-day-manifest-v1.json`はrevisionと新domainのraw_set_rootを含むcanonical JSONとmanifest digestを固定する。
+non-empty batchのordinalは0からN-1であり、同一objectの複数disjoint rangeをstrict ascending non-overlapで保持します。
 
-`.agent/tick-data-platform-execplan-revised.md`はJCSとLFの記述をProtocol V1のcanonical-json-v1へ修正し、その理由をDecision Logへ残す。
+chain slice start rootは最初のselected entryのPreviousEntryHashであり、end rootは最後のselected entryのEntryHashです。
+
+revision genesisはrevision 1かつprevious nullであり、successorはprevious revision plus oneとprevious manifest digestを要求します。
+
+revision successorはscope、publisher epoch、chain start、Objects prefix、ChainObjects prefixを保持します。
+
+revision successorはchain endを維持または前方延長し、accepted count、error count、source watermark、capture watermarkを減少させません。
+
+ScopeConfigはdataset_id、campaign_id、provider_id、stable_feed_id、exact_source_symbol、broker_server_fingerprint、gateway build identity、producer build identity、day_definition_id、settle_policy、publisher_id、publisher_epoch、Protocol limitsを持ちます。
+
+archive config canonical documentはsecret、environment variable名、absolute pathを含めず、archive-config domain prefixを付けてSHA-256します。
+
+EnsureCampaignScopeDescriptorはhash-derived safe pathへno-clobber descriptorを作り、same content retryを成功させ、different contentをarchive.ErrIntegrityにします。
+
+VerifyRawDaySnapshotは全chain objectをpathから再openし、wal.VerifySealedSegment、SHA、bytes、bounds、cross-object continuity、entry chain、day ranges、sentinel、counts、watermarksを検証します。
+
+VerifyRawDaySnapshotはmissing、tampered、false boundary、cross-array mismatchをarchive.ErrIntegrityとしてfail closedします。
+
+### M2R-2 raw R2 publication
+
+R2 publicationはM2R-1でlocal semantic verification済みのobjectとmanifestだけを入力にします。
+
+rclone binary、version、sha256、configuration、remote URL、flagsをpinned publication profileへ固定します。
+
+publisher claimはcampaign scopeとpublisher epochをbindし、conditional createとtransitionをno-clobberで検証します。
+
+local lockは同じcampaign scopeとpublisher epochの同時publisherを一つに制限し、stale lock recoveryをowner identityとlease evidenceへ限定します。
+
+publication journalはobject upload、manifest upload、claim、receiptのintent、state、hash、remote key、error、retryをdurably記録します。
+
+reconcileはlocal journal、remote object metadata、downloaded bytes、manifest referencesをread-after-write検証し、不一致を自動成功にしません。
+
+publication receiptはpublisher claim、rclone profile、object hashes、manifest digest、remote verification、completion timestamp inputをbindします。
+
+M2R-2はremote delete、overwrite、sync、unscoped copyを実行しません。
+
+### M2R-3 read-only ArchiveReader and verification CLI
+
+ArchiveReaderはread-only tokenとremote manifestからscope、campaign、revision、objects、chain_objectsを解決します。
+
+ArchiveReaderはremote bytesをlocal temporary pathへ取得し、VerifyRawDaySnapshot相当のlocal semantic verificationを完了してからconsumerへ返します。
+
+tickctl raw commandsはdatasets、campaigns、snapshots、fetchのread-only raw delivery contractを提供します。
+
+tick-verify dayはmanifestのselected chain sliceとday rangesを検証し、campaign genesisからの完全chain検証とは主張しません。
+
+tick-verify campaignは指定campaignのchain object setをsequenceとhash continuityに沿って検証します。
+
+M2R-3は前日prefix、gateway SQLite、write credential、Parquet、replay-day manifestをread pathの前提にしません。
+
+### M2R-4 integration and release readiness
+
+integration testはfake producer、local WAL、local raw promotion、manifest build、read-only fetch、semantic verifyをnetworkなしで結線します。
+
+fake testはcross-day batch、same-object disjoint range、zero-record error、A/B/A chain、revision extension、missing middle、tamper、false boundary、key traversalを再現します。
+
+optional real-R2 smokeはsynthetic objectとisolated prefixだけを使い、claim、immutable upload、download verify、receipt、reconcileを確認します。
+
+docsはProtocol V1、archive semantics、operator scope trust root、fake-only completion、optional real-R2 boundary、未実装対象を一致させます。
+
+CIはGo test、Go vet、Python test、fixture、Ruff、gofmt、diff check、必要なrace testを実行します。
+
+PR readinessはscope内差分、secretとruntime dataの不在、verification command、unresolved risk、review boundaryを記録します。
 
 ## Concrete Steps
 
-作業directoryは`C:\projects\utaki-tick-data-platform`とする。
+作業開始時にgit status --short --branchでcleanまたは既存差分を記録し、branchがagent/m2-raw-offhost-delivery由来であることを確認します。
 
-最初にbranchと既存変更を確認する。
+既存の510c014とユーザー変更をrevertせず、scope外変更が必要なら実装せずunresolvedへ返します。
 
-    git status --short --branch
-    git branch -vv
+M2R-1ではinternal/archive、internal/protocol、protocol/v1、tools、tests、testdata、ExecPlanだけを変更します。
 
-期待するbranchは`agent/m2-raw-offhost-delivery`であり、既存変更がある場合はrevertせず、scope外変更を追加しない。
+RawWALObjectKeyとraw promotionのpathを一致させ、legacy raw-wal-segment-v1 pathのtest期待値を更新します。
 
-Go整形はmise-managed toolchainで実行する。
+manifest canonical map、strict parser、Go verifier、Python verifier、golden fixtureを同時に更新します。
 
-    mise exec -- gofmt -w internal/archive/manifest.go internal/archive/raw.go internal/archive/manifest_test.go internal/protocol/canonical_json.go internal/protocol/canonical_json_test.go
+Go focused testでlocal objectをBuildRawDayManifestへ渡し、manifest canonical bytes、raw_set_root、manifest digest、revision chainを再計算します。
 
-fixture verifierを実行する。
+Go focused testでVerifyRawDaySnapshotへkeyからlocal pathを渡し、success、missing、tamper、false boundary、cross-array mismatchを確認します。
 
-    mise run fixture
+Go focused testでA/B/Aの3 sealed objectを作り、day AのobjectsがAとCだけでchain_objectsがA、B、Cになることを確認します。
 
-期待する出力は`verified 18 Protocol V1 fixtures`であり、raw-day fixtureのcanonical bytes、manifest digest、raw_set_rootが一致することを示す。
+Go focused testでforged、traversal、backslash、drive、UNC、hash mismatch keyをarchive.ErrIntegrityとして確認します。
 
-archiveとprotocolのfocused Go testを実行する。
+M2R-2ではrclone profile、claim、lock、journal、reconcile、receiptの各state transitionをcrash-safeに実装します。
 
-    mise exec -- go test ./internal/archive ./internal/protocol
+M2R-3ではArchiveReaderとtickctl raw commandsをread-only contractへ接続し、dayとcampaignのverification resultを分離します。
 
-Python依存が未導入の場合は一度だけbootstrapする。
-
-    mise run bootstrap
-
-Python unitとstateful testを実行する。
-
-    mise run test-python
-
-最終的にrepository指定の全checkを実行する。
-
-    mise run check
-
-全checkが成功した後、変更scopeを確認する。
-
-    git status --short
-    git diff --stat
-    git diff --check
-
-scope内だけが変更されていることを確認してから、M2R-1のscoped commitを作成する。
-
-    git add execplan/2026-07-15-m2-raw-offhost-delivery.md .agent/tick-data-platform-execplan-revised.md protocol/v1/hash-domains.md protocol/v1/manifests.md protocol/v1/fixtures/README.md testdata/tickdata/golden/raw-day-manifest-v1.json internal/archive internal/protocol/canonical_json.go internal/protocol/canonical_json_test.go tools/tick_protocol.py tools/tick_fixture_verify.py tests/unit tests/stateful
-    git commit -m "feat: build deterministic raw-day manifests"
-
-commit後はSHAを取得する。
-
-    git rev-parse HEAD
+M2R-4ではfake integration、optional isolated real-R2 smoke、docs、CI、race、PR review evidenceを追加します。
 
 ## Validation and Acceptance
 
-canonical JSON encodeはASCII key順、空白なし、末尾改行なし、整数のみ、lowercase Unicode escapeを出力する。
+M2R-1のfixture検証はmise run fixtureで実行します。
 
-canonical JSON strict decodeはunknown key、duplicate key、float、leading zero、plus sign、exponent、negative zero、invalid UTF-8、raw non-ASCII、BOM、末尾空白を拒否する。
+M2R-1のGo focused検証はmise exec -- go test ./internal/archive ./internal/protocolで実行します。
 
-raw-day manifest decodeはrequired key以外を拒否し、revisionを1以上に限定し、genesisのprevious nullとsuccessorのprevious digestを検証する。
+Python検証はmise run test-pythonで実行します。
 
-object rangeはsame objectの複数rangeを許すが、inclusive coordinateとしてempty、reversed、overlap、順序違反を拒否する。
+repository全体の通常検証はmise run checkで実行します。
 
-record dayは`RawMqlTickV1.TimeMSC`をUTCへ変換し、zero-record batchだけは`RequestedFromMSC`を使ってordinal 0 sentinelを割り当てる。
+静的なGo検証はmise exec -- go vet ./...で実行します。
 
-selected BatchFrameV1のrecord数をaccepted_record_countへ入れ、selected BatchFrameV1のCopyTicksError非zero数をerror_countへ入れる。
+差分の空白検証はgit diff --checkで実行します。
 
-chain sliceは最初と最後のselected WAL entryへbindし、campaign segmentのsequence gapまたはpredecessor root mismatchをErrIntegrityで拒否する。
+canonical JSON fixtureはGoとPythonで同じbytes、manifest digest、raw_set_root、unknown key rejection、duplicate key rejectionを示します。
 
-raw_set_rootはkeyを除外してGoとPythonとgolden fixtureで一致する。
+golden raw-day fixtureはrevision 1、previous null、canonical raw key、chain_objects、raw_set_rootを固定します。
 
-ScopeConfigのconfig hashはidentity、build、publisher、day、settle policy、protocol limitsを含み、secret、env名、absolute pathを含まない。
+golden A/B/A fixtureはday-selected objectsとchain-complete chain_objectsの差を固定します。
 
-同じScopeConfigのdescriptor retryは成功し、同じscope keyで異なるconfig bytesを作るretryはErrIntegrityになる。
+BuildRawDayManifestはverified sealed WAL以外、caller-forged key、discontinuous campaign chainを受け付けません。
 
-`mise run fixture`、`mise exec -- go test ./internal/archive ./internal/protocol`、`mise run test-python`、`mise run check`がすべてexit code 0であることをM2R-1の検証結果とする。
+VerifyRawDaySnapshotはmissing、tampered、false boundary、cross-array mismatchをarchive.ErrIntegrityで拒否します。
 
-実R2が未設定でも、fake producerとlocal sealed WALを使うfocused testが成功すればM2R-1のcompletion条件を満たす。
+M2R-1はfake-only local verificationと全指定gateが成功し、実R2がなくてもcompletion判定できる場合に完了です。
+
+M2全体はM2R-1、M2R-2、M2R-3、M2R-4とその未実施境界が全て確認されるまで完了ではありません。
 
 ## Idempotence and Recovery
 
-BuildRawDayManifestは入力RawObject、date、scope、status、logical close time、previousを同じにすればwall clockに依存せず同じbytesを生成する。
+local raw promotionは同じsealed bytesのretryを同じkey、path、hashで成功させます。
 
-descriptor作成はO_EXCLであり、processが作成後に再実行しても同じbytesを読み取って成功する。
+local raw promotionは同じkeyの異なるbytesを上書きせずarchive.ErrIntegrityで停止します。
 
-descriptor書き込み途中で失敗した場合はtemporary descriptorを残さず、次回retryが同じscope pathを再利用できる。
+campaign-scope descriptorは同一canonical config retryを成功させ、異なるconfigをno-clobberで拒否します。
 
-manifest digest mismatch、object range mutation、segment verification failure、chain discontinuityは既存objectを削除せずErrIntegrityとして返す。
+BuildRawDayManifestは同じverified object、scope、date、explicit input、previous manifestから同じcanonical bytesとdigestを作ります。
 
-作業途中でverificationが失敗した場合は、失敗したcommandとscopeをhandoffへ残し、scope外修正や既存変更のrevertを行わない。
+revision successorは既存manifestを変更せず、新しいrevision、previous digest、累積prefixだけを追加します。
+
+VerifyRawDaySnapshotは毎回object pathを再openし、cached metadataだけをtrustしません。
+
+M2R-2のjournal recoveryはintentを再読し、remote bytesを再検証し、未完了stateを同じimmutable operationへretryします。
+
+M2R-2のrclone retryはclaim、object、manifest、receiptの順序とno-clobber条件を再確認します。
+
+M2R-3のfetch failureはtemporary bytesをdiscardし、partial objectをconsumerへ返しません。
 
 ## Artifacts and Notes
 
-raw-day golden fixtureは`revision=1`、`previous_manifest_sha256=null`、一つのrange、`raw_set_root=8fa4796d55ef8800626ae4769e20b41e3a1c9dceeaa8da9990ed258244f8362d`を固定する。
+M2R-1の主要artifactはprotocol/v1/hash-domains.md、protocol/v1/manifests.md、protocol/v1/fixtures/README.mdです。
 
-更新後fixtureのmanifest digestは`3206bfd7fd5ef2b8dccf479c400322cbbbb249c92a291e79a0e55a80ecb6c29d`である。
+M2R-1のGo artifactはinternal/archive/raw_key.go、internal/archive/raw.go、internal/archive/manifest.go、focused testsです。
 
-focused archive testは同一WAL object内のordinal 0と2のdisjoint rangeを別要素で保持する。
+M2R-1のPython artifactはtools/tick_protocol.py、tools/tick_fixture_verify.py、tests/unit、tests/statefulです。
 
-focused archive testはzero-record CopyTicksError batchをsequence 2 ordinal 0 sentinelとして保持する。
+M2R-1のgolden artifactはtestdata/tickdata/golden/raw-day-manifest-v1.json、raw-day-manifest-chain-slice-v1.json、index.jsonです。
+
+parent plan .agent/tick-data-platform-execplan-revised.mdにはJCSではなくProtocol V1 canonical-json-v1であること、canonical key、chain_objects、monotonic revisionのDecision Logを残します。
+
+commit 510c014はM2R-1初回実装の既存履歴であり、今回のcorrective taskはそれを保持して追加のscoped fix commitだけを作ります。
+
+今回のcommit messageはfix: make raw-day chain slices self-containedです。
+
+M2R-2以降のartifact pathは、実装着手時にこのExecPlanのscopeと既存repository構成を確認してから確定します。
 
 ## Interfaces and Dependencies
 
-`internal/protocol.CanonicalJSON(value any) ([]byte, error)`はProtocol V1のrestricted JSON valueをcanonical bytesへ変換する。
+RawWALObjectKeyはarchive package内のlocal promotion、BuildRawDayManifest、strict validationが共有するkey interfaceです。
 
-`internal/protocol.DecodeCanonicalJSON(data []byte) (any, error)`はcanonical bytesだけを受理し、duplicate keyとnoncanonical bytesを拒否する。
+RawObjectはverified sealed WALのcanonical key、local path、complete-file SHA-256、byte size、VerifiedSegmentを保持します。
 
-`archive.ScopeConfig.CanonicalConfigJSON() ([]byte, error)`はsecret、env名、absolute pathを含まないcanonical config documentを返す。
+RawDayManifestはscope identity、date、revision、objects、chain_objects、counts、watermarks、chain roots、raw_set_root、previous digestを保持します。
 
-`archive.ScopeConfig.ConfigHash() ([32]byte, error)`はarchive-config domain prefixとcanonical config bytesからSHA-256を返す。
+RawChainObjectはselected chain sliceを覆うsealed WAL objectのcontent identityとsequence boundsを保持します。
 
-`archive.EnsureCampaignScopeDescriptor(root string, scope ScopeConfig) (string, error)`はcampaign-scope-v1 descriptorのpathを返し、different contentをErrIntegrityで拒否する。
+VerifyRawDaySnapshotはmanifestとmap[string]stringのobject pathを受け、成功またはarchive.ErrIntegrityを返します。
 
-`archive.RawSetRoot(objects []RawObjectRange) ([32]byte, error)`はordered rangesからraw_set_rootを計算する。
+ScopeConfig.ConfigHashはsecret、environment variable名、absolute pathを含まないcanonical config documentのarchive-config domain digestを返します。
 
-`archive.BuildRawDayManifest(input RawDayManifestInput) (RawDayManifest, error)`はverified RawObjectだけからraw-day manifestとdigestを生成する。
+EnsureCampaignScopeDescriptorはrootとScopeConfigを受け、no-clobber descriptor pathまたはerrorを返します。
 
-`archive.ManifestCanonicalJSON(manifest RawDayManifest) ([]byte, error)`はdigestを埋め込まないcanonical manifest bytesを返す。
+GoとPythonのcanonical JSON実装はProtocol V1の同じ restricted value setを受け、同じcanonical bytesを返します。
 
-`archive.ManifestDigest(manifest RawDayManifest) ([32]byte, error)`はraw-day manifest domainとcanonical bytesからdigestを返す。
+M2R-2はrclone executable、pinned profile、R2 endpoint、read/write credential、local journal storageへ依存します。
 
-`archive.VerifyRawDayManifest(data []byte) (RawDayManifest, error)`はcanonical JSONとraw_set_rootをstrict verifyし、digestを計算して返す。
+M2R-3はM2R-2のpublished manifest、raw object、receiptまたはlocal equivalentへ依存します。
 
-依存する外部runtimeはGo 1.24、Python 3.12、uv、Ruff、pytestであり、M2R-1のR2 clientやnetwork serviceは不要である。
+M2R-4はM2R-1からM2R-3のcontractとfake producerへ依存します。
 
-改訂記録（2026-07-15）: Protocol V1のcanonical-json-v1、raw_set_root、revision chain、verified RawObject入力、ScopeConfig descriptorをM2R-1の実装と検証対象へ追加した。
+operator configはWALだけでは証明できないdataset identity、campaign identity、provider identity、exact source identityのtrust rootであり、その限界をdocsへ明記します。

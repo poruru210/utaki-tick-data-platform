@@ -61,6 +61,14 @@ type RawObjectRange struct {
 	LastRecordOrdinal   uint32
 }
 
+type RawChainObject struct {
+	Key                 string
+	SHA256              [32]byte
+	Bytes               uint64
+	StartIngestSequence uint64
+	EndIngestSequence   uint64
+}
+
 type RawDayManifest struct {
 	ManifestVersion           string
 	ManifestID                string
@@ -81,6 +89,7 @@ type RawDayManifest struct {
 	SettlePolicy              string
 	CompletenessStatus        string
 	Objects                   []RawObjectRange
+	ChainObjects              []RawChainObject
 	AcceptedRecordCount       uint64
 	ErrorCount                uint64
 	ChainSliceStartSequence   uint64
@@ -363,75 +372,20 @@ func BuildRawDayManifest(input RawDayManifestInput) (RawDayManifest, error) {
 	}
 	manifest.ManifestID = manifestID(scope, input.Date, revision)
 
-	var selected []selectedCoordinate
-	for objectIndex, object := range objects {
-		for _, entry := range object.Segment.Entries {
-			frame, err := protocol.DecodeFrame(entry.Frame)
-			if err != nil {
-				return RawDayManifest{}, fmt.Errorf("decode WAL entry %d: %w", entry.Sequence, err)
-			}
-			message, err := protocol.DecodeMessage(frame)
-			if err != nil {
-				return RawDayManifest{}, fmt.Errorf("decode WAL entry %d: %w", entry.Sequence, err)
-			}
-			batch, ok := message.(protocol.BatchFrameV1)
-			if !ok {
-				return RawDayManifest{}, fmt.Errorf("WAL entry %d is not BatchFrameV1", entry.Sequence)
-			}
-			if len(batch.Records) > int(scope.ProtocolLimits.MaxRecords) {
-				return RawDayManifest{}, fmt.Errorf("WAL entry %d exceeds configured record limit", entry.Sequence)
-			}
-			ordinals := make([]uint32, 0, len(batch.Records))
-			for ordinal, record := range batch.Records {
-				if utcDate(record.TimeMSC) == input.Date {
-					ordinals = append(ordinals, uint32(ordinal))
-					manifest.AcceptedRecordCount++
-					if record.TimeMSC > manifest.ObservedThroughSourceMSC {
-						manifest.ObservedThroughSourceMSC = record.TimeMSC
-					}
-					if record.CaptureSequence > manifest.ObservedThroughCaptureSeq {
-						manifest.ObservedThroughCaptureSeq = record.CaptureSequence
-					}
-				}
-			}
-			if len(batch.Records) == 0 && utcDate(batch.RequestedFromMSC) == input.Date {
-				ordinals = []uint32{0}
-			}
-			if len(ordinals) == 0 {
-				continue
-			}
-			if batch.CopyTicksError != 0 {
-				manifest.ErrorCount++
-			}
-			for start := 0; start < len(ordinals); {
-				end := start
-				for end+1 < len(ordinals) && ordinals[end+1] == ordinals[end]+1 {
-					end++
-				}
-				manifest.Objects = append(manifest.Objects, RawObjectRange{
-					Key:                 object.Key,
-					SHA256:              object.SHA256,
-					Bytes:               uint64(object.Bytes),
-					StartIngestSequence: entry.Sequence,
-					EndIngestSequence:   entry.Sequence,
-					FirstRecordOrdinal:  ordinals[start],
-					LastRecordOrdinal:   ordinals[end],
-				})
-				selected = append(selected, selectedCoordinate{objectIndex: objectIndex, sequence: entry.Sequence})
-				start = end + 1
-			}
-		}
+	selection, err := deriveDaySelection(objects, input.Date, 0, 0, scope.ProtocolLimits.MaxRecords)
+	if err != nil {
+		return RawDayManifest{}, err
 	}
-	if len(selected) > 0 {
-		first := selected[0]
-		last := selected[len(selected)-1]
-		firstEntry := entryFor(objects[first.objectIndex], first.sequence)
-		lastEntry := entryFor(objects[last.objectIndex], last.sequence)
-		manifest.ChainSliceStartSequence = firstEntry.Sequence
-		manifest.ChainSliceStartRoot = firstEntry.PreviousEntryHash
-		manifest.ChainSliceEndSequence = lastEntry.Sequence
-		manifest.ChainSliceEndRoot = lastEntry.EntryHash
-	}
+	manifest.Objects = selection.Objects
+	manifest.AcceptedRecordCount = selection.AcceptedRecordCount
+	manifest.ErrorCount = selection.ErrorCount
+	manifest.ObservedThroughSourceMSC = selection.ObservedThroughSourceMSC
+	manifest.ObservedThroughCaptureSeq = selection.ObservedThroughCaptureSeq
+	manifest.ChainSliceStartSequence = selection.ChainSliceStartSequence
+	manifest.ChainSliceStartRoot = selection.ChainSliceStartRoot
+	manifest.ChainSliceEndSequence = selection.ChainSliceEndSequence
+	manifest.ChainSliceEndRoot = selection.ChainSliceEndRoot
+	manifest.ChainObjects = chainObjectsForSlice(objects, selection.ChainSliceStartSequence, selection.ChainSliceEndSequence)
 	if err := validateOrderedRanges(manifest.Objects); err != nil {
 		return RawDayManifest{}, err
 	}
@@ -463,11 +417,6 @@ func BuildRawDayManifest(input RawDayManifestInput) (RawDayManifest, error) {
 	return manifest, nil
 }
 
-type selectedCoordinate struct {
-	objectIndex int
-	sequence    uint64
-}
-
 func orderedVerifiedObjects(input []RawObject) ([]RawObject, error) {
 	objects := append([]RawObject(nil), input...)
 	for i := range objects {
@@ -485,6 +434,9 @@ func orderedVerifiedObjects(input []RawObject) ([]RawObject, error) {
 		}
 		if object.SHA256 != object.Segment.ObjectSHA256 || uint64(object.Bytes) != uint64(object.Segment.FileBytes) {
 			return nil, fmt.Errorf("%w: raw object %d metadata does not match verified segment", ErrIntegrity, i)
+		}
+		if err := validateRawWALObjectKey(object.Key, object.SHA256); err != nil {
+			return nil, fmt.Errorf("raw object %d: %w", i, err)
 		}
 	}
 	sort.Slice(objects, func(i, j int) bool {
@@ -506,9 +458,110 @@ func orderedVerifiedObjects(input []RawObject) ([]RawObject, error) {
 	return objects, nil
 }
 
-func entryFor(object RawObject, sequence uint64) wal.Entry {
-	index := int(sequence - object.Segment.StartSequence)
-	return object.Segment.Entries[index]
+type daySelection struct {
+	Objects                   []RawObjectRange
+	AcceptedRecordCount       uint64
+	ErrorCount                uint64
+	ObservedThroughSourceMSC  int64
+	ObservedThroughCaptureSeq uint64
+	ChainSliceStartSequence   uint64
+	ChainSliceStartRoot       [32]byte
+	ChainSliceEndSequence     uint64
+	ChainSliceEndRoot         [32]byte
+	hasSourceWatermark        bool
+}
+
+func deriveDaySelection(objects []RawObject, date string, startSequence, endSequence uint64, maxRecords uint32) (daySelection, error) {
+	selection := daySelection{}
+	for _, object := range objects {
+		for _, entry := range object.Segment.Entries {
+			if startSequence != 0 && (entry.Sequence < startSequence || entry.Sequence > endSequence) {
+				continue
+			}
+			frame, err := protocol.DecodeFrame(entry.Frame)
+			if err != nil {
+				return daySelection{}, fmt.Errorf("decode WAL entry %d: %w", entry.Sequence, err)
+			}
+			message, err := protocol.DecodeMessage(frame)
+			if err != nil {
+				return daySelection{}, fmt.Errorf("decode WAL entry %d: %w", entry.Sequence, err)
+			}
+			batch, ok := message.(protocol.BatchFrameV1)
+			if !ok {
+				return daySelection{}, fmt.Errorf("WAL entry %d is not BatchFrameV1", entry.Sequence)
+			}
+			if len(batch.Records) > int(maxRecords) {
+				return daySelection{}, fmt.Errorf("WAL entry %d exceeds configured record limit", entry.Sequence)
+			}
+			ordinals := make([]uint32, 0, len(batch.Records))
+			for ordinal, record := range batch.Records {
+				if utcDate(record.TimeMSC) != date {
+					continue
+				}
+				ordinals = append(ordinals, uint32(ordinal))
+				selection.AcceptedRecordCount++
+				if !selection.hasSourceWatermark || record.TimeMSC > selection.ObservedThroughSourceMSC {
+					selection.ObservedThroughSourceMSC = record.TimeMSC
+					selection.hasSourceWatermark = true
+				}
+				if record.CaptureSequence > selection.ObservedThroughCaptureSeq {
+					selection.ObservedThroughCaptureSeq = record.CaptureSequence
+				}
+			}
+			if len(batch.Records) == 0 && utcDate(batch.RequestedFromMSC) == date {
+				ordinals = []uint32{0}
+			}
+			if len(ordinals) == 0 {
+				continue
+			}
+			if selection.ChainSliceStartSequence == 0 {
+				selection.ChainSliceStartSequence = entry.Sequence
+				selection.ChainSliceStartRoot = entry.PreviousEntryHash
+			}
+			selection.ChainSliceEndSequence = entry.Sequence
+			selection.ChainSliceEndRoot = entry.EntryHash
+			if batch.CopyTicksError != 0 {
+				selection.ErrorCount++
+			}
+			for start := 0; start < len(ordinals); {
+				end := start
+				for end+1 < len(ordinals) && ordinals[end+1] == ordinals[end]+1 {
+					end++
+				}
+				selection.Objects = append(selection.Objects, RawObjectRange{
+					Key:                 object.Key,
+					SHA256:              object.SHA256,
+					Bytes:               uint64(object.Bytes),
+					StartIngestSequence: entry.Sequence,
+					EndIngestSequence:   entry.Sequence,
+					FirstRecordOrdinal:  ordinals[start],
+					LastRecordOrdinal:   ordinals[end],
+				})
+				start = end + 1
+			}
+		}
+	}
+	return selection, nil
+}
+
+func chainObjectsForSlice(objects []RawObject, startSequence, endSequence uint64) []RawChainObject {
+	if startSequence == 0 || endSequence == 0 {
+		return nil
+	}
+	result := make([]RawChainObject, 0, len(objects))
+	for _, object := range objects {
+		if object.Segment.LastSequence < startSequence || object.Segment.StartSequence > endSequence {
+			continue
+		}
+		result = append(result, RawChainObject{
+			Key:                 object.Key,
+			SHA256:              object.SHA256,
+			Bytes:               uint64(object.Bytes),
+			StartIngestSequence: object.Segment.StartSequence,
+			EndIngestSequence:   object.Segment.LastSequence,
+		})
+	}
+	return result
 }
 
 func validatePreviousManifest(previous RawDayManifest, current RawDayManifest) error {
@@ -529,6 +582,14 @@ func validatePreviousManifest(previous RawDayManifest, current RawDayManifest) e
 			return fmt.Errorf("%w: raw-day object ranges were reordered or changed", ErrIntegrity)
 		}
 	}
+	if len(previous.ChainObjects) > len(current.ChainObjects) {
+		return fmt.Errorf("%w: raw-day chain objects are not cumulative", ErrIntegrity)
+	}
+	for i := range previous.ChainObjects {
+		if previous.ChainObjects[i] != current.ChainObjects[i] {
+			return fmt.Errorf("%w: raw-day chain objects were reordered or changed", ErrIntegrity)
+		}
+	}
 	if previous.AcceptedRecordCount > current.AcceptedRecordCount || previous.ErrorCount > current.ErrorCount {
 		return fmt.Errorf("%w: raw-day counts decreased", ErrIntegrity)
 	}
@@ -536,8 +597,14 @@ func validatePreviousManifest(previous RawDayManifest, current RawDayManifest) e
 		previous.ObservedThroughCaptureSeq > current.ObservedThroughCaptureSeq {
 		return fmt.Errorf("%w: raw-day watermark decreased", ErrIntegrity)
 	}
-	if len(previous.Objects) > 0 && (previous.ChainSliceStartSequence != current.ChainSliceStartSequence || previous.ChainSliceStartRoot != current.ChainSliceStartRoot) {
+	if previous.ChainSliceStartSequence != current.ChainSliceStartSequence || previous.ChainSliceStartRoot != current.ChainSliceStartRoot {
 		return fmt.Errorf("%w: raw-day chain start changed", ErrIntegrity)
+	}
+	if previous.ChainSliceEndSequence > current.ChainSliceEndSequence {
+		return fmt.Errorf("%w: raw-day chain end moved backwards", ErrIntegrity)
+	}
+	if previous.ChainSliceEndSequence == current.ChainSliceEndSequence && previous.ChainSliceEndRoot != current.ChainSliceEndRoot {
+		return fmt.Errorf("%w: raw-day chain end root changed without extension", ErrIntegrity)
 	}
 	return nil
 }
@@ -575,6 +642,136 @@ func VerifyRawDayManifest(data []byte) (RawDayManifest, error) {
 	return manifest, nil
 }
 
+// VerifyRawDaySnapshot reopens every full sealed WAL object named by
+// ChainObjects and proves that the manifest is a semantic view of those bytes.
+// The caller supplies paths by their canonical campaign-relative object key.
+func VerifyRawDaySnapshot(manifest RawDayManifest, objectPaths map[string]string) error {
+	if err := ValidateRawDayManifest(manifest); err != nil {
+		return fmt.Errorf("%w: manifest is invalid: %v", ErrIntegrity, err)
+	}
+	if manifest.ManifestSHA256 != ([32]byte{}) {
+		digest, err := ManifestDigest(manifest)
+		if err != nil {
+			return fmt.Errorf("%w: manifest digest cannot be computed: %v", ErrIntegrity, err)
+		}
+		if manifest.ManifestSHA256 != digest {
+			return fmt.Errorf("%w: manifest digest does not match canonical bytes", ErrIntegrity)
+		}
+	}
+	if len(manifest.ChainObjects) == 0 {
+		return nil
+	}
+	verifiedObjects := make([]RawObject, len(manifest.ChainObjects))
+	seen := make(map[string]struct{}, len(manifest.ChainObjects))
+	for i, descriptor := range manifest.ChainObjects {
+		if _, ok := seen[descriptor.Key]; ok {
+			return fmt.Errorf("%w: chain object %d is duplicated", ErrIntegrity, i)
+		}
+		seen[descriptor.Key] = struct{}{}
+		path, ok := objectPaths[descriptor.Key]
+		if !ok || path == "" {
+			return fmt.Errorf("%w: chain object %q is missing locally", ErrIntegrity, descriptor.Key)
+		}
+		verified, err := wal.VerifySealedSegment(path)
+		if err != nil {
+			return fmt.Errorf("%w: chain object %q failed sealed WAL verification: %v", ErrIntegrity, descriptor.Key, err)
+		}
+		if verified.ObjectSHA256 != descriptor.SHA256 || uint64(verified.FileBytes) != descriptor.Bytes ||
+			verified.StartSequence != descriptor.StartIngestSequence || verified.LastSequence != descriptor.EndIngestSequence {
+			return fmt.Errorf("%w: chain object %q metadata does not match its bytes", ErrIntegrity, descriptor.Key)
+		}
+		verifiedObjects[i] = RawObject{
+			Key:     descriptor.Key,
+			Path:    path,
+			SHA256:  verified.ObjectSHA256,
+			Bytes:   verified.FileBytes,
+			Segment: verified,
+		}
+		if i > 0 {
+			previous := verifiedObjects[i-1].Segment
+			if previous.LastSequence == ^uint64(0) || verified.StartSequence != previous.LastSequence+1 || verified.ChainStart != previous.ChainRoot {
+				return fmt.Errorf("%w: chain object sequence or hash continuity failed at %d", ErrIntegrity, i)
+			}
+		}
+	}
+
+	expectedSequence := manifest.ChainSliceStartSequence
+	expectedPrevious := manifest.ChainSliceStartRoot
+	reachedEnd := false
+	for _, object := range verifiedObjects {
+		for _, entry := range object.Segment.Entries {
+			if entry.Sequence < manifest.ChainSliceStartSequence {
+				continue
+			}
+			if entry.Sequence > manifest.ChainSliceEndSequence {
+				break
+			}
+			if entry.Sequence != expectedSequence || entry.PreviousEntryHash != expectedPrevious {
+				return fmt.Errorf("%w: selected WAL entry chain is discontinuous at sequence %d", ErrIntegrity, entry.Sequence)
+			}
+			expectedPrevious = entry.EntryHash
+			if entry.Sequence == manifest.ChainSliceEndSequence {
+				reachedEnd = true
+				break
+			}
+			expectedSequence++
+		}
+		if reachedEnd {
+			break
+		}
+	}
+	if !reachedEnd || expectedPrevious != manifest.ChainSliceEndRoot {
+		return fmt.Errorf("%w: selected WAL entry chain does not match manifest roots", ErrIntegrity)
+	}
+
+	selection, err := deriveDaySelection(
+		verifiedObjects,
+		manifest.Date,
+		manifest.ChainSliceStartSequence,
+		manifest.ChainSliceEndSequence,
+		protocol.MaxRecords,
+	)
+	if err != nil {
+		return fmt.Errorf("%w: could not rederive selected ranges: %v", ErrIntegrity, err)
+	}
+	if !equalRawObjectRanges(selection.Objects, manifest.Objects) ||
+		selection.AcceptedRecordCount != manifest.AcceptedRecordCount || selection.ErrorCount != manifest.ErrorCount ||
+		selection.ObservedThroughSourceMSC != manifest.ObservedThroughSourceMSC || selection.ObservedThroughCaptureSeq != manifest.ObservedThroughCaptureSeq ||
+		selection.ChainSliceStartSequence != manifest.ChainSliceStartSequence || selection.ChainSliceStartRoot != manifest.ChainSliceStartRoot ||
+		selection.ChainSliceEndSequence != manifest.ChainSliceEndSequence || selection.ChainSliceEndRoot != manifest.ChainSliceEndRoot {
+		return fmt.Errorf("%w: manifest selection or watermark does not match WAL bytes", ErrIntegrity)
+	}
+	wantChainObjects := chainObjectsForSlice(verifiedObjects, manifest.ChainSliceStartSequence, manifest.ChainSliceEndSequence)
+	if !equalRawChainObjects(wantChainObjects, manifest.ChainObjects) {
+		return fmt.Errorf("%w: chain_objects does not match WAL bytes", ErrIntegrity)
+	}
+	return nil
+}
+
+func equalRawObjectRanges(left, right []RawObjectRange) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalRawChainObjects(left, right []RawChainObject) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func manifestValue(manifest RawDayManifest) (map[string]any, error) {
 	if manifest.ManifestVersion == "" {
 		manifest.ManifestVersion = RawDayManifestVersion
@@ -591,6 +788,16 @@ func manifestValue(manifest RawDayManifest) (map[string]any, error) {
 			"start_ingest_sequence": object.StartIngestSequence,
 		}
 	}
+	chainObjects := make([]any, len(manifest.ChainObjects))
+	for i, object := range manifest.ChainObjects {
+		chainObjects[i] = map[string]any{
+			"bytes":                 object.Bytes,
+			"end_ingest_sequence":   object.EndIngestSequence,
+			"key":                   object.Key,
+			"sha256":                hex.EncodeToString(object.SHA256[:]),
+			"start_ingest_sequence": object.StartIngestSequence,
+		}
+	}
 	previous := any(nil)
 	if manifest.PreviousManifestSHA256 != nil {
 		previous = hex.EncodeToString(manifest.PreviousManifestSHA256[:])
@@ -603,6 +810,7 @@ func manifestValue(manifest RawDayManifest) (map[string]any, error) {
 		"chain_slice_start_root":            hex.EncodeToString(manifest.ChainSliceStartRoot[:]),
 		"chain_slice_start_sequence":        manifest.ChainSliceStartSequence,
 		"completeness_status":               manifest.CompletenessStatus,
+		"chain_objects":                     chainObjects,
 		"config_hash":                       hex.EncodeToString(manifest.ConfigHash[:]),
 		"dataset_id":                        manifest.DatasetID,
 		"date":                              manifest.Date,
@@ -635,8 +843,8 @@ func rawDayManifestFromValue(value any) (RawDayManifest, error) {
 	if err := requireExactKeys(object, []string{
 		"accepted_record_count", "campaign_id", "chain_slice_end_root", "chain_slice_end_sequence",
 		"chain_slice_start_root", "chain_slice_start_sequence", "completeness_status", "config_hash",
-		"dataset_id", "date", "day_definition_id", "error_count", "logical_close_time_s", "manifest_id",
-		"manifest_version", "objects", "observed_through_capture_sequence", "observed_through_source_msc",
+		"chain_objects", "dataset_id", "date", "day_definition_id", "error_count", "logical_close_time_s",
+		"manifest_id", "manifest_version", "objects", "observed_through_capture_sequence", "observed_through_source_msc",
 		"previous_manifest_sha256", "protocol_version", "publisher_epoch", "publisher_id", "raw_set_root",
 		"revision", "settle_policy", "source_schema_id", "terminal_sync_status", "wal_schema_id",
 	}); err != nil {
@@ -756,6 +964,41 @@ func rawDayManifestFromValue(value any) (RawDayManifest, error) {
 		}
 		result.PreviousManifestSHA256 = &digest
 	}
+	rawChainObjects, ok := object["chain_objects"].([]any)
+	if !ok {
+		return RawDayManifest{}, fmt.Errorf("chain_objects must be an array")
+	}
+	result.ChainObjects = make([]RawChainObject, 0, len(rawChainObjects))
+	for i, rawObject := range rawChainObjects {
+		item, ok := rawObject.(map[string]any)
+		if !ok {
+			return RawDayManifest{}, fmt.Errorf("chain_objects[%d] must be an object", i)
+		}
+		if err := requireExactKeys(item, []string{"bytes", "end_ingest_sequence", "key", "sha256", "start_ingest_sequence"}); err != nil {
+			return RawDayManifest{}, fmt.Errorf("chain_objects[%d]: %w", i, err)
+		}
+		var chainObject RawChainObject
+		chainObject.Key, err = stringValue(item, "key", true)
+		if err != nil {
+			return RawDayManifest{}, err
+		}
+		if err := hashValue(item, "sha256", &chainObject.SHA256); err != nil {
+			return RawDayManifest{}, err
+		}
+		chainObject.Bytes, err = uint64Value(item, "bytes")
+		if err != nil {
+			return RawDayManifest{}, err
+		}
+		chainObject.StartIngestSequence, err = uint64Value(item, "start_ingest_sequence")
+		if err != nil {
+			return RawDayManifest{}, err
+		}
+		chainObject.EndIngestSequence, err = uint64Value(item, "end_ingest_sequence")
+		if err != nil {
+			return RawDayManifest{}, err
+		}
+		result.ChainObjects = append(result.ChainObjects, chainObject)
+	}
 	rawObjects, ok := object["objects"].([]any)
 	if !ok {
 		return RawDayManifest{}, fmt.Errorf("objects must be an array")
@@ -842,6 +1085,9 @@ func ValidateRawDayManifest(manifest RawDayManifest) error {
 	if manifest.RawSetRoot != wantRoot {
 		return fmt.Errorf("raw_set_root does not match ordered objects")
 	}
+	if err := validateChainObjects(manifest); err != nil {
+		return err
+	}
 	if (manifest.Revision == 1) != (manifest.PreviousManifestSHA256 == nil) {
 		return fmt.Errorf("raw-day revision and previous manifest hash do not agree")
 	}
@@ -859,11 +1105,74 @@ func validateObjectRange(object RawObjectRange) error {
 	if object.Key == "" || !utf8.ValidString(object.Key) {
 		return fmt.Errorf("object key is empty or invalid UTF-8")
 	}
+	if err := validateRawWALObjectKey(object.Key, object.SHA256); err != nil {
+		return err
+	}
+	if object.Bytes == 0 {
+		return fmt.Errorf("object bytes must be nonzero")
+	}
 	if object.StartIngestSequence == 0 || object.EndIngestSequence < object.StartIngestSequence {
 		return fmt.Errorf("object sequence range is empty or reversed")
 	}
 	if object.StartIngestSequence == object.EndIngestSequence && object.LastRecordOrdinal < object.FirstRecordOrdinal {
 		return fmt.Errorf("object ordinal range is empty or reversed")
+	}
+	return nil
+}
+
+func validateChainObjects(manifest RawDayManifest) error {
+	if len(manifest.ChainObjects) == 0 {
+		if len(manifest.Objects) != 0 || manifest.ChainSliceStartSequence != 0 || manifest.ChainSliceEndSequence != 0 ||
+			manifest.ChainSliceStartRoot != ([32]byte{}) || manifest.ChainSliceEndRoot != ([32]byte{}) {
+			return fmt.Errorf("empty chain_objects must have empty objects and zero chain slice")
+		}
+		return nil
+	}
+	if len(manifest.Objects) == 0 || manifest.ChainSliceStartSequence == 0 || manifest.ChainSliceEndSequence < manifest.ChainSliceStartSequence {
+		return fmt.Errorf("non-empty chain_objects require a non-empty chain slice and objects")
+	}
+	seen := make(map[string]struct{}, len(manifest.ChainObjects))
+	for i, object := range manifest.ChainObjects {
+		if err := validateRawWALObjectKey(object.Key, object.SHA256); err != nil {
+			return fmt.Errorf("chain object %d: %w", i, err)
+		}
+		if object.Bytes == 0 || object.StartIngestSequence == 0 || object.EndIngestSequence < object.StartIngestSequence {
+			return fmt.Errorf("chain object %d has an empty or reversed range", i)
+		}
+		if _, ok := seen[object.Key]; ok {
+			return fmt.Errorf("chain object %d duplicates an earlier object", i)
+		}
+		seen[object.Key] = struct{}{}
+		if object.StartIngestSequence > manifest.ChainSliceEndSequence || object.EndIngestSequence < manifest.ChainSliceStartSequence {
+			return fmt.Errorf("chain object %d does not intersect the chain slice", i)
+		}
+		if i > 0 {
+			previous := manifest.ChainObjects[i-1]
+			if previous.EndIngestSequence == ^uint64(0) || object.StartIngestSequence != previous.EndIngestSequence+1 {
+				return fmt.Errorf("chain objects are not strictly contiguous")
+			}
+		}
+	}
+	first := manifest.ChainObjects[0]
+	last := manifest.ChainObjects[len(manifest.ChainObjects)-1]
+	if manifest.ChainSliceStartSequence < first.StartIngestSequence || manifest.ChainSliceStartSequence > first.EndIngestSequence ||
+		manifest.ChainSliceEndSequence < last.StartIngestSequence || manifest.ChainSliceEndSequence > last.EndIngestSequence {
+		return fmt.Errorf("chain slice is not contained by its first and last chain objects")
+	}
+	for i, object := range manifest.Objects {
+		var matches int
+		for _, chainObject := range manifest.ChainObjects {
+			if object.Key == chainObject.Key && object.SHA256 == chainObject.SHA256 && object.Bytes == chainObject.Bytes {
+				matches++
+				if object.StartIngestSequence < chainObject.StartIngestSequence || object.EndIngestSequence > chainObject.EndIngestSequence ||
+					object.StartIngestSequence < manifest.ChainSliceStartSequence || object.EndIngestSequence > manifest.ChainSliceEndSequence {
+					return fmt.Errorf("object range %d is outside its chain object or chain slice", i)
+				}
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("object range %d does not match exactly one chain object", i)
+		}
 	}
 	return nil
 }

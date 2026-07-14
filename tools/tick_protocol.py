@@ -458,7 +458,7 @@ def raw_set_root(objects: list[dict[str, Any]]) -> bytes:
         if not isinstance(item["key"], str) or not item["key"]:
             raise ValueError("raw set key is empty")
         digest = bytes.fromhex(item["sha256"])
-        if len(digest) != 32 or item["bytes"] < 0:
+        if len(digest) != 32 or item["bytes"] <= 0:
             raise ValueError("raw set object hash or size is invalid")
         start = (item["start_ingest_sequence"], item["first_record_ordinal"])
         end = (item["end_ingest_sequence"], item["last_record_ordinal"])
@@ -479,6 +479,12 @@ def raw_set_root(objects: list[dict[str, Any]]) -> bytes:
         )
         previous = end
     return hashlib.sha256(payload).digest()
+
+
+def raw_wal_object_key(sha256: bytes) -> str:
+    if len(sha256) != 32:
+        raise ValueError("raw WAL object SHA-256 must be 32 bytes")
+    return f"objects/raw/wal-{sha256.hex()}.rtw"
 
 
 def duplicate_identity_status(first: bytes, second: bytes) -> str:

@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,22 +164,159 @@ func TestBuildRawDayManifestRejectsDiscontinuousCampaignSegments(t *testing.T) {
 	}
 }
 
+func TestRawDayManifestChainObjectsContainCrossDayMiddleObject(t *testing.T) {
+	dayA := time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli()
+	dayB := time.Date(2024, 3, 10, 0, 0, 1, 0, time.UTC).UnixMilli()
+	objects := promoteCampaignObjects(t, []int64{dayA, dayB, dayA})
+	input := archive.RawDayManifestInput{
+		Scope:              testScope(),
+		Date:               "2024-03-09",
+		RawObjects:         objects,
+		TerminalSyncStatus: "complete",
+		CompletenessStatus: "settled_snapshot",
+		LogicalCloseTimeS:  1710003600,
+	}
+	manifest, err := archive.BuildRawDayManifest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.ChainObjects) != 3 || len(manifest.Objects) != 2 {
+		t.Fatalf("chain objects=%d selected objects=%d, want 3 and 2", len(manifest.ChainObjects), len(manifest.Objects))
+	}
+	if manifest.ChainObjects[1].Key == manifest.Objects[0].Key || manifest.ChainObjects[1].Key == manifest.Objects[1].Key {
+		t.Fatal("middle cross-day chain object was incorrectly included in selected ranges")
+	}
+	paths := make(map[string]string, len(objects))
+	for _, object := range objects {
+		paths[object.Key] = object.Path
+	}
+	if err := archive.VerifyRawDaySnapshot(manifest, paths); err != nil {
+		t.Fatalf("VerifyRawDaySnapshot = %v", err)
+	}
+
+	first, err := archive.BuildRawDayManifest(inputForObjects(input, objects[:1], nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	extended, err := archive.BuildRawDayManifest(inputForObjects(input, objects, &first))
+	if err != nil {
+		t.Fatalf("revision chain extension = %v", err)
+	}
+	if len(extended.ChainObjects) != 3 || extended.ChainObjects[0] != first.ChainObjects[0] || len(extended.Objects) < len(first.Objects) {
+		t.Fatal("revision chain did not preserve the previous chain and object prefixes")
+	}
+	badPrevious := first
+	badPrevious.ChainObjects = append([]archive.RawChainObject(nil), first.ChainObjects...)
+	badPrevious.ChainObjects[0].EndIngestSequence++
+	if _, err := archive.BuildRawDayManifest(inputForObjects(input, objects, &badPrevious)); !errors.Is(err, archive.ErrIntegrity) {
+		t.Fatalf("revision chain prefix violation error = %v, want ErrIntegrity", err)
+	}
+
+	missingMiddle := append([]archive.RawObject(nil), objects[:1]...)
+	missingMiddle = append(missingMiddle, objects[2])
+	if _, err := archive.BuildRawDayManifest(inputForObjects(input, missingMiddle, nil)); !errors.Is(err, archive.ErrIntegrity) {
+		t.Fatalf("missing middle object error = %v, want ErrIntegrity", err)
+	}
+}
+
+func TestVerifyRawDaySnapshotRejectsMissingTamperedFalseBoundaryAndCrossArray(t *testing.T) {
+	day := time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli()
+	objects := promoteCampaignObjects(t, []int64{day, day + 1000, day})
+	input := archive.RawDayManifestInput{
+		Scope:              testScope(),
+		Date:               "2024-03-09",
+		RawObjects:         objects,
+		TerminalSyncStatus: "complete",
+		CompletenessStatus: "settled_snapshot",
+		LogicalCloseTimeS:  1710003600,
+	}
+	manifest, err := archive.BuildRawDayManifest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]string, len(objects))
+	for _, object := range objects {
+		paths[object.Key] = object.Path
+	}
+	missing := make(map[string]string, len(paths))
+	for key, path := range paths {
+		if key != objects[1].Key {
+			missing[key] = path
+		}
+	}
+	if err := archive.VerifyRawDaySnapshot(manifest, missing); !errors.Is(err, archive.ErrIntegrity) {
+		t.Fatalf("missing chain object error = %v, want ErrIntegrity", err)
+	}
+	falseBoundary := make(map[string]string, len(paths))
+	for key, path := range paths {
+		falseBoundary[key] = path
+	}
+	falseBoundary[objects[1].Key] = objects[0].Path
+	if err := archive.VerifyRawDaySnapshot(manifest, falseBoundary); !errors.Is(err, archive.ErrIntegrity) {
+		t.Fatalf("false segment boundary error = %v, want ErrIntegrity", err)
+	}
+	tampered := filepath.Join(t.TempDir(), "tampered.rtw")
+	data, err := os.ReadFile(objects[1].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[len(data)/2] ^= 0xff
+	if err := os.WriteFile(tampered, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tamperedPaths := make(map[string]string, len(paths))
+	for key, path := range paths {
+		tamperedPaths[key] = path
+	}
+	tamperedPaths[objects[1].Key] = tampered
+	if err := archive.VerifyRawDaySnapshot(manifest, tamperedPaths); !errors.Is(err, archive.ErrIntegrity) {
+		t.Fatalf("tampered object error = %v, want ErrIntegrity", err)
+	}
+	crossArray := manifest
+	crossArray.ChainObjects = append([]archive.RawChainObject(nil), manifest.ChainObjects...)
+	crossArray.ChainObjects[1].Bytes++
+	if err := archive.ValidateRawDayManifest(crossArray); err == nil {
+		t.Fatal("cross-array metadata mismatch was accepted")
+	}
+}
+
+func TestRawDayManifestRejectsForgedAndTraversalObjectKeys(t *testing.T) {
+	object := promoteTestObject(t, testFrame(t, time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli(), 1))
+	for _, key := range []string{"objects/raw/wal-" + strings.Repeat("0", 64) + ".rtw", "../objects/raw/wal-x.rtw", "objects\\raw\\wal-x.rtw", "C:\\objects\\raw\\wal-x.rtw"} {
+		forged := object
+		forged.Key = key
+		input := archive.RawDayManifestInput{
+			Scope:              testScope(),
+			Date:               "2024-03-09",
+			RawObjects:         []archive.RawObject{forged},
+			TerminalSyncStatus: "complete",
+			CompletenessStatus: "provisional",
+			LogicalCloseTimeS:  1710003600,
+		}
+		if _, err := archive.BuildRawDayManifest(input); !errors.Is(err, archive.ErrIntegrity) {
+			t.Fatalf("forged key %q error = %v, want ErrIntegrity", key, err)
+		}
+	}
+}
+
 func TestVerifyGoldenRawDayManifest(t *testing.T) {
-	path := filepath.Join("..", "..", "testdata", "tickdata", "golden", "raw-day-manifest-v1.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifestFixture, err := decodeFixtureCanonicalJSON(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest, err := archive.VerifyRawDayManifest([]byte(manifestFixture))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if manifest.Revision != 1 || manifest.ManifestSHA256 == ([32]byte{}) {
-		t.Fatalf("golden raw-day manifest was not verified: %+v", manifest)
+	for _, name := range []string{"raw-day-manifest-v1.json", "raw-day-manifest-chain-slice-v1.json"} {
+		path := filepath.Join("..", "..", "testdata", "tickdata", "golden", name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifestFixture, err := decodeFixtureCanonicalJSON(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := archive.VerifyRawDayManifest([]byte(manifestFixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if manifest.Revision != 1 || manifest.ManifestSHA256 == ([32]byte{}) {
+			t.Fatalf("golden raw-day manifest was not verified: %+v", manifest)
+		}
 	}
 }
 
@@ -197,6 +335,48 @@ func testScope() archive.ScopeConfig {
 		PublisherID:             "publisher-1",
 		PublisherEpoch:          1,
 	}
+}
+
+func inputForObjects(base archive.RawDayManifestInput, objects []archive.RawObject, previous *archive.RawDayManifest) archive.RawDayManifestInput {
+	base.RawObjects = objects
+	base.Previous = previous
+	if previous != nil {
+		base.CompletenessStatus = "settled_snapshot"
+	}
+	return base
+}
+
+func promoteCampaignObjects(t *testing.T, times []int64) []archive.RawObject {
+	t.Helper()
+	root := t.TempDir()
+	outbox := t.TempDir()
+	store, err := wal.Open(root, "gateway-test-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects := make([]archive.RawObject, 0, len(times))
+	for i, timeMSC := range times {
+		frame := testFrame(t, timeMSC, uint64(i+1))
+		if _, err := store.Append(frame, 1710000000+int64(i), uint64(100+i)); err != nil {
+			_ = store.Close()
+			t.Fatal(err)
+		}
+		sealed, err := store.Seal()
+		if err != nil {
+			_ = store.Close()
+			t.Fatal(err)
+		}
+		object, err := archive.PromoteSealedSegment(outbox, sealed.Path)
+		if err != nil {
+			_ = store.Close()
+			t.Fatal(err)
+		}
+		objects = append(objects, object)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return objects
 }
 
 func testFrame(t *testing.T, timeMSC int64, captureSequence uint64) []byte {

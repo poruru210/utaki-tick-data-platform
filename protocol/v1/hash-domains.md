@@ -113,6 +113,10 @@ replay-day manifestのdigestは次のbytesから計算します。
 canonical_json_bytes
 ```
 
+raw-day manifestのcanonical bytesにはday-selected `objects`とchain-complete `chain_objects`の両方を含めます。
+
+manifest digest自身と外部のpublication receiptはmanifest canonical bytesへ含めません。
+
 ## raw_set_root
 
 `raw_set_root`は、manifestが選択したraw WAL objectのcontent hashとinclusive coordinate rangeを識別するdigestです。
@@ -136,6 +140,18 @@ repeated for each ordered range
 各rangeは`(start_ingest_sequence, first_record_ordinal)`から`(end_ingest_sequence, last_record_ordinal)`までのinclusive coordinateです。
 
 rangeはemptyでなく、manifest内で厳密昇順かつnon-overlapでなければなりません。
+
+## raw WAL object key
+
+raw WAL objectのcampaign-relative keyは次のASCII文字列です。
+
+```text
+objects/raw/wal-<64 lowercase sha256>.rtw
+```
+
+`<64 lowercase sha256>`はsealed WAL object全体のSHA-256です。
+
+object keyは`raw_set_root`には含めませんが、manifestの各rangeと`chain_objects`ではcontent hashと一対一に一致しなければなりません。
 
 ## Canonical JSON
 

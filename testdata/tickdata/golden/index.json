@@ -9,6 +9,7 @@
     {"fixture_id": "ack-v1", "path": "ack-v1.json", "kind": "valid_frame", "expected_result": "accepted"},
     {"fixture_id": "error-v1", "path": "error-v1.json", "kind": "valid_frame", "expected_result": "accepted"},
     {"fixture_id": "raw-day-manifest-v1", "path": "raw-day-manifest-v1.json", "kind": "canonical_json", "expected_result": "accepted"},
+    {"fixture_id": "raw-day-manifest-chain-slice-v1", "path": "raw-day-manifest-chain-slice-v1.json", "kind": "canonical_json", "expected_result": "accepted"},
     {"fixture_id": "replay-day-manifest-v1", "path": "replay-day-manifest-v1.json", "kind": "canonical_json", "expected_result": "accepted"},
     {"fixture_id": "wal-entry-v1", "path": "wal-entry-v1.json", "kind": "wal_entry", "expected_result": "accepted"},
     {"fixture_id": "batch-truncated", "path": "batch-truncated.json", "kind": "invalid_frame", "expected_result": "rejected"},

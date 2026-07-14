@@ -43,6 +43,7 @@ top-level objectは次のrequired keyを持ちます。
 | settle_policy | string | policy identifier |
 | completeness_status | string | one of the fixed statuses |
 | objects | array | ordered inclusive coordinate ranges in verified raw WAL objects |
+| chain_objects | array | minimal ordered complete sealed WAL object chain covering the selected slice |
 | accepted_record_count | integer | non-negative |
 | error_count | integer | non-negative |
 | chain_slice_start_sequence | integer | non-negative |
@@ -54,6 +55,22 @@ top-level objectは次のrequired keyを持ちます。
 | logical_close_time_s | integer | signed Unix seconds |
 
 `objects`の各要素は`key`、`sha256`、`bytes`、`start_ingest_sequence`、`end_ingest_sequence`、`first_record_ordinal`、`last_record_ordinal`を持ちます。
+
+`chain_objects`の各要素は`key`、`sha256`、`bytes`、`start_ingest_sequence`、`end_ingest_sequence`を持ちます。
+
+raw WAL objectのkeyはcampaign-relativeなASCII文字列`objects/raw/wal-<64 lowercase sha256>.rtw`であり、`sha256`から機械的に導出します。
+
+`chain_objects`は、最初のselected WAL entryから最後のselected WAL entryまでのinclusive chain sliceに交差するsealed WAL objectの最小完全集合です。
+
+`chain_objects`は重複せず、WAL sequenceの厳密昇順で隣接し、sequence gapとoverlapを持ちません。
+
+最初のchain objectはchain start sequenceを含み、最後のchain objectはchain end sequenceを含み、全chain objectはchain sliceと交差します。
+
+`objects`の各rangeは、同じkey、sha256、bytesを持つchain objectに正確に一つだけbindし、そのobjectのsequence boundsとchain sliceの範囲内にあります。
+
+同じchain objectを複数のdisjointな`objects` rangeが参照できます。
+
+chain sliceが空の場合、`objects`と`chain_objects`は空配列であり、chain sequenceとchain rootはzero値です。
 
 各要素は同じraw WAL object内のinclusive coordinate range `(gateway_ingest_sequence, record_ordinal)`です。
 
@@ -120,7 +137,11 @@ genesis revisionは`1`かつ`previous_manifest_sha256`は`null`です。
 
 successor revisionは直前revisionに`1`を加え、直前digestを`previous_manifest_sha256`へ入れます。
 
-successorのobjectsは直前revisionのobjectsをprefixとして累積し、scope、publisher epoch、chain、count watermarkを変更しません。
+successorのobjectsとchain_objectsは直前revisionの配列をprefixとして累積します。
+
+successorはscopeとpublisher epochを変更せず、chain startを保持し、chain endは同じか前方へ延長します。
+
+successorのaccepted count、error count、source watermark、capture watermarkは減少しません。
 
 raw-day manifest digestとreplay-day manifest digestは、hash-domains.mdの専用domainで計算します。
 

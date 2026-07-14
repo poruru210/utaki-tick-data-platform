@@ -2,7 +2,6 @@ package archive
 
 import (
 	"bytes"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -34,13 +33,7 @@ func PromoteSealedSegment(outboxRoot, sealedPath string) (RawObject, error) {
 	if err != nil {
 		return RawObject{}, fmt.Errorf("%w: source is not a verified sealed WAL: %v", ErrIntegrity, err)
 	}
-	hashHex := hex.EncodeToString(source.ObjectSHA256[:])
-	key := filepath.ToSlash(filepath.Join(
-		"raw-wal-segment-v1",
-		"sha256",
-		hashHex[:2],
-		hashHex+".wal",
-	))
+	key := RawWALObjectKey(source.ObjectSHA256)
 	destination := filepath.Join(outboxRoot, filepath.FromSlash(key))
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return RawObject{}, fmt.Errorf("create raw outbox directory: %w", err)
