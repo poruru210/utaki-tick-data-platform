@@ -79,13 +79,19 @@ type fakeRcloneExecutor struct {
 	failOn              string
 	mutateOnObjectCheck bool
 	objectCheckCount    int
+	timeoutNext         bool
 }
 
 func (e *fakeRcloneExecutor) run(_ context.Context, executable string, args ...string) (string, error) {
 	e.mu.Lock()
 	e.calls = append(e.calls, append([]string{executable}, args...))
 	failOn := e.failOn
+	timeout := e.timeoutNext
+	e.timeoutNext = false
 	e.mu.Unlock()
+	if timeout {
+		return "", context.DeadlineExceeded
+	}
 	if len(args) == 1 && args[0] == "version" {
 		return "rclone v1.74.4\n", nil
 	}
@@ -226,6 +232,108 @@ func TestPublisherRemoteRawMutationStopsBeforeManifest(t *testing.T) {
 	}
 	if _, err := fixture.backend.Get(context.Background(), manifestKey); !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("manifest exists after remote raw mutation: %v", err)
+	}
+}
+
+func TestPublisherRawImmutableCollisionPreservesOriginalAndOmitsManifest(t *testing.T) {
+	fixture := newPublicationFixture(t)
+	rawKey, err := fixture.layout.RcloneRawObjectKey(fixture.manifest.ChainObjects[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := []byte("preexisting immutable raw bytes")
+	fixture.backend.force(rawKey, original)
+	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err == nil {
+		t.Fatal("raw immutable collision was accepted")
+	}
+	fixture.executor.mu.Lock()
+	copyAttempted := false
+	for _, call := range fixture.executor.calls {
+		if len(call) == 5 && call[1] == "copyto" && call[2] == "--immutable" && call[4] == rawKey {
+			copyAttempted = true
+		}
+	}
+	fixture.executor.mu.Unlock()
+	if !copyAttempted {
+		t.Fatalf("immutable raw copyto was not attempted for %q", rawKey)
+	}
+	got, err := fixture.backend.Get(context.Background(), rawKey)
+	if err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("preexisting raw bytes = %q, want %q, err=%v", got, original, err)
+	}
+	manifestKey, err := fixture.layout.ManifestKey(fixture.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.backend.Get(context.Background(), manifestKey); !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("manifest exists after raw immutable collision: %v", err)
+	}
+}
+
+func TestPublisherDoesNotExposeEnvironmentSecret(t *testing.T) {
+	secret := "sentinel-r2-secret-7f5c"
+	t.Setenv("R2_TEST_SECRET", secret)
+	fixture := newPublicationFixture(t)
+	receiptPath := filepath.Join(t.TempDir(), "receipt.json")
+	fixture.input.ReceiptPath = receiptPath
+	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err != nil {
+		t.Fatal(err)
+	}
+	fixture.executor.mu.Lock()
+	var argv bytes.Buffer
+	for _, call := range fixture.executor.calls {
+		for _, argument := range call {
+			argv.WriteString(argument)
+			argv.WriteByte('\x00')
+		}
+	}
+	fixture.executor.mu.Unlock()
+	if bytes.Contains(argv.Bytes(), []byte(secret)) {
+		t.Fatal("environment secret appeared in recorded rclone argv")
+	}
+	manifestKey, err := fixture.layout.ManifestKey(fixture.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, found, err := fixture.journal.Record(manifestKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("publication journal record is missing")
+	}
+	if bytes.Contains(record.IntentBytes, []byte(secret)) {
+		t.Fatal("environment secret appeared in journal intent bytes")
+	}
+	databaseBytes, err := os.ReadFile(fixture.journal.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(databaseBytes, []byte(secret)) {
+		t.Fatal("environment secret appeared in SQLite bytes")
+	}
+	receiptBytes, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(receiptBytes, []byte(secret)) {
+		t.Fatal("environment secret appeared in receipt bytes")
+	}
+
+	fixture.executor.failOn = "check"
+	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err == nil || bytes.Contains([]byte(err.Error()), []byte(secret)) {
+		t.Fatalf("returned error exposed secret or was absent: %v", err)
+	}
+}
+
+func TestPublisherRetriesAfterContextDeadline(t *testing.T) {
+	fixture := newPublicationFixture(t)
+	fixture.executor.timeoutNext = true
+	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout error = %v, want context deadline", err)
+	}
+	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err != nil {
+		t.Fatalf("reconcile after timeout: %v", err)
 	}
 }
 
