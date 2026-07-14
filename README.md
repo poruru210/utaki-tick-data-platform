@@ -2,6 +2,8 @@
 
 `tick-data-platform` は、MT5を含む複数のデータ源からティックデータを収集し、再利用可能なデータとして保存するモノレポです。
 
+M1では、1 brokerと1 exact symbolを対象に、MT5 Serviceからlocalhost TCPでGo Gatewayへ送信し、WAL syncとSQLite journal commitの後にACKを返します。
+
 **モノレポ**：Gateway、producer、Protocol、検証ツールを一つのリポジトリで管理する構成です。
 
 **IF**：producerとGatewayの間で交換する、言語に依存しないデータ形式と通信規則です。
@@ -22,12 +24,14 @@
 ## データ経路
 
 ```text
-MT5 producer -> protocol/v1 -> localhost TCP -> Go Gateway -> WAL -> archive/R2 -> delivery
+MT5 producer -> protocol/v1 -> localhost TCP -> Go Gateway -> WAL + durable ACK -> archive/R2 -> delivery
 ```
 
 producerはデータ源固有の形式をIFへ変換します。
 
 GatewayはIFを検証し、受信済みデータを永続化して後続処理へ渡します。
+
+M1のGatewayはR2、Parquet、HTTP delivery、local pruningを実行しません。
 
 Pythonは本番Gatewayの実装には使わず、fixtureと契約の検証に使います。
 

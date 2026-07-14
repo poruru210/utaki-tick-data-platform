@@ -23,6 +23,17 @@ const (
 	MessageBatch            = internal.MessageBatch
 	MessageAck              = internal.MessageAck
 	MessageError            = internal.MessageError
+	AckAcceptedAdvanced     = internal.AckAcceptedAdvanced
+	AckAcceptedNoAdvance    = internal.AckAcceptedNoAdvance
+	AckDuplicate            = internal.AckDuplicate
+	AckDenseBoundary        = internal.AckDenseBoundary
+	AckDenseUnresolved      = internal.AckDenseUnresolved
+	AckRetryableError       = internal.AckRetryableError
+	AckFatalProtocolError   = internal.AckFatalProtocolError
+	AckSourceStateConflict  = internal.AckSourceStateConflict
+	AckSessionLeaseConflict = internal.AckSessionLeaseConflict
+	MaxFrameBytes           = internal.MaxFrameBytes
+	MaxRecords              = internal.MaxRecords
 	SourceSchemaMT5         = internal.SourceSchemaMT5
 	ErrInvalidFrame         = internal.ErrInvalidFrame
 	ErrUnsupportedVersion   = internal.ErrUnsupportedVersion
@@ -42,8 +53,10 @@ var (
 	EncodeMessage            = internal.EncodeMessage
 	DecodeMessage            = internal.DecodeMessage
 	ErrorCodeOf              = internal.ErrorCodeOf
+	ErrorCodeNumber          = internal.ErrorCodeNumber
 	SourcePayloadFingerprint = internal.SourcePayloadFingerprint
 	ObservationHash          = internal.ObservationHash
 	GatewayBatchSHA256       = internal.GatewayBatchSHA256
 	WALEntryHash             = internal.WALEntryHash
+	BoundaryDigest           = internal.BoundaryDigest
 )

@@ -14,6 +14,16 @@ M0の対象は、wire envelope、5種類のmessage、`mt5.mqltick.v1`、Gateway 
 
 TCP runtime、live MT5 collection、R2、Parquet、SQLite journal runtime、crash injection、production operationはM0の対象外です。
 
+## M1 runtime binding
+
+M1では、この契約を変更せずに`internal/ingest`、`internal/wal`、`internal/journal`がlocalhost TCP runtimeへ実装します。
+
+Gatewayはframeを完全に受信してProtocol V1の検証を終えた後、`protocol/v1/wal-layout.md`のactive WALへappendし、file syncとSQLite transaction commitを完了してからAckV1を返します。
+
+同一producer sessionとbatch sequenceの同じbytesは`DUPLICATE`として再利用し、異なるbytesは`SOURCE_STATE_CONFLICT`として受理しません。
+
+M1のruntimeはR2、Parquet、HTTP delivery、local pruningを呼び出しません。
+
 ## 固定値
 
 wireの固定値は[wire-layout.md](wire-layout.md)に定義します。

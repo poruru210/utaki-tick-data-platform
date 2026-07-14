@@ -27,7 +27,11 @@ tools/                          fixtureと契約の検証
 testdata/tickdata/              共有fixture
 ```
 
-データはproducerからlocalhost TCPを通ってGatewayへ入り、Gateway内でWAL、アーカイブ、replay、配信の順に処理します。
+データはproducerからlocalhost TCPを通ってGatewayへ入り、Gateway内でProtocol検証、WAL sync、SQLite journal commitの順に処理します。
+
+M1ではWAL syncとjournal commitがdurable ACKの境界です。
+
+R2、Parquet、HTTP delivery、local pruningはM1のACK経路から除外します。
 
 ```text
 producer -> protocol/v1 -> localhost TCP -> ingest -> protocol validation -> WAL -> archive/replay/delivery
@@ -44,6 +48,12 @@ producer -> protocol/v1 -> localhost TCP -> ingest -> protocol validation -> WAL
 **`cmd/`**：サービスまたは運用ツールの起動処理だけを置きます。
 
 **`internal/`**：外部から直接参照させないGateway内部の責務ごとの実装を置きます。
+
+`internal/ingest/`はbounded frame decode、session lease、cursor、ACK、status metricsを実装します。
+
+`internal/wal/`は`protocol/v1/wal-layout.md`に従うactive WALをappendし、entry commit marker、CRC、batch hash、entry chainを検証します。
+
+`internal/journal/`はWALから再構築できるSQLite batch indexとcursor stateを保持します。
 
 **`testdata/tickdata/`**：仕様に対応する合成fixtureとgolden bytesを置きます。
 

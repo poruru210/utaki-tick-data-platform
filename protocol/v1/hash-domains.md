@@ -81,6 +81,22 @@ batch_frame_bytes
 
 commit markerとentry checksumはhash入力に含めません。
 
+## boundary_digest
+
+**`boundary_digest`**：Gatewayがcommitted cursorの同一millisecond境界について、観測したordered source payloadのsequenceとmultiplicityを識別するdigestです。
+
+同じcursorへ後続batchを追加する場合は、直前のdigestを`previous_boundary_digest`として入力します。
+
+```text
+"tick-data-platform/boundary/v1\0"
+I64(committed_cursor_msc)
+H32(previous_boundary_digest)
+U32(boundary_record_count)
+H32(source_payload_fingerprint) repeated in observed order
+```
+
+cursorが新しいmillisecondへ進む場合、`previous_boundary_digest`は全zero bytesです。
+
 ## Manifest digest
 
 raw-day manifestのdigestは次のbytesから計算します。

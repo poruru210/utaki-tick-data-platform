@@ -1,0 +1,39 @@
+name: Windows race detector
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  race:
+    name: Go race detector (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify CGO toolchain
+        shell: pwsh
+        run: |
+          gcc --version
+          go version
+          $env:CGO_ENABLED = "1"
+          go env GOOS GOARCH CGO_ENABLED CC
+
+      - name: Run race detector
+        shell: pwsh
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race ./internal/ingest ./internal/wal
