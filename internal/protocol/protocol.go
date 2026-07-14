@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"unicode/utf8"
@@ -29,6 +30,18 @@ const (
 	MessageBatch  MessageType = 3
 	MessageAck    MessageType = 4
 	MessageError  MessageType = 5
+)
+
+const (
+	AckAcceptedAdvanced     uint8 = 1
+	AckAcceptedNoAdvance    uint8 = 2
+	AckDuplicate            uint8 = 3
+	AckDenseBoundary        uint8 = 4
+	AckDenseUnresolved      uint8 = 5
+	AckRetryableError       uint8 = 6
+	AckFatalProtocolError   uint8 = 7
+	AckSourceStateConflict  uint8 = 8
+	AckSessionLeaseConflict uint8 = 9
 )
 
 type ErrorCode string
@@ -66,10 +79,38 @@ func ErrorCodeOf(err error) ErrorCode {
 	if err == nil {
 		return ""
 	}
-	if protocolErr, ok := err.(*ProtocolError); ok {
+	var protocolErr *ProtocolError
+	if errors.As(err, &protocolErr) && protocolErr != nil {
 		return protocolErr.Code
 	}
-	return ErrInvalidField
+	return ErrInternalRetryable
+}
+
+func ErrorCodeNumber(code ErrorCode) uint16 {
+	switch code {
+	case ErrInvalidFrame:
+		return 1
+	case ErrUnsupportedVersion:
+		return 2
+	case ErrUnknownMessage:
+		return 3
+	case ErrTruncatedFrame:
+		return 4
+	case ErrOversizedFrame:
+		return 5
+	case ErrCRCMismatch:
+		return 6
+	case ErrInvalidField:
+		return 7
+	case ErrSourceStateConflict:
+		return 8
+	case ErrSessionLeaseConflict:
+		return 9
+	case ErrInternalRetryable:
+		return 10
+	default:
+		return 7
+	}
 }
 
 type Frame struct {
@@ -99,7 +140,7 @@ func EncodeFrame(messageType MessageType, payload []byte) ([]byte, error) {
 }
 
 func DecodeFrame(raw []byte) (Frame, error) {
-	if len(raw) < 12 {
+	if len(raw) < 16 {
 		return Frame{}, newError(ErrTruncatedFrame, "frame has %d bytes", len(raw))
 	}
 	frameLength := binary.LittleEndian.Uint32(raw[8:12])
@@ -788,5 +829,18 @@ func WALEntryHash(sequence uint64, previous [32]byte, receiveWallS int64, receiv
 	w.u64(receiveMonotonicUS)
 	w.hash(batchHash)
 	w.Write(frame)
+	return sha256.Sum256(w.Bytes())
+}
+
+func BoundaryDigest(cursorMSC int64, previous [32]byte, records []RawMqlTickV1) [32]byte {
+	var w writer
+	w.WriteString("tick-data-platform/boundary/v1\x00")
+	w.i64(cursorMSC)
+	w.hash(previous)
+	w.u32(uint32(len(records)))
+	for _, record := range records {
+		fingerprint := SourcePayloadFingerprint(record)
+		w.hash(fingerprint)
+	}
 	return sha256.Sum256(w.Bytes())
 }
