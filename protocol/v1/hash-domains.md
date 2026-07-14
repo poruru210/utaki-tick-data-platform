@@ -113,19 +113,54 @@ replay-day manifestのdigestは次のbytesから計算します。
 canonical_json_bytes
 ```
 
+## raw_set_root
+
+`raw_set_root`は、manifestが選択したraw WAL objectのcontent hashとinclusive coordinate rangeを識別するdigestです。
+
+object keyは入力に含めず、異なるkeyで同じcontent hashとrangeを参照しても同じrootになります。
+
+入力bytesは次の順序です。
+
+```text
+"tick-data-platform/raw-set/v1\0"
+U32(element_count)
+H32(object_sha256)
+U64(object_bytes)
+U64(start_ingest_sequence)
+U64(end_ingest_sequence)
+U32(first_record_ordinal)
+U32(last_record_ordinal)
+repeated for each ordered range
+```
+
+各rangeは`(start_ingest_sequence, first_record_ordinal)`から`(end_ingest_sequence, last_record_ordinal)`までのinclusive coordinateです。
+
+rangeはemptyでなく、manifest内で厳密昇順かつnon-overlapでなければなりません。
+
 ## Canonical JSON
 
-canonical JSONは、UTF-8、BOMなし、空白なし、改行なしで出力します。
+`canonical-json-v1`は、UTF-8、BOMなし、空白なし、末尾改行なしで出力します。
 
 object keyはUTF-8 byte列の昇順で並べ、arrayの順序は入力の順序を保持します。
 
-numberは整数だけを許可し、先頭の0、`+`、指数表記、`-0`を使いません。
+numberは整数だけを許可し、Protocol V1のsignedまたはunsigned 64-bit rangeに収まるdecimal表記だけを使います。
 
 stringはJSONの引用規則を使い、制御文字、引用符、backslashをescapeします。
 
 ASCII以外のcode pointはlowercase hexadecimalの`\u`形式へ変換し、補助平面はUTF-16 surrogate pairで表します。
 
+strict decoderはunknown key、duplicate key、float、noncanonical integer、invalid UTF-8、noncanonical bytes、schemaで定義されたrange違反を拒否します。
+
 同じ入力から異なるcanonical JSONが生成される場合、その実装はProtocol V1に適合しません。
+
+canonical JSONのdigestはcanonical bytesに対して計算し、digest自身をcanonical bytesへ再帰的に埋め込みません。
+
+archive configのdigestは次のbytesから計算します。
+
+```text
+"tick-data-platform/archive-config/v1\0"
+canonical_config_json_bytes
+```
 
 ## 変更規則
 

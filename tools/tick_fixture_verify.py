@@ -13,12 +13,13 @@ from typing import Any
 from tick_protocol import (
     _crc32c,
     apply_mutation,
-    canonical_json,
+    decode_canonical_json,
     decode_frame,
     decode_message,
     duplicate_identity_status,
     gateway_batch_sha256,
     observation_hash,
+    raw_set_root,
     source_payload_fingerprint,
     wal_entry_hash,
 )
@@ -62,9 +63,10 @@ def _verify_frame(fixture: dict[str, Any]) -> None:
 
 def _verify_manifest(fixture: dict[str, Any]) -> None:
     canonical = fixture["canonical_json"]
-    decoded = json.loads(canonical)
-    if canonical_json(decoded) != canonical:
-        raise AssertionError(f"{fixture['fixture_id']}: non-canonical JSON")
+    try:
+        decoded = decode_canonical_json(canonical.encode("utf-8"))
+    except ValueError as exc:
+        raise AssertionError(f"{fixture['fixture_id']}: non-canonical JSON: {exc}") from exc
     _verify_manifest_schema(fixture["fixture_id"], decoded)
     if fixture["fixture_id"].startswith("raw-"):
         prefix = b"tick-data-platform/raw-day-manifest/v1\0"
@@ -73,6 +75,9 @@ def _verify_manifest(fixture: dict[str, Any]) -> None:
     actual = hashlib.sha256(prefix + canonical.encode("utf-8")).hexdigest()
     if actual != fixture["manifest_sha256"]:
         raise AssertionError(f"{fixture['fixture_id']}: manifest hash mismatch")
+    if fixture["fixture_id"].startswith("raw-"):
+        if raw_set_root(decoded["objects"]).hex() != decoded["raw_set_root"]:
+            raise AssertionError(f"{fixture['fixture_id']}: raw set root mismatch")
 
 
 def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
@@ -120,6 +125,7 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
                 "raw_set_root",
                 "previous_manifest_sha256",
                 "logical_close_time_s",
+                "revision",
             }
         )
         if not isinstance(value["publisher_epoch"], int) or isinstance(
@@ -128,6 +134,8 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
             raise AssertionError(f"{fixture_id}: publisher_epoch must be integer")
         if value["publisher_epoch"] < 0 or value["protocol_version"] != 1:
             raise AssertionError(f"{fixture_id}: invalid version or epoch")
+        if not is_integer(value["revision"]) or value["revision"] < 1:
+            raise AssertionError(f"{fixture_id}: revision must be at least 1")
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value["date"]):
             raise AssertionError(f"{fixture_id}: invalid date")
         if value["source_schema_id"] != "mt5.mqltick.v1":
@@ -188,6 +196,10 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
             for name in object_keys - {"key", "sha256"}:
                 if not is_integer(item[name]) or item[name] < 0:
                     raise AssertionError(f"{fixture_id}: object integer")
+            start = (item["start_ingest_sequence"], item["first_record_ordinal"])
+            end = (item["end_ingest_sequence"], item["last_record_ordinal"])
+            if start[0] == 0 or end < start:
+                raise AssertionError(f"{fixture_id}: empty or reversed object range")
     else:
         require_keys(
             {

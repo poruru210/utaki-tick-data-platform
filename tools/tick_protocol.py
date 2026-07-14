@@ -348,27 +348,137 @@ def wal_entry_hash(
 
 
 def canonical_json(value: Any) -> str:
-    def check(item: Any) -> None:
+    def check(item: Any) -> Any:
         if isinstance(item, bool) or item is None or isinstance(item, str):
-            return
+            if isinstance(item, str):
+                try:
+                    item.encode("utf-8", "strict")
+                except UnicodeEncodeError as exc:
+                    raise ValueError("canonical JSON strings must be valid UTF-8") from exc
+            return item
         if isinstance(item, int):
-            return
+            if item < -(1 << 63) or item > (1 << 64) - 1:
+                raise ValueError("canonical JSON integer is outside 64-bit range")
+            return item
         if isinstance(item, float):
             raise ValueError("canonical JSON accepts integers only")
         if isinstance(item, list):
-            for child in item:
-                check(child)
-            return
+            return [check(child) for child in item]
         if isinstance(item, dict):
-            for key, child in item.items():
+            for key in item:
                 if not isinstance(key, str):
                     raise ValueError("object keys must be strings")
-                check(child)
-            return
+            ordered: dict[str, Any] = {}
+            for key in sorted(item, key=lambda child: child.encode("utf-8")):
+                try:
+                    key.encode("utf-8", "strict")
+                except UnicodeEncodeError as exc:
+                    raise ValueError("canonical JSON keys must be valid UTF-8") from exc
+                ordered[key] = check(item[key])
+            return ordered
         raise ValueError(f"unsupported JSON value: {type(item)!r}")
 
-    check(value)
-    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    checked = check(value)
+    return json.dumps(
+        checked,
+        ensure_ascii=True,
+        sort_keys=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def decode_canonical_json(data: bytes) -> Any:
+    if data.startswith(b"\xef\xbb\xbf"):
+        raise ValueError("canonical JSON must not contain a BOM")
+    try:
+        text = data.decode("utf-8", "strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError("canonical JSON is not valid UTF-8") from exc
+
+    def parse_int(token: str) -> int:
+        if (
+            token == "-0"
+            or (len(token) > 1 and token[0] == "0")
+            or (len(token) > 2 and token[:2] == "-0")
+        ):
+            raise ValueError("non-canonical integer")
+        value = int(token, 10)
+        if value < -(1 << 63) or value > (1 << 64) - 1:
+            raise ValueError("canonical JSON integer is outside 64-bit range")
+        return value
+
+    def parse_float(_: str) -> Any:
+        raise ValueError("canonical JSON accepts integers only")
+
+    def parse_constant(token: str) -> Any:
+        raise ValueError(f"invalid JSON constant {token}")
+
+    def object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON object key {key!r}")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(
+            text,
+            parse_int=parse_int,
+            parse_float=parse_float,
+            parse_constant=parse_constant,
+            object_pairs_hook=object_pairs,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid canonical JSON: {exc}") from exc
+    if canonical_json(value).encode("utf-8") != data:
+        raise ValueError("canonical JSON bytes are not canonical")
+    return value
+
+
+def raw_set_root(objects: list[dict[str, Any]]) -> bytes:
+    if len(objects) > 0xFFFFFFFF:
+        raise ValueError("raw set has too many ranges")
+    payload = bytearray(b"tick-data-platform/raw-set/v1\0")
+    payload.extend(struct.pack("<I", len(objects)))
+    previous: tuple[int, int] | None = None
+    for item in objects:
+        required = {
+            "key",
+            "sha256",
+            "bytes",
+            "start_ingest_sequence",
+            "end_ingest_sequence",
+            "first_record_ordinal",
+            "last_record_ordinal",
+        }
+        if set(item) != required:
+            raise ValueError("raw set range keys differ")
+        if not isinstance(item["key"], str) or not item["key"]:
+            raise ValueError("raw set key is empty")
+        digest = bytes.fromhex(item["sha256"])
+        if len(digest) != 32 or item["bytes"] < 0:
+            raise ValueError("raw set object hash or size is invalid")
+        start = (item["start_ingest_sequence"], item["first_record_ordinal"])
+        end = (item["end_ingest_sequence"], item["last_record_ordinal"])
+        if start[0] == 0 or end < start:
+            raise ValueError("raw set range is empty or reversed")
+        if previous is not None and start <= previous:
+            raise ValueError("raw set ranges are not strictly ascending")
+        payload.extend(
+            struct.pack(
+                "<32sQQQII",
+                digest,
+                item["bytes"],
+                item["start_ingest_sequence"],
+                item["end_ingest_sequence"],
+                item["first_record_ordinal"],
+                item["last_record_ordinal"],
+            )
+        )
+        previous = end
+    return hashlib.sha256(payload).digest()
 
 
 def duplicate_identity_status(first: bytes, second: bytes) -> str:
