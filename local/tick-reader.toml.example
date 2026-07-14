@@ -1,0 +1,4 @@
+r2_bucket_env = "TICK_READER_R2_BUCKET"
+r2_prefix = "v1"
+cache_root = "./cache"
+read_only_token_env = "TICK_READER_R2_TOKEN"

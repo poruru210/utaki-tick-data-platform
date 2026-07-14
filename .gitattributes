@@ -1,0 +1,40 @@
+# Keep repository text files as LF on every platform.
+* text=auto eol=lf
+
+# Source, configuration, documentation, and fixture text.
+*.go text eol=lf
+*.sum text eol=lf
+*.py text eol=lf
+*.mq5 text eol=lf
+*.mqh text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.csv text eol=lf
+*.lock text eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+*.bat text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Serialized and compiled artifacts are binary.
+*.bin binary
+*.dat binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.wal binary
+*.rtw binary
+*.parquet binary
+*.ex4 binary
+*.ex5 binary
+*.zip binary
+*.gz binary
+*.png binary
+*.jpg binary
+*.jpeg binary

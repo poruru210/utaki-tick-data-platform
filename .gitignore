@@ -1,0 +1,81 @@
+# Go build and test output
+bin/
+*.test
+coverage.out
+coverage.html
+*.prof
+
+# Python build and test output
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+*.egg-info/
+
+# General build output
+build/
+dist/
+*.egg
+
+# mise local overrides
+.mise.local.toml
+.mise.local.*
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+local/*.toml
+!local/*.toml.example
+local/*.json
+!local/*.json.example
+local/*.yaml
+!local/*.yaml.example
+local/*.yml
+!local/*.yml.example
+local/*.pem
+local/*.key
+local/*.crt
+rclone.conf
+
+# Runtime data and derived artifacts
+*.wal
+*.rtw
+*.sqlite
+*.sqlite3
+*.db
+*.parquet
+*.log
+gateway.sqlite*
+local/data/
+local/runtime/
+local/artifacts/
+local/logs/
+**/outbox/
+**/verification-receipts/
+
+# Synthetic golden Parquet files may be added deliberately.
+!testdata/tickdata/golden/*.parquet
+!testdata/tickdata/golden/**/*.parquet
+
+# MT5 compiled output
+*.ex4
+*.ex5
+*.mqh~
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

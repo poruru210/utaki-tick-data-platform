@@ -1,0 +1,46 @@
+min_version = "2026.7.0"
+
+# The project toolchain is managed here. Do not rely on a system Go or Python.
+[tools]
+go = "1.24"
+python = "3.12"
+uv = "0.11.26"
+
+[env]
+PYTHONUTF8 = "1"
+
+[tasks.bootstrap]
+description = "Create the mise-managed Python environment and install development dependencies"
+run = "uv sync --dev"
+
+[tasks.test-go]
+description = "Run the Go package tests"
+run = "go test ./..."
+
+[tasks.test-python]
+description = "Run the independent Python contract and invariant tests"
+run = "uv run pytest tests/unit/test_tick_data_contract.py tests/stateful/test_tick_data_invariants.py"
+
+[tasks.fixture]
+description = "Run the independent fixture verifier entry point"
+run = "uv run python tools/tick_fixture_verify.py"
+
+[tasks.format]
+description = "Format Go and Python sources"
+run = [
+  "gofmt -w cmd internal",
+  "uv run ruff format .",
+]
+
+[tasks.format-check]
+description = "Check Go and Python formatting and lint"
+run = [
+  "gofmt -l cmd internal",
+  "uv run ruff check .",
+  "uv run ruff format --check .",
+  "git diff --check",
+]
+
+[tasks.check]
+description = "Run the local repository checks through mise-managed tools"
+depends = ["test-go", "test-python", "fixture", "format-check"]

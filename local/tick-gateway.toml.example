@@ -1,0 +1,11 @@
+listen_address = "127.0.0.1:17001"
+max_frame_bytes = 1048576
+max_records = 10000
+wal_root = "./wal"
+journal_path = "./journal/gateway.sqlite"
+outbox_root = "./outbox"
+verification_receipts_root = "./verification-receipts"
+publisher_id_env = "TICK_PUBLISHER_ID"
+publisher_epoch_env = "TICK_PUBLISHER_EPOCH"
+r2_bucket_env = "TICK_R2_BUCKET"
+r2_prefix = "v1"

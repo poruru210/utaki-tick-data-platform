@@ -1,0 +1,6 @@
+listen_address = "127.0.0.1:17003"
+wal_root = "./smoke/wal"
+journal_path = "./smoke/journal/gateway.sqlite"
+outbox_root = "./smoke/outbox"
+r2_bucket_env = "TICK_SMOKE_R2_BUCKET"
+r2_prefix = "smoke/v1"
