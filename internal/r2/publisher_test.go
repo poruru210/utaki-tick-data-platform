@@ -73,13 +73,15 @@ func (b *fakeBackend) force(key string, body []byte) {
 }
 
 type fakeRcloneExecutor struct {
-	backend             *fakeBackend
-	calls               [][]string
-	mu                  sync.Mutex
-	failOn              string
-	mutateOnObjectCheck bool
-	objectCheckCount    int
-	timeoutNext         bool
+	backend                 *fakeBackend
+	calls                   [][]string
+	mu                      sync.Mutex
+	failOn                  string
+	mutateOnObjectCheck     bool
+	objectCheckCount        int
+	timeoutNext             bool
+	mutateOnDescriptorCheck bool
+	descriptorCheckCount    int
 }
 
 func (e *fakeRcloneExecutor) run(_ context.Context, executable string, args ...string) (string, error) {
@@ -128,6 +130,15 @@ func (e *fakeRcloneExecutor) run(_ context.Context, executable string, args ...s
 			e.mu.Unlock()
 			if mutate {
 				e.backend.force(args[3], []byte("tampered-remote-object"))
+			}
+		}
+		if e.mutateOnDescriptorCheck && bytes.Contains([]byte(args[3]), []byte("scope-descriptor-v1.json")) {
+			e.mu.Lock()
+			e.descriptorCheckCount++
+			mutate := e.descriptorCheckCount == 2
+			e.mu.Unlock()
+			if mutate {
+				e.backend.force(args[3], []byte("tampered-remote-scope-descriptor"))
 			}
 		}
 		remote, err := e.backend.Get(context.Background(), args[3])
@@ -232,6 +243,29 @@ func TestPublisherRemoteRawMutationStopsBeforeManifest(t *testing.T) {
 	}
 	if _, err := fixture.backend.Get(context.Background(), manifestKey); !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("manifest exists after remote raw mutation: %v", err)
+	}
+}
+
+func TestPublisherScopeDescriptorMutationStopsBeforeManifest(t *testing.T) {
+	fixture := newPublicationFixture(t)
+	fixture.executor.mutateOnDescriptorCheck = true
+	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err == nil {
+		t.Fatal("remote scope descriptor mutation was not detected")
+	}
+	descriptorKey, err := fixture.layout.RcloneKey("scope-descriptor-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := fixture.backend.Get(context.Background(), descriptorKey)
+	if err != nil || !bytes.Equal(descriptor, []byte("tampered-remote-scope-descriptor")) {
+		t.Fatalf("scope descriptor mutation = %q, want tampered bytes, err=%v", descriptor, err)
+	}
+	manifestKey, err := fixture.layout.ManifestKey(fixture.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.backend.Get(context.Background(), manifestKey); !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("manifest exists after scope descriptor mutation: %v", err)
 	}
 }
 

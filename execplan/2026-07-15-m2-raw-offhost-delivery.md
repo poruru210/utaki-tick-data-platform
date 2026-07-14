@@ -35,6 +35,7 @@ Parquet、replay-day manifest、part manifest、handover、pruning、Worker、HT
 - [x] receipt保存はsync済みtemporary fileをhard-linkでfinalへno-clobber publishし、partial finalを公開せず、同内容retryと異内容拒否を確認しました。
 - [ ] M2R-2の実R2 smoke、追加のremote mutation variants、CI race実行は未実施です。
 - [x] M2R-2 corrective acceptanceで、既存raw keyのimmutable collision、secret非漏洩、context deadline後のreconcile成功を追加確認しました。
+- [x] post-review correctionとして、manifest直前にscope descriptorと全ChainObjectを再checkし、初回descriptor検証後のremote mutationをrejectするfocused testを追加しました。
 - [ ] local環境ではgccとclangが存在しないためrace testは実行せず、mise exec -- go test -race ./internal/r2 ./internal/archiveはGitHub Windows CIで実行します。
 - [ ] M2R-3のArchiveReader、tickctl raw commands、tick-verify day/campaignは未実装です。
 - [ ] M2R-4のintegration、optional real-R2 smoke、CI/race、PR/review readinessは未実装です。
@@ -90,6 +91,8 @@ Parquet、replay-day manifest、part manifest、handover、pruning、Worker、HT
 - 理由: crash後のreconcileが既に完了したstageを再適用してもbackward transition errorにならないためです。
 - 決定: raw objectの既存key異内容、secret sentinel、timeoutを独立したfake publication recovery contractとして検証します。
 - 理由: immutable no-clobber、credential非漏洩、retryable transport failureを同じ成功経路の副作用で見落とさないためです。
+- 決定: manifest直前のrecheckでは全ChainObjectに加えてscope descriptorもpinned rclone check --downloadで再検証します。
+- 理由: 初回metadata transfer後のscope mutationをjournal stageや初回check結果で見逃さず、manifest公開前に停止するためです。
 - 決定: Parquet、replay-day、part manifest、handover、pruning、Worker、HTTP、live brokerはM2から除外します。
 - 理由: raw evidence deliveryとderivative replay、運用handover、service runtimeの責務を混ぜないためです。
 
@@ -110,6 +113,8 @@ M2R-2では、fake conditional backendとfake rclone executorでexact argv、cla
 M2R-2のlocal verificationはfixture 19件、Python 16件、Go r2/archive、repository check、Go vet、git diff --checkを成功させました。
 
 M2R-2 corrective verificationは異内容raw collision時のno-clobberとdata-before-manifest、environment secretの非漏洩、context deadline後の同一intent再開を成功させました。
+
+post-review correction verificationは初回scope descriptor check後のremote mutationを再checkで検出し、manifest不在を確認しました。
 
 実R2 smokeは明示的なenable flag、isolated bucket/prefix、credentialが同時に存在する実行環境を提供されていないため実施せず、remote mutationの実環境確認はM2R-4のoptional smokeへ残します。
 

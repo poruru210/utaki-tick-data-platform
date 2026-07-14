@@ -102,6 +102,9 @@ func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (Verifi
 	if err := p.checkObjects(ctx, intent.Objects); err != nil {
 		return VerificationReceipt{}, err
 	}
+	if err := p.rclone.CheckDownload(ctx, intent.ScopeDescriptorPath, intent.ScopeDescriptorRcloneKey); err != nil {
+		return VerificationReceipt{}, err
+	}
 	existing, err := LoadManifestRecords(ctx, p.backend, p.layout, intent.Manifest.Date)
 	if err != nil {
 		return VerificationReceipt{}, err
