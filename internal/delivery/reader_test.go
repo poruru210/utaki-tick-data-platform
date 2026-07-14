@@ -406,6 +406,44 @@ func TestArchiveReaderCampaignProvesGenesisToRootAndRejectsMissingRoot(t *testin
 	}
 }
 
+func TestArchiveReaderCampaignRejectsCanonicalButSemanticallyMutatedManifest(t *testing.T) {
+	fixture := newDeliveryFixture(t)
+	mutated := fixture.manifestA
+	mutated.Objects = append([]archive.RawObjectRange(nil), mutated.Objects...)
+	mutated.Objects[0].LastRecordOrdinal++
+	var err error
+	mutated.RawSetRoot, err = archive.RawSetRoot(mutated.Objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated.ManifestSHA256 = [32]byte{}
+	mutated.ManifestSHA256, err = archive.ManifestDigest(mutated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := archive.ManifestCanonicalJSON(mutated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldKey, err := fixture.layout.ManifestKey(fixture.manifestA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newKey, err := fixture.layout.ManifestKey(mutated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldKey == newKey {
+		t.Fatal("semantic mutation did not produce a new manifest digest key")
+	}
+	delete(fixture.backend.objects, oldKey)
+	fixture.backend.objects[newKey] = body
+	throughRoot := fixture.objects[2].Segment.ChainRoot
+	if _, err := fixture.reader.VerifyCampaign(context.Background(), fixture.scope.DatasetID, fixture.scope.CampaignID, hexDigest(throughRoot)); !errors.Is(err, archive.ErrIntegrity) {
+		t.Fatalf("semantic manifest mutation error = %v, want ErrIntegrity", err)
+	}
+}
+
 func TestArchiveReaderRejectsMalformedSelectorAndRevisionBranch(t *testing.T) {
 	fixture := newDeliveryFixture(t)
 	ctx := context.Background()

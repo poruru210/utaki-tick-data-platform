@@ -88,6 +88,7 @@ func (r *archiveReaderV1) VerifyCampaign(ctx context.Context, datasetID, campaig
 		endSequence   uint64
 	}
 	objects := make(map[string]campaignObject)
+	manifests := make([]archive.RawDayManifest, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		manifest, err := r.metadata(ctx, snapshot.ManifestKey)
 		if err != nil {
@@ -100,6 +101,7 @@ func (r *archiveReaderV1) VerifyCampaign(ctx context.Context, datasetID, campaig
 		if err := publishVerifiedBytes(r.cacheManifestPath(decoded), manifest); err != nil {
 			return CampaignVerificationReport{}, err
 		}
+		manifests = append(manifests, decoded)
 		for _, object := range decoded.ChainObjects {
 			if object.Key != archive.RawWALObjectKey(object.SHA256) || object.Bytes == 0 || object.EndIngestSequence < object.StartIngestSequence {
 				return CampaignVerificationReport{}, fmt.Errorf("%w: campaign chain object identity is invalid", archive.ErrIntegrity)
@@ -126,15 +128,22 @@ func (r *archiveReaderV1) VerifyCampaign(ctx context.Context, datasetID, campaig
 		return ordered[i].Key < ordered[j].Key
 	})
 	segments := make([]wal.VerifiedSegment, 0, len(ordered))
+	objectPaths := make(map[string]string, len(ordered))
 	for _, object := range ordered {
 		if err := r.fetchRawObject(ctx, object.FetchObject); err != nil {
 			return CampaignVerificationReport{}, err
 		}
+		objectPaths[object.Key] = object.CachePath
 		segment, err := wal.VerifySealedSegment(object.CachePath)
 		if err != nil || segment.ObjectSHA256 != object.SHA256 || uint64(segment.FileBytes) != object.Bytes || segment.StartSequence != object.startSequence || segment.LastSequence != object.endSequence {
 			return CampaignVerificationReport{}, fmt.Errorf("%w: campaign segment does not match descriptor", archive.ErrIntegrity)
 		}
 		segments = append(segments, segment)
+	}
+	for _, manifest := range manifests {
+		if err := archive.VerifyRawDaySnapshot(manifest, objectPaths); err != nil {
+			return CampaignVerificationReport{}, fmt.Errorf("%w: campaign raw-day manifest semantic verification failed: %v", archive.ErrIntegrity, err)
+		}
 	}
 	sort.Slice(segments, func(i, j int) bool { return segments[i].StartSequence < segments[j].StartSequence })
 	var expectedSequence uint64 = 1
