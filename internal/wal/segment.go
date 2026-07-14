@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"os"
@@ -17,6 +18,8 @@ const (
 	trailerVersion uint16 = 1
 	trailerBytes          = 96
 )
+
+var errSealedTrailerAtEntryBoundary = errors.New("sealed WAL trailer starts at an entry boundary")
 
 // VerifiedSegment describes a byte-exact sealed GatewayWalSegmentV1.
 type VerifiedSegment struct {
@@ -176,6 +179,11 @@ func parseEntries(
 
 	for offset < len(data) {
 		remaining := data[offset:]
+		if allowPartial &&
+			len(remaining) == trailerBytes &&
+			string(remaining[:4]) == trailerMagic {
+			return entries, offset, false, errSealedTrailerAtEntryBoundary
+		}
 		if allowPartial && isPartialTrailer(remaining) {
 			return entries, offset, true, nil
 		}

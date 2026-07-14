@@ -266,6 +266,12 @@ func (s *Store) loadActive() error {
 	if err != nil {
 		return err
 	}
+	s.start = header.startSequence
+	s.activeAt = len(s.entries)
+	entries, entriesEnd, partial, err := parseEntries(data, header, nil, true)
+	if err != nil {
+		return err
+	}
 	if header.startSequence != s.next {
 		return fmt.Errorf(
 			"%w: active WAL starts at sequence %d, want %d",
@@ -274,11 +280,12 @@ func (s *Store) loadActive() error {
 			s.next,
 		)
 	}
-	s.start = header.startSequence
-	s.activeAt = len(s.entries)
-	entries, entriesEnd, partial, err := parseEntries(data, header, &s.last, true)
-	if err != nil {
-		return err
+	if len(entries) > 0 && entries[0].PreviousEntryHash != s.last {
+		return fmt.Errorf(
+			"%w: active WAL chain start mismatch at sequence %d",
+			ErrIntegrity,
+			entries[0].Sequence,
+		)
 	}
 	if partial {
 		if err := s.file.Truncate(int64(entriesEnd)); err != nil {

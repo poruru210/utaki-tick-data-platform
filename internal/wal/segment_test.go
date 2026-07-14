@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"tick-data-platform/internal/protocol"
 	"tick-data-platform/internal/wal"
 	"tick-data-platform/producers/fake"
 )
@@ -146,6 +147,59 @@ func TestWALRecoversPartialTrailerAsActive(t *testing.T) {
 	}
 	if len(reopened.SealedSegments()) != 0 {
 		t.Fatal("partial trailer must not seal the active WAL")
+	}
+}
+
+func TestWALDoesNotTreatEntryPayloadMagicAsSealedTrailer(t *testing.T) {
+	root := t.TempDir()
+	fixture, err := fake.BatchFixture()
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := protocol.DecodeFrame(fixture.Frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := protocol.DecodeMessage(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := message.(protocol.BatchFrameV1)
+	batch.Records[0].Flags = 0x52545754
+	raw, err := protocol.EncodeMessage(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := wal.Open(root, "gateway-test-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Append(raw, 1710000000, 42); err != nil {
+		t.Fatal(err)
+	}
+	activePath := store.Path()
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	activeBytes, err := os.ReadFile(activePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(activeBytes[len(activeBytes)-96:len(activeBytes)-92]) != "TWTR" {
+		t.Fatal("test frame does not place TWTR 96 bytes before active WAL end")
+	}
+
+	reopened, err := wal.Open(root, "gateway-test-01")
+	if err != nil {
+		t.Fatalf("valid active WAL was mistaken for a sealed segment: %v", err)
+	}
+	defer reopened.Close()
+	if reopened.Count() != 1 || len(reopened.SealedSegments()) != 0 {
+		t.Fatalf(
+			"valid active WAL recovery count=%d sealed=%d",
+			reopened.Count(),
+			len(reopened.SealedSegments()),
+		)
 	}
 }
 

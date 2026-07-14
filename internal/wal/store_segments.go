@@ -51,24 +51,28 @@ func (s *Store) initialize() error {
 		return err
 	}
 
-	if hasTrailerAtEnd(data) {
-		segment, err := VerifySealedSegment(s.path)
-		if err != nil {
-			return err
-		}
-		if err := s.recoverSealedActive(segment); err != nil {
-			return err
-		}
-		return s.createActive()
-	}
-
 	file, err := os.OpenFile(s.path, os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("open active WAL: %w", err)
 	}
 	s.setActiveFile(file)
 	if err := s.loadActive(); err != nil {
-		return err
+		if !errors.Is(err, errSealedTrailerAtEntryBoundary) {
+			return err
+		}
+		if closeErr := s.file.Close(); closeErr != nil {
+			s.file = nil
+			return fmt.Errorf("close sealed active WAL during recovery: %w", closeErr)
+		}
+		s.file = nil
+		segment, verifyErr := VerifySealedSegment(s.path)
+		if verifyErr != nil {
+			return verifyErr
+		}
+		if recoverErr := s.recoverSealedActive(segment); recoverErr != nil {
+			return recoverErr
+		}
+		return s.createActive()
 	}
 	if _, err := s.file.Seek(0, io.SeekEnd); err != nil {
 		return fmt.Errorf("seek WAL end: %w", err)
@@ -319,11 +323,6 @@ func (s *Store) setActiveFile(file *os.File) {
 
 func (s *Store) sealedRoot() string {
 	return filepath.Join(s.root, sealedDirectory)
-}
-
-func hasTrailerAtEnd(data []byte) bool {
-	return len(data) >= trailerBytes &&
-		string(data[len(data)-trailerBytes:len(data)-trailerBytes+4]) == trailerMagic
 }
 
 func matchesIncompleteHeader(data []byte, gatewayID string, startSequence uint64) bool {
