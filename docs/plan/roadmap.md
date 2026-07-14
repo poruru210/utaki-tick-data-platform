@@ -83,6 +83,24 @@ manifestはGoやMQL5の非公開型を参照しません。
 
 M2の完了条件は、ローカル保存とR2配置の結果をmanifestとhashで検証できることです。
 
+### 2026-07-15時点のローカルraw WAL基盤
+
+internal/walはactive WALへTWTR trailerを追加し、seal済みsegmentへ切り替えた後、次のgateway ingest sequenceとentry hash chainを引き継ぐ新しいactive WALを作成します。
+
+起動時にはseal済みsegmentをsequence順に検証し、active WALと合わせてaccepted batch inventoryを復元します。
+
+検証対象はheader、entry length、BatchFrameV1、commit marker、CRC32C、batch SHA-256、entry hash chain、trailer、trailer直前までのfile SHA-256です。
+
+raw objectのkeyには、trailerを含むseal済みfile全体のSHA-256を使います。
+
+internal/archiveは検証済みsegmentを再encodeも圧縮もせず、既存objectを上書きしないatomic operationでローカルoutboxへpromoteします。
+
+同じbytesのretryは同じobjectを返し、同じkeyに異なるbytesが存在する場合はintegrity failureとして停止します。
+
+この段階では明示的なStore.Seal APIだけを提供し、自動rotation policyは実装しません。
+
+R2 upload、rclone tool lock、publisher claim、raw-day manifest、remote verification、delivery CLIは未実装であるため、M2全体は未完了です。
+
 ## M3のReplay配信
 
 M3では、rawデータからreplay用データを生成します。
