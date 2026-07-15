@@ -52,6 +52,9 @@ dataset namespace collisionは`TestLayoutSeparatesDatasetsWithTheSameCampaignIde
 
 scope-specific `ProtocolLimits.MaxRecords`は`TestVerifyRawDaySnapshotUsesScopedRecordLimit`でsemantic verificationへ適用します。
 
+thread-aware review readでは、上記2件のP2 threadを未解決として確認しました。
+指摘内容は最新headで修正済みですが、threadへの返信とresolveは明示依頼がないため実施していません。
+
 fake backendのconditional writeはclaimだけに使用し、scope descriptor、raw object、manifestの転送と検証はfake rcloneの`copyto --immutable`と`check --download`で再現します。
 
 ## optional real-R2 smoke
