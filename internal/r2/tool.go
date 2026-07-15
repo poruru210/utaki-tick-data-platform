@@ -18,9 +18,11 @@ import (
 const RcloneVersion = "v1.74.4"
 
 var (
-	ErrRcloneBinary  = errors.New("rclone binary integrity failure")
-	ErrRcloneCommand = errors.New("rclone command failed")
-	ErrRcloneVersion = errors.New("rclone version mismatch")
+	ErrRcloneBinary        = errors.New("rclone binary integrity failure")
+	ErrRcloneCommand       = errors.New("rclone command failed")
+	ErrRcloneVersion       = errors.New("rclone version mismatch")
+	ErrRcloneCollision     = errors.New("rclone immutable destination collision")
+	ErrRcloneCheckMismatch = errors.New("rclone downloaded bytes differ")
 )
 
 type RcloneTool struct {
@@ -189,6 +191,14 @@ type RcloneRunner struct {
 	binaryPath string
 	tool       RcloneTool
 	executor   commandExecutor
+}
+
+// ReplayActionTool is the complete remote mutation allow-list available to
+// the R4 executor. It cannot invoke delete, move, sync, overwrite-copy, shell,
+// or an arbitrary rclone operation.
+type ReplayActionTool interface {
+	CopyToImmutable(ctx context.Context, localPath, remoteKey string) error
+	CheckDownload(ctx context.Context, localPath, remoteKey string) error
 }
 
 func (r *RcloneRunner) Tool() RcloneTool {

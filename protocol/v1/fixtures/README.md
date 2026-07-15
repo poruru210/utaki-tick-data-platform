@@ -12,7 +12,7 @@ indexのtop-levelは`fixture_version`と`fixtures`を持ちます。
 
 fixturesの各要素は`fixture_id`、`path`、`kind`、`expected_result`を持ちます。
 
-`kind`は`valid_frame`、`invalid_frame`、`stateful_scenario`、`canonical_json`、`wal_entry`、`manifest`のいずれかです。
+`kind`は`valid_frame`、`invalid_frame`、`stateful_scenario`、`canonical_json`、`wal_entry`、`replay_contract`、`part_contract`、`key_contract`、`publication_contract`のいずれかです。
 
 `expected_result`は`accepted`または`rejected`です。
 
@@ -23,6 +23,16 @@ fixture fileはJSON objectです。
 valid frame fixtureは`wire_hex`、`decoded_message_type`、`expected_hashes`、`expected_result`を持ちます。
 
 manifest fixtureは`canonical_json`、`manifest_sha256`、`expected_result`を持ちます。
+
+`replay_contract` fixtureはGo/Pythonがcanonical row、marker、row-chain、part manifest、part_set_root、replay manifestを同じ入力から計算した結果を持ちます。
+
+part manifest fixtureはexact scope、raw-day manifest key+domain digest、ConversionTuple、`previous_row_chain_hash`を含み、part setの最終row-chain rootとreplay manifest rootの一致も検証します。
+
+`key_contract` fixtureは、date-local campaign-relative base、Parquet part key、part manifest key、replay-day manifest key、exact scope/conversion identityをGo/Pythonで導出し、旧generic keyを受理しないことを固定します。
+
+`publication_contract` fixtureは、bundleとcomplete final observationのcanonical JSON、二つのdomain digest、M2 claim relation、10個のresource limit、Go/Python共通のnegative classificationを固定します。
+
+negative caseはunknown field、duplicate field、zero digest、wrong domain、wrong key、scope collision、raw claim missing、oversized aggregate、noncanonical bytes、invalid UTF-8、noncanonical integer、incomplete observation、missing derivativeを含みます。
 
 raw-day manifest fixtureはrevision、raw_set_root、object range、canonical JSONのstrict decode結果を同時に固定します。
 
@@ -35,7 +45,7 @@ WAL fixtureは、file header、entry、commit marker、trailerのhex bytesと`ex
 
 ## 必須case
 
-indexにはHello、Resume、Batch、Ack、Error、WAL entry、raw-day manifest、replay-day manifestを登録します。
+indexにはHello、Resume、Batch、Ack、Error、WAL entry、raw-day manifest、M0 replay-day manifest、M3 replay contract、M3 derivative key contract、M3 replay publication contractを登録します。
 
 異常系にはtruncated frame、CRC mutation、unknown version、unknown message、oversized frameを登録します。
 

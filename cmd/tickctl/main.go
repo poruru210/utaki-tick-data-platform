@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"tick-data-platform/internal/delivery"
 )
@@ -55,17 +56,71 @@ func runWithReader(args []string, reader delivery.ArchiveReaderV1, output, error
 	case "campaigns":
 		return runCampaigns(args[1:], reader, output, errorsOut)
 	case "snapshots":
-		if len(args) < 2 || args[1] != "raw" {
-			fmt.Fprintln(errorsOut, "snapshots requires the raw subcommand")
+		if len(args) < 2 {
+			fmt.Fprintln(errorsOut, "snapshots requires raw or replay")
 			return 2
 		}
-		return runSnapshotsRaw(args[2:], reader, output, errorsOut)
+		switch args[1] {
+		case "raw":
+			return runSnapshotsRaw(args[2:], reader, output, errorsOut)
+		case "replay":
+			return runSnapshotsReplay(args[2:], reader, output, errorsOut)
+		default:
+			fmt.Fprintln(errorsOut, "snapshots requires raw or replay")
+			return 2
+		}
 	case "fetch":
 		return runFetch(args[1:], reader, output, errorsOut)
 	default:
 		fmt.Fprintln(errorsOut, "unknown tickctl command")
 		return 2
 	}
+}
+
+func runSnapshotsReplay(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
+	flags := flag.NewFlagSet("snapshots replay", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.String("config", "", "reader configuration")
+	dataset := flags.String("dataset", "", "dataset identity")
+	campaign := flags.String("campaign", "", "campaign identity")
+	date := flags.String("date", "", "UTC date")
+	stream := flags.String("stream", "", "replay contract identity")
+	conversion := flags.String("conversion", "", "conversion identity")
+	dayDefinition := flags.String("day-definition", "", "day definition identity")
+	revision := flags.Uint64("revision", 0, "exact replay revision")
+	manifest := flags.String("manifest", "", "immutable replay manifest key or digest")
+	if err := flags.Parse(args); err != nil || *dataset == "" || *campaign == "" || *date == "" || *stream == "" || *conversion == "" || *revision != 0 && *manifest != "" {
+		fmt.Fprintln(errorsOut, "--dataset, --campaign, --date, --stream, and --conversion are required; --revision and --manifest are mutually exclusive")
+		return 2
+	}
+	scope := delivery.ReplayDayScope{DatasetID: *dataset, CampaignID: *campaign, DayDefinitionID: *dayDefinition, Date: *date, ReplayContractID: *stream, ConversionID: *conversion}
+	var items []delivery.ReplaySnapshotDescriptor
+	if *revision != 0 || *manifest != "" {
+		selector := delivery.ReplaySnapshotSelector{ReplayDayScope: scope, Manifest: *manifest}
+		if *revision != 0 {
+			selector.Revision = revision
+		}
+		resolved, err := reader.ResolveReplaySnapshot(context.Background(), selector)
+		if err != nil {
+			return reportError(err, errorsOut)
+		}
+		items = []delivery.ReplaySnapshotDescriptor{resolved.Descriptor}
+	} else {
+		var err error
+		items, err = reader.ListReplaySnapshots(context.Background(), scope)
+		if err != nil {
+			return reportError(err, errorsOut)
+		}
+	}
+	result := make([]replaySnapshotOutput, len(items))
+	for index, item := range items {
+		previous := ""
+		if item.PreviousManifestSHA256 != nil {
+			previous = hex.EncodeToString(item.PreviousManifestSHA256[:])
+		}
+		result[index] = replaySnapshotOutput{DatasetID: item.DatasetID, CampaignID: item.CampaignID, DayDefinitionID: item.DayDefinitionID, Date: item.Date, ReplayContractID: item.ReplayContractID, ConversionID: item.ConversionID, Revision: item.Revision, ManifestKey: item.ManifestKey, ManifestSHA256: hex.EncodeToString(item.ManifestSHA256[:]), PreviousManifestSHA256: previous, RawDayManifestKey: item.RawDayManifestKey, RawDayManifestSHA256: hex.EncodeToString(item.RawDayManifestSHA256[:]), PartSetRoot: hex.EncodeToString(item.PartSetRoot[:]), CanonicalStreamRowChainRoot: hex.EncodeToString(item.CanonicalStreamRowChainRoot[:]), PartCount: item.PartCount}
+	}
+	return writeJSON(result, output, errorsOut)
 }
 
 func runDatasets(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
@@ -149,12 +204,19 @@ func runFetch(args []string, reader delivery.ArchiveReaderV1, output, errorsOut 
 	flags.String("config", "", "reader configuration")
 	manifest := flags.String("manifest", "", "immutable manifest key or digest")
 	destination := flags.String("output", "", "output directory")
-	if err := flags.Parse(args); err != nil || *manifest == "" || *destination == "" {
+	kind := flags.String("kind", "auto", "auto, raw, or replay")
+	if err := flags.Parse(args); err != nil || *manifest == "" || *destination == "" || *kind != "auto" && *kind != "raw" && *kind != "replay" {
 		fmt.Fprintln(errorsOut, "--manifest and --output are required")
 		return 2
 	}
+	if *kind == "replay" || *kind == "auto" && strings.Contains(*manifest, "/replay-day-") {
+		return runReplayFetch(*manifest, *destination, reader, output, errorsOut)
+	}
 	snapshot, err := reader.ResolveSnapshot(context.Background(), delivery.SnapshotSelector{Manifest: *manifest})
 	if err != nil {
+		if *kind == "auto" {
+			return runReplayFetch(*manifest, *destination, reader, output, errorsOut)
+		}
 		return reportError(err, errorsOut)
 	}
 	plan, err := reader.BuildFetchPlan(context.Background(), snapshot)
@@ -166,6 +228,29 @@ func runFetch(args []string, reader delivery.ArchiveReaderV1, output, errorsOut 
 		return reportError(err, errorsOut)
 	}
 	return writeJSON(fetchOutput{ManifestPath: result.ManifestPath, ObjectPaths: result.ObjectPaths, EntryCount: len(result.Entries)}, output, errorsOut)
+}
+
+func runReplayFetch(manifest, destination string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
+	snapshot, err := reader.ResolveReplaySnapshot(context.Background(), delivery.ReplaySnapshotSelector{Manifest: manifest})
+	if err != nil {
+		return reportError(err, errorsOut)
+	}
+	plan, err := reader.BuildReplayFetchPlan(context.Background(), snapshot)
+	if err != nil {
+		return reportError(err, errorsOut)
+	}
+	result, err := reader.FetchReplay(context.Background(), plan, destination)
+	if err != nil {
+		return reportError(err, errorsOut)
+	}
+	paths := make(map[string]string, 1+len(result.PartManifestPaths)+len(result.ParquetPaths))
+	for key, path := range result.PartManifestPaths {
+		paths[key] = path
+	}
+	for key, path := range result.ParquetPaths {
+		paths[key] = path
+	}
+	return writeJSON(fetchOutput{ManifestPath: result.ManifestPath, ObjectPaths: paths, EntryCount: 0}, output, errorsOut)
 }
 
 type datasetOutput struct {
@@ -207,6 +292,24 @@ type fetchOutput struct {
 	ManifestPath string            `json:"manifest_path"`
 	ObjectPaths  map[string]string `json:"object_paths"`
 	EntryCount   int               `json:"entry_count"`
+}
+
+type replaySnapshotOutput struct {
+	DatasetID                   string `json:"dataset_id"`
+	CampaignID                  string `json:"campaign_id"`
+	DayDefinitionID             string `json:"day_definition_id"`
+	Date                        string `json:"date"`
+	ReplayContractID            string `json:"replay_contract_id"`
+	ConversionID                string `json:"conversion_id"`
+	Revision                    uint64 `json:"revision"`
+	ManifestKey                 string `json:"manifest_key"`
+	ManifestSHA256              string `json:"manifest_sha256"`
+	PreviousManifestSHA256      string `json:"previous_manifest_sha256,omitempty"`
+	RawDayManifestKey           string `json:"raw_day_manifest_key"`
+	RawDayManifestSHA256        string `json:"raw_day_manifest_sha256"`
+	PartSetRoot                 string `json:"part_set_root"`
+	CanonicalStreamRowChainRoot string `json:"canonical_stream_row_chain_root"`
+	PartCount                   uint64 `json:"part_count"`
 }
 
 func writeJSON(value any, output, errorsOut io.Writer) int {

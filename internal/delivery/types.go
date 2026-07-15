@@ -27,6 +27,11 @@ type ArchiveReaderV1 interface {
 	Fetch(ctx context.Context, plan FetchPlan, destination string) (FetchResult, error)
 	VerifyDay(ctx context.Context, selector SnapshotSelector) (DayVerificationReport, error)
 	VerifyCampaign(ctx context.Context, datasetID, campaignID, throughRoot string) (CampaignVerificationReport, error)
+	ListReplaySnapshots(ctx context.Context, scope ReplayDayScope) ([]ReplaySnapshotDescriptor, error)
+	ResolveReplaySnapshot(ctx context.Context, selector ReplaySnapshotSelector) (ResolvedReplaySnapshot, error)
+	BuildReplayFetchPlan(ctx context.Context, snapshot ResolvedReplaySnapshot) (ReplayFetchPlan, error)
+	FetchReplay(ctx context.Context, plan ReplayFetchPlan, destination string) (ReplayFetchResult, error)
+	VerifyReplayDay(ctx context.Context, selector ReplaySnapshotSelector) (ReplayDayVerificationReport, error)
 }
 
 type DatasetDescriptor struct {
@@ -146,4 +151,103 @@ type CampaignVerificationReport struct {
 	VerifiedThrough   uint64
 	SegmentCount      int
 	EntryCount        int
+}
+
+const VerificationScopeReplayAnchoredDay = "replay_anchored_day"
+
+type ReplayDayScope struct {
+	DatasetID        string
+	CampaignID       string
+	DayDefinitionID  string
+	Date             string
+	ReplayContractID string
+	ConversionID     string
+}
+
+type ReplaySnapshotSelector struct {
+	ReplayDayScope
+	Revision *uint64
+	Manifest string
+}
+
+type ReplaySnapshotDescriptor struct {
+	DatasetID                   string
+	CampaignID                  string
+	DayDefinitionID             string
+	Date                        string
+	ReplayContractID            string
+	ConversionID                string
+	Revision                    uint64
+	ManifestKey                 string
+	ManifestSHA256              [32]byte
+	PreviousManifestSHA256      *[32]byte
+	RawDayManifestKey           string
+	RawDayManifestSHA256        [32]byte
+	PartSetRoot                 [32]byte
+	CanonicalStreamRowChainRoot [32]byte
+	PartCount                   uint64
+}
+
+type ResolvedReplaySnapshot struct {
+	Descriptor     ReplaySnapshotDescriptor
+	Scope          archive.ScopeConfig
+	Manifest       protocol.ReplayDayManifest
+	ManifestKey    string
+	ManifestBytes  []byte
+	ManifestSHA256 [32]byte
+}
+
+type ReplayFetchObjectKind string
+
+const (
+	ReplayFetchManifest     ReplayFetchObjectKind = "replay_manifest"
+	ReplayFetchPartManifest ReplayFetchObjectKind = "part_manifest"
+	ReplayFetchParquet      ReplayFetchObjectKind = "parquet"
+)
+
+type ReplayFetchObject struct {
+	Kind           ReplayFetchObjectKind
+	Key            string
+	RemoteKey      string
+	Digest         [32]byte
+	Bytes          uint64
+	CachePath      string
+	CanonicalBytes []byte
+}
+
+type ReplayFetchPlan struct {
+	Manifest ReplayFetchObject
+	Parts    []ReplayFetchObject
+	Parquet  []ReplayFetchObject
+}
+
+type ReplayFetchResult struct {
+	ManifestPath      string
+	PartManifestPaths map[string]string
+	ParquetPaths      map[string]string
+}
+
+type ReplayDayVerificationReport struct {
+	GenesisVerified               bool
+	VerificationScope             string
+	DatasetID                     string
+	CampaignID                    string
+	DayDefinitionID               string
+	Date                          string
+	ReplayContractID              string
+	ConversionID                  string
+	Revision                      uint64
+	ManifestKey                   string
+	ManifestSHA256                [32]byte
+	RawBindingVerified            bool
+	RawDaySemanticsVerified       bool
+	PartManifestChainVerified     bool
+	PartSetRootVerified           bool
+	ParquetSchemaVerified         bool
+	ParquetRowsVerified           bool
+	ParquetFileHashesVerified     bool
+	CanonicalRowChainRootVerified bool
+	EmptyDay                      bool
+	PartCount                     uint64
+	RowCount                      uint64
 }

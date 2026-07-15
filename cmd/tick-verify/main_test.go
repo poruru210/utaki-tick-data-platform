@@ -36,6 +36,21 @@ func (tickVerifyReaderStub) VerifyDay(context.Context, delivery.SnapshotSelector
 func (tickVerifyReaderStub) VerifyCampaign(context.Context, string, string, string) (delivery.CampaignVerificationReport, error) {
 	return delivery.CampaignVerificationReport{GenesisVerified: true, VerificationScope: delivery.VerificationScopeCampaign}, nil
 }
+func (tickVerifyReaderStub) ListReplaySnapshots(context.Context, delivery.ReplayDayScope) ([]delivery.ReplaySnapshotDescriptor, error) {
+	return nil, errors.New("unused")
+}
+func (tickVerifyReaderStub) ResolveReplaySnapshot(context.Context, delivery.ReplaySnapshotSelector) (delivery.ResolvedReplaySnapshot, error) {
+	return delivery.ResolvedReplaySnapshot{}, errors.New("unused")
+}
+func (tickVerifyReaderStub) BuildReplayFetchPlan(context.Context, delivery.ResolvedReplaySnapshot) (delivery.ReplayFetchPlan, error) {
+	return delivery.ReplayFetchPlan{}, errors.New("unused")
+}
+func (tickVerifyReaderStub) FetchReplay(context.Context, delivery.ReplayFetchPlan, string) (delivery.ReplayFetchResult, error) {
+	return delivery.ReplayFetchResult{}, errors.New("unused")
+}
+func (tickVerifyReaderStub) VerifyReplayDay(context.Context, delivery.ReplaySnapshotSelector) (delivery.ReplayDayVerificationReport, error) {
+	return delivery.ReplayDayVerificationReport{VerificationScope: delivery.VerificationScopeReplayAnchoredDay, RawBindingVerified: true}, nil
+}
 
 func TestTickVerifyDayAndCampaignUseExplicitVerificationScopes(t *testing.T) {
 	reader := tickVerifyReaderStub{}
@@ -60,6 +75,25 @@ func TestTickVerifyDayAndCampaignUseExplicitVerificationScopes(t *testing.T) {
 	}
 	if campaign["genesis_verified"] != true || campaign["verification_scope"] != delivery.VerificationScopeCampaign {
 		t.Fatalf("campaign output = %v", campaign)
+	}
+}
+
+func TestTickVerifyReplayDayEmitsMachineReadableScope(t *testing.T) {
+	var output, errorsOut bytes.Buffer
+	if code := runWithReader([]string{"replay-day", "--manifest", "manifest"}, tickVerifyReaderStub{}, &output, &errorsOut); code != 0 {
+		t.Fatalf("replay-day exit=%d errors=%q", code, errorsOut.String())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["verification_scope"] != delivery.VerificationScopeReplayAnchoredDay || decoded["genesis_verified"] != false || decoded["raw_binding_verified"] != true {
+		t.Fatalf("replay-day JSON = %v", decoded)
+	}
+	output.Reset()
+	errorsOut.Reset()
+	if code := runWithReader([]string{"replay-day"}, tickVerifyReaderStub{}, &output, &errorsOut); code != 2 || output.Len() != 0 {
+		t.Fatalf("invalid replay-day exit=%d output=%q errors=%q", code, output.String(), errorsOut.String())
 	}
 }
 

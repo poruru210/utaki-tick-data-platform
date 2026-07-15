@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -62,6 +64,32 @@ const (
 type ProtocolError struct {
 	Code   ErrorCode
 	Detail string
+}
+
+// DeriveSessionLeaseID is the single authoritative implementation of the
+// existing M2 lease algorithm. Its field order and NUL separators are wire
+// compatible with the original Gateway implementation.
+func DeriveSessionLeaseID(
+	producerInstanceID string,
+	producerSessionID string,
+	campaignID string,
+	providerID string,
+	stableFeedID string,
+	brokerServerFingerprint string,
+	exactSourceSymbol string,
+) string {
+	data := strings.Join([]string{
+		"tick-data-platform/lease/v1",
+		producerInstanceID,
+		producerSessionID,
+		campaignID,
+		providerID,
+		stableFeedID,
+		brokerServerFingerprint,
+		exactSourceSymbol,
+	}, "\x00")
+	hash := sha256.Sum256([]byte(data))
+	return "lease-" + hex.EncodeToString(hash[:16])
 }
 
 func (e *ProtocolError) Error() string {

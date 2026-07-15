@@ -53,6 +53,10 @@ func (l *CampaignLock) Path() string {
 	return l.path
 }
 
+func (l *CampaignLock) Held() bool {
+	return l != nil && l.file != nil
+}
+
 func (l *CampaignLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil

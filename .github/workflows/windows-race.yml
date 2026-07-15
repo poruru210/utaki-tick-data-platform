@@ -41,4 +41,4 @@ jobs:
         shell: pwsh
         env:
           CGO_ENABLED: "1"
-        run: mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/catalog
+        run: mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/catalog ./internal/continuity ./internal/parquet

@@ -20,6 +20,7 @@ var (
 	ErrObjectExists      = errors.New("remote object already exists")
 	ErrPublisherConflict = errors.New("publisher claim conflict")
 	ErrMetadataTooLarge  = errors.New("remote metadata exceeds configured limit")
+	ErrResourceLimit     = errors.New("remote resource exceeds configured limit")
 )
 
 type RemoteObject struct {
@@ -30,7 +31,71 @@ type RemoteObject struct {
 type ObjectBackend interface {
 	PutIfAbsent(ctx context.Context, key string, body []byte) error
 	Get(ctx context.Context, key string) ([]byte, error)
+	Open(ctx context.Context, key string) (io.ReadCloser, int64, error)
 	List(ctx context.Context, prefix string) ([]RemoteObject, error)
+}
+
+// BoundedObjectBackend is the stronger read boundary required by replay
+// publication. The raw M2 publisher keeps using ObjectBackend; replay
+// publication must never use its unbounded Get or List methods for remote
+// acceptance decisions.
+type BoundedObjectBackend interface {
+	ObjectBackend
+	GetLimited(ctx context.Context, key string, maxBytes uint64) ([]byte, error)
+	ListLimited(ctx context.Context, prefix string, maxObjects uint64) ([]RemoteObject, error)
+}
+
+// ReplayRemoteObjectList is a bounded inventory result. Complete is part of
+// the trust boundary: a missing key is Absent only when the backend proves the
+// whole requested prefix was returned.
+type ReplayRemoteObjectList struct {
+	Objects  []RemoteObject
+	Complete bool
+}
+
+// ReplayRemoteReadBackend is the only remote object capability available to
+// the replay observer. It deliberately neither embeds ObjectBackend nor
+// exposes Put, unbounded Get/List, or an unbounded Open.
+type ReplayRemoteReadBackend interface {
+	ListLimited(ctx context.Context, prefix string, maxObjects uint64) (ReplayRemoteObjectList, error)
+	OpenLimited(ctx context.Context, key string, maxBytes uint64) (io.ReadCloser, int64, error)
+}
+
+// ReplayRemoteReadAdapter narrows the legacy bounded backend to the R3
+// observer interface without changing the M2 backend contract.
+type ReplayRemoteReadAdapter struct {
+	backend BoundedObjectBackend
+}
+
+func NewReplayRemoteReadAdapter(backend BoundedObjectBackend) (*ReplayRemoteReadAdapter, error) {
+	if backend == nil {
+		return nil, fmt.Errorf("replay remote read backend is nil")
+	}
+	return &ReplayRemoteReadAdapter{backend: backend}, nil
+}
+
+func (a *ReplayRemoteReadAdapter) ListLimited(ctx context.Context, prefix string, maxObjects uint64) (ReplayRemoteObjectList, error) {
+	objects, err := a.backend.ListLimited(ctx, prefix, maxObjects)
+	if err != nil {
+		return ReplayRemoteObjectList{}, err
+	}
+	return ReplayRemoteObjectList{Objects: objects, Complete: true}, nil
+}
+
+func (a *ReplayRemoteReadAdapter) OpenLimited(ctx context.Context, key string, maxBytes uint64) (io.ReadCloser, int64, error) {
+	if maxBytes == 0 || maxBytes >= uint64(^uint64(0)>>1) {
+		return nil, 0, fmt.Errorf("%w: invalid object byte limit", ErrResourceLimit)
+	}
+	body, size, err := a.backend.Open(ctx, key)
+	if err != nil {
+		return nil, 0, err
+	}
+	return &boundedReplayReadCloser{Reader: io.LimitReader(body, int64(maxBytes)+1), Closer: body}, size, nil
+}
+
+type boundedReplayReadCloser struct {
+	io.Reader
+	io.Closer
 }
 
 // ReadBackend is deliberately separate from ObjectBackend so an ArchiveReader
@@ -199,6 +264,46 @@ func (b *S3Backend) Get(ctx context.Context, key string) ([]byte, error) {
 	return body, nil
 }
 
+func (b *S3Backend) GetLimited(ctx context.Context, key string, maxBytes uint64) ([]byte, error) {
+	if maxBytes == 0 || maxBytes >= uint64(^uint64(0)>>1) {
+		return nil, fmt.Errorf("%w: invalid metadata byte limit", ErrResourceLimit)
+	}
+	output, err := b.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(b.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, classifyRemoteError(err)
+	}
+	defer output.Body.Close()
+	if output.ContentLength != nil && (*output.ContentLength < 0 || uint64(*output.ContentLength) > maxBytes) {
+		return nil, fmt.Errorf("%w: metadata object is oversized", ErrResourceLimit)
+	}
+	body, err := io.ReadAll(io.LimitReader(output.Body, int64(maxBytes)+1))
+	if err != nil {
+		return nil, fmt.Errorf("read remote metadata")
+	}
+	if uint64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("%w: metadata object is oversized", ErrResourceLimit)
+	}
+	return body, nil
+}
+
+func (b *S3Backend) Open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	output, err := b.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(b.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, 0, classifyRemoteError(err)
+	}
+	size := int64(-1)
+	if output.ContentLength != nil {
+		size = *output.ContentLength
+	}
+	return output.Body, size, nil
+}
+
 func (b *S3Backend) List(ctx context.Context, prefix string) ([]RemoteObject, error) {
 	paginator := s3.NewListObjectsV2Paginator(b.client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(b.bucket),
@@ -221,6 +326,44 @@ func (b *S3Backend) List(ctx context.Context, prefix string) ([]RemoteObject, er
 		}
 	}
 	return result, nil
+}
+
+func (b *S3Backend) ListLimited(ctx context.Context, prefix string, maxObjects uint64) ([]RemoteObject, error) {
+	if maxObjects == 0 || maxObjects > uint64(^uint64(0)>>1) {
+		return nil, fmt.Errorf("%w: invalid object count limit", ErrResourceLimit)
+	}
+	paginator := s3.NewListObjectsV2Paginator(b.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(b.bucket),
+		Prefix: aws.String(prefix),
+	})
+	result := make([]RemoteObject, 0, minInt64(maxObjects, 256))
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, classifyRemoteError(err)
+		}
+		for _, object := range page.Contents {
+			if object.Key == nil {
+				continue
+			}
+			if uint64(len(result)) >= maxObjects {
+				return nil, fmt.Errorf("%w: derivative object count exceeds limit", ErrResourceLimit)
+			}
+			size := int64(-1)
+			if object.Size != nil {
+				size = *object.Size
+			}
+			result = append(result, RemoteObject{Key: *object.Key, Size: size})
+		}
+	}
+	return result, nil
+}
+
+func minInt64(value uint64, maximum int) int {
+	if value > uint64(maximum) {
+		return maximum
+	}
+	return int(value)
 }
 
 func classifyRemoteError(err error) error {

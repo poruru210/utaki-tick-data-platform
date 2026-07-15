@@ -292,8 +292,7 @@ func (s ScopeConfig) ConfigHash() ([32]byte, error) {
 // IdentityPathKey hashes exact identity bytes without normalization or case
 // folding, producing a lowercase hexadecimal path-safe component.
 func IdentityPathKey(value string) string {
-	digest := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(digest[:])
+	return protocol.ExactIdentityPathKey(value)
 }
 
 func ScopePathKey(scope ScopeConfig) (string, error) {
@@ -698,7 +697,7 @@ func ManifestDigest(manifest RawDayManifest) ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return sha256.Sum256(append([]byte(RawDayManifestDomain), canonical...)), nil
+	return protocol.RawDayManifestDigest(canonical), nil
 }
 
 func ManifestCanonicalJSON(manifest RawDayManifest) ([]byte, error) {
