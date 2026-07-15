@@ -190,7 +190,7 @@ func TestRawDayManifestChainObjectsContainCrossDayMiddleObject(t *testing.T) {
 	for _, object := range objects {
 		paths[object.Key] = object.Path
 	}
-	if err := archive.VerifyRawDaySnapshot(manifest, paths); err != nil {
+	if err := archive.VerifyRawDaySnapshot(manifest, paths, testScope()); err != nil {
 		t.Fatalf("VerifyRawDaySnapshot = %v", err)
 	}
 
@@ -244,7 +244,7 @@ func TestVerifyRawDaySnapshotRejectsMissingTamperedFalseBoundaryAndCrossArray(t 
 			missing[key] = path
 		}
 	}
-	if err := archive.VerifyRawDaySnapshot(manifest, missing); !errors.Is(err, archive.ErrIntegrity) {
+	if err := archive.VerifyRawDaySnapshot(manifest, missing, testScope()); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("missing chain object error = %v, want ErrIntegrity", err)
 	}
 	falseBoundary := make(map[string]string, len(paths))
@@ -252,7 +252,7 @@ func TestVerifyRawDaySnapshotRejectsMissingTamperedFalseBoundaryAndCrossArray(t 
 		falseBoundary[key] = path
 	}
 	falseBoundary[objects[1].Key] = objects[0].Path
-	if err := archive.VerifyRawDaySnapshot(manifest, falseBoundary); !errors.Is(err, archive.ErrIntegrity) {
+	if err := archive.VerifyRawDaySnapshot(manifest, falseBoundary, testScope()); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("false segment boundary error = %v, want ErrIntegrity", err)
 	}
 	tampered := filepath.Join(t.TempDir(), "tampered.rtw")
@@ -269,7 +269,7 @@ func TestVerifyRawDaySnapshotRejectsMissingTamperedFalseBoundaryAndCrossArray(t 
 		tamperedPaths[key] = path
 	}
 	tamperedPaths[objects[1].Key] = tampered
-	if err := archive.VerifyRawDaySnapshot(manifest, tamperedPaths); !errors.Is(err, archive.ErrIntegrity) {
+	if err := archive.VerifyRawDaySnapshot(manifest, tamperedPaths, testScope()); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("tampered object error = %v, want ErrIntegrity", err)
 	}
 	crossArray := manifest
@@ -277,6 +277,49 @@ func TestVerifyRawDaySnapshotRejectsMissingTamperedFalseBoundaryAndCrossArray(t 
 	crossArray.ChainObjects[1].Bytes++
 	if err := archive.ValidateRawDayManifest(crossArray); err == nil {
 		t.Fatal("cross-array metadata mismatch was accepted")
+	}
+}
+
+func TestVerifyRawDaySnapshotUsesScopedRecordLimit(t *testing.T) {
+	day := time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli()
+	frame, err := encodeTestBatch(protocol.BatchFrameV1{
+		RequestedFromMSC: day,
+		ReturnedCount:    2,
+		SourceSchemaID:   protocol.SourceSchemaMT5,
+		Records: []protocol.RawMqlTickV1{
+			{TimeMSC: day, CaptureSequence: 1},
+			{TimeMSC: day + 1, CaptureSequence: 2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := testScope()
+	object := promoteTestObject(t, frame)
+	manifest, err := archive.BuildRawDayManifest(archive.RawDayManifestInput{
+		Scope:              scope,
+		Date:               "2024-03-09",
+		RawObjects:         []archive.RawObject{object},
+		TerminalSyncStatus: "complete",
+		CompletenessStatus: "settled_snapshot",
+		LogicalCloseTimeS:  1710003600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	strictScope := scope
+	strictScope.ProtocolLimits.MaxRecords = 1
+	manifest.ConfigHash, err = strictScope.ConfigHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.ManifestSHA256, err = archive.ManifestDigest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]string{object.Key: object.Path}
+	if err := archive.VerifyRawDaySnapshot(manifest, paths, strictScope); !errors.Is(err, archive.ErrIntegrity) {
+		t.Fatalf("scoped record limit violation error = %v, want ErrIntegrity", err)
 	}
 }
 

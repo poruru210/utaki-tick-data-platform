@@ -72,7 +72,7 @@ func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (Verifi
 		return VerificationReceipt{}, err
 	}
 
-	if err := archive.VerifyRawDaySnapshot(intent.Manifest, objectPathMap(intent.Objects)); err != nil {
+	if err := archive.VerifyRawDaySnapshot(intent.Manifest, objectPathMap(intent.Objects), intent.Scope); err != nil {
 		return VerificationReceipt{}, err
 	}
 	if err := p.copyPathWithResume(ctx, intent.ScopeDescriptorPath, intent.ScopeDescriptorRcloneKey); err != nil {
@@ -193,7 +193,7 @@ func (p *Publisher) prepareIntent(input PublicationInput) (PublicationIntent, er
 	if len(input.ObjectPaths) == 0 && len(decoded.ChainObjects) != 0 {
 		return PublicationIntent{}, fmt.Errorf("%w: chain object paths are missing", archive.ErrIntegrity)
 	}
-	if err := archive.VerifyRawDaySnapshot(decoded, input.ObjectPaths); err != nil {
+	if err := archive.VerifyRawDaySnapshot(decoded, input.ObjectPaths, p.layout.Scope); err != nil {
 		return PublicationIntent{}, err
 	}
 	manifestKey, err := p.layout.ManifestKey(decoded)

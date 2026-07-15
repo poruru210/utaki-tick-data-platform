@@ -20,9 +20,9 @@ M2R-4のfake end-to-end testは、verified sealed WAL、local raw promotion、ca
 
 local race testはgccとclangが存在しないため実行せず、`mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/catalog`をWindows CIの実行境界へ移しました。
 
-GitHub ActionsのRepository checkはpush run `29379100767`とPR run `29379114428`で成功しました。
+GitHub ActionsのRepository checkはpush run `29380124381`とPR run `29380126333`で成功しました。
 
-GitHub ActionsのWindows raceはpush run `29379100753`とPR run `29379114434`で成功しました。
+GitHub ActionsのWindows raceはpush run `29380124589`とPR run `29380126328`で成功しました。
 
 実R2 smokeは必要なopt-in条件がないため未実施です。
 
@@ -47,6 +47,10 @@ revision branchとmissing predecessorは`internal/r2/revision_test.go`およびr
 empty-cache fetch、実production APIを使うpublicationからreaderまでの接続、exact BatchFrameV1 bytes、zero-record error batch、day reportの`anchored_day_slice`、campaign reportの`campaign_genesis_to_root`は`TestM2RawOffhostDeliveryEndToEndFake`で確認します。
 
 readerのremote mutation、corrupt cache、streaming failure、traversal rejection、revision collision、campaign gap拒否は`internal/delivery`のfocused testsで確認します。
+
+dataset namespace collisionは`TestLayoutSeparatesDatasetsWithTheSameCampaignIdentity`で拒否します。
+
+scope-specific `ProtocolLimits.MaxRecords`は`TestVerifyRawDaySnapshotUsesScopedRecordLimit`でsemantic verificationへ適用します。
 
 fake backendのconditional writeはclaimだけに使用し、scope descriptor、raw object、manifestの転送と検証はfake rcloneの`copyto --immutable`と`check --download`で再現します。
 

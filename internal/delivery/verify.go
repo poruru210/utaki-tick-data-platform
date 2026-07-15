@@ -25,7 +25,7 @@ func (r *archiveReaderV1) VerifyDay(ctx context.Context, selector SnapshotSelect
 	if err != nil {
 		return DayVerificationReport{}, err
 	}
-	if err := archive.VerifyRawDaySnapshot(snapshot.Manifest, result.ObjectPaths); err != nil {
+	if err := archive.VerifyRawDaySnapshot(snapshot.Manifest, result.ObjectPaths, snapshot.Scope); err != nil {
 		return DayVerificationReport{}, err
 	}
 	manifest := snapshot.Manifest
@@ -141,7 +141,7 @@ func (r *archiveReaderV1) VerifyCampaign(ctx context.Context, datasetID, campaig
 		segments = append(segments, segment)
 	}
 	for _, manifest := range manifests {
-		if err := archive.VerifyRawDaySnapshot(manifest, objectPaths); err != nil {
+		if err := archive.VerifyRawDaySnapshot(manifest, objectPaths, selected.Scope); err != nil {
 			return CampaignVerificationReport{}, fmt.Errorf("%w: campaign raw-day manifest semantic verification failed: %v", archive.ErrIntegrity, err)
 		}
 	}

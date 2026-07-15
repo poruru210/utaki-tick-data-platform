@@ -23,7 +23,8 @@ func TestLayoutUsesImmutableRootExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPrefix := "provider=" + archive.IdentityPathKey(scope.ProviderID) +
+	wantPrefix := "dataset=" + archive.IdentityPathKey(scope.DatasetID) +
+		"/provider=" + archive.IdentityPathKey(scope.ProviderID) +
 		"/feed=" + archive.IdentityPathKey(scope.StableFeedID) +
 		"/symbol=" + archive.IdentityPathKey(scope.ExactSourceSymbol) +
 		"/campaign=" + archive.IdentityPathKey(scope.CampaignID) + "/"
@@ -38,6 +39,18 @@ func TestLayoutUsesImmutableRootExactlyOnce(t *testing.T) {
 	}
 	if strings.Count(remoteObject, "v1/") != 1 || strings.Count(rcloneObject, "v1/") != 1 {
 		t.Fatalf("immutable roots were duplicated: S3=%q rclone=%q", remoteObject, rcloneObject)
+	}
+}
+
+func TestLayoutSeparatesDatasetsWithTheSameCampaignIdentity(t *testing.T) {
+	first := layoutTestScope()
+	second := first
+	second.DatasetID = "dataset-other"
+	if CampaignPrefix(first) == CampaignPrefix(second) {
+		t.Fatalf("campaign prefixes collide across dataset identities: %q", CampaignPrefix(first))
+	}
+	if !strings.Contains(CampaignPrefix(first), "dataset="+archive.IdentityPathKey(first.DatasetID)+"/") {
+		t.Fatalf("campaign prefix does not bind dataset identity: %q", CampaignPrefix(first))
 	}
 }
 

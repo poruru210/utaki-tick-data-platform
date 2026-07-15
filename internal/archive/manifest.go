@@ -729,7 +729,21 @@ func VerifyRawDayManifest(data []byte) (RawDayManifest, error) {
 // VerifyRawDaySnapshot reopens every full sealed WAL object named by
 // ChainObjects and proves that the manifest is a semantic view of those bytes.
 // The caller supplies paths by their canonical campaign-relative object key.
-func VerifyRawDaySnapshot(manifest RawDayManifest, objectPaths map[string]string) error {
+func VerifyRawDaySnapshot(manifest RawDayManifest, objectPaths map[string]string, scope ScopeConfig) error {
+	normalizedScope, err := scope.normalized()
+	if err != nil {
+		return fmt.Errorf("%w: scope config is invalid: %v", ErrIntegrity, err)
+	}
+	configHash, err := normalizedScope.ConfigHash()
+	if err != nil {
+		return fmt.Errorf("%w: scope config hash cannot be computed: %v", ErrIntegrity, err)
+	}
+	if manifest.DatasetID != normalizedScope.DatasetID || manifest.CampaignID != normalizedScope.CampaignID ||
+		manifest.DayDefinitionID != normalizedScope.DayDefinitionID || manifest.PublisherID != normalizedScope.PublisherID ||
+		manifest.PublisherEpoch != normalizedScope.PublisherEpoch || manifest.SettlePolicy != normalizedScope.SettlePolicy ||
+		manifest.ConfigHash != configHash {
+		return fmt.Errorf("%w: manifest scope does not match verification scope", ErrIntegrity)
+	}
 	if err := ValidateRawDayManifest(manifest); err != nil {
 		return fmt.Errorf("%w: manifest is invalid: %v", ErrIntegrity, err)
 	}
@@ -813,7 +827,7 @@ func VerifyRawDaySnapshot(manifest RawDayManifest, objectPaths map[string]string
 		manifest.Date,
 		manifest.ChainSliceStartSequence,
 		manifest.ChainSliceEndSequence,
-		protocol.MaxRecords,
+		normalizedScope.ProtocolLimits.MaxRecords,
 	)
 	if err != nil {
 		return fmt.Errorf("%w: could not rederive selected ranges: %v", ErrIntegrity, err)

@@ -44,6 +44,7 @@ func CampaignPrefix(scope archive.ScopeConfig) string {
 
 func campaignPrefix(scope archive.ScopeConfig) string {
 	return path.Join(
+		"dataset="+archive.IdentityPathKey(scope.DatasetID),
 		"provider="+archive.IdentityPathKey(scope.ProviderID),
 		"feed="+archive.IdentityPathKey(scope.StableFeedID),
 		"symbol="+archive.IdentityPathKey(scope.ExactSourceSymbol),
