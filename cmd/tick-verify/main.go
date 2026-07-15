@@ -54,10 +54,38 @@ func runWithReader(args []string, reader delivery.ArchiveReaderV1, output, error
 		return runDay(args[1:], reader, output, errorsOut)
 	case "campaign":
 		return runCampaign(args[1:], reader, output, errorsOut)
+	case "replay-day":
+		return runReplayDay(args[1:], reader, output, errorsOut)
 	default:
 		fmt.Fprintln(errorsOut, "unknown tick-verify command")
 		return 2
 	}
+}
+
+func runReplayDay(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
+	flags := flag.NewFlagSet("replay-day", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.String("config", "", "reader configuration")
+	manifest := flags.String("manifest", "", "immutable replay manifest key or digest")
+	if err := flags.Parse(args); err != nil || *manifest == "" {
+		fmt.Fprintln(errorsOut, "--manifest is required")
+		return 2
+	}
+	report, err := reader.VerifyReplayDay(context.Background(), delivery.ReplaySnapshotSelector{Manifest: *manifest})
+	if err != nil {
+		return reportError(err, errorsOut)
+	}
+	return writeJSON(replayDayOutput{
+		GenesisVerified: report.GenesisVerified, VerificationScope: report.VerificationScope,
+		DatasetID: report.DatasetID, CampaignID: report.CampaignID, DayDefinitionID: report.DayDefinitionID,
+		Date: report.Date, ReplayContractID: report.ReplayContractID, ConversionID: report.ConversionID,
+		Revision: report.Revision, ManifestKey: report.ManifestKey, ManifestSHA256: hex.EncodeToString(report.ManifestSHA256[:]),
+		RawBindingVerified: report.RawBindingVerified, RawDaySemanticsVerified: report.RawDaySemanticsVerified,
+		PartManifestChainVerified: report.PartManifestChainVerified, PartSetRootVerified: report.PartSetRootVerified,
+		ParquetSchemaVerified: report.ParquetSchemaVerified, ParquetRowsVerified: report.ParquetRowsVerified,
+		ParquetFileHashesVerified: report.ParquetFileHashesVerified, CanonicalRowChainRootVerified: report.CanonicalRowChainRootVerified,
+		EmptyDay: report.EmptyDay, PartCount: report.PartCount, RowCount: report.RowCount,
+	}, output, errorsOut)
 }
 
 func runDay(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
@@ -136,6 +164,31 @@ type campaignOutput struct {
 	VerifiedThrough   uint64 `json:"verified_through"`
 	SegmentCount      int    `json:"segment_count"`
 	EntryCount        int    `json:"entry_count"`
+}
+
+type replayDayOutput struct {
+	GenesisVerified               bool   `json:"genesis_verified"`
+	VerificationScope             string `json:"verification_scope"`
+	DatasetID                     string `json:"dataset_id"`
+	CampaignID                    string `json:"campaign_id"`
+	DayDefinitionID               string `json:"day_definition_id"`
+	Date                          string `json:"date"`
+	ReplayContractID              string `json:"replay_contract_id"`
+	ConversionID                  string `json:"conversion_id"`
+	Revision                      uint64 `json:"revision"`
+	ManifestKey                   string `json:"manifest_key"`
+	ManifestSHA256                string `json:"manifest_sha256"`
+	RawBindingVerified            bool   `json:"raw_binding_verified"`
+	RawDaySemanticsVerified       bool   `json:"raw_day_semantics_verified"`
+	PartManifestChainVerified     bool   `json:"part_manifest_chain_verified"`
+	PartSetRootVerified           bool   `json:"part_set_root_verified"`
+	ParquetSchemaVerified         bool   `json:"parquet_schema_verified"`
+	ParquetRowsVerified           bool   `json:"parquet_rows_verified"`
+	ParquetFileHashesVerified     bool   `json:"parquet_file_hashes_verified"`
+	CanonicalRowChainRootVerified bool   `json:"canonical_row_chain_root_verified"`
+	EmptyDay                      bool   `json:"empty_day"`
+	PartCount                     uint64 `json:"part_count"`
+	RowCount                      uint64 `json:"row_count"`
 }
 
 func writeJSON(value any, output, errorsOut io.Writer) int {

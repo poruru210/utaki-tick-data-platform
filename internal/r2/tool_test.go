@@ -27,7 +27,7 @@ func (e *recordingExecutor) run(_ context.Context, executable string, args ...st
 	return e.output, nil
 }
 
-func TestRcloneRunnerUsesOnlyPinnedArguments(t *testing.T) {
+func TestRcloneRunnerAllowlistUsesOnlyPinnedArguments(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rclone.exe")
 	data := []byte("fake-rclone")
 	if err := os.WriteFile(path, data, 0o700); err != nil {

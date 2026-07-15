@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/protocol"
 )
 
 func TestLayoutUsesImmutableRootExactlyOnce(t *testing.T) {
@@ -39,6 +40,21 @@ func TestLayoutUsesImmutableRootExactlyOnce(t *testing.T) {
 	}
 	if strings.Count(remoteObject, "v1/") != 1 || strings.Count(rcloneObject, "v1/") != 1 {
 		t.Fatalf("immutable roots were duplicated: S3=%q rclone=%q", remoteObject, rcloneObject)
+	}
+}
+
+func TestLayoutDerivesReplayBundlePrefixesWithoutCallerKeys(t *testing.T) {
+	layout, err := NewLayout("v1", "r2:isolated-bucket/v1", layoutTestScope())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantImmutable := "v1/" + CampaignPrefix(layout.Scope)
+	wantRclone := "r2:isolated-bucket/v1/" + CampaignPrefix(layout.Scope)
+	if got := layout.ImmutableCampaignPrefix(); got != strings.TrimSuffix(wantImmutable, "/") {
+		t.Fatalf("immutable campaign prefix = %q", got)
+	}
+	if got := layout.RcloneCampaignPrefix(); got != strings.TrimSuffix(wantRclone, "/") {
+		t.Fatalf("rclone campaign prefix = %q", got)
 	}
 }
 
@@ -113,6 +129,107 @@ func TestLayoutRejectsForgedManifestDigestAndTraversalDate(t *testing.T) {
 		if _, err := layout.RcloneManifestKey(manifest); err == nil {
 			t.Fatalf("forged rclone manifest key input was accepted: %+v", manifest)
 		}
+	}
+}
+
+func TestLayoutValidatesTrustedFullDerivativeKeys(t *testing.T) {
+	layout, err := NewLayout("v1", "r2:bucket/v1", layoutTestScope())
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := layoutTestPart()
+	fullObject, err := layout.ReplayPartObjectKey(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fullObject != "v1/"+CampaignPrefix(layout.Scope)+part.PartKey {
+		t.Fatalf("full part object key = %q", fullObject)
+	}
+	if err := layout.VerifyReplayPartObjectKey(part, fullObject); err != nil {
+		t.Fatal(err)
+	}
+	generic, err := layout.RemoteKey("objects/replay/part-" + fmt.Sprintf("%x", part.PartSHA256) + ".parquet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.VerifyReplayPartObjectKey(part, generic); err == nil {
+		t.Fatal("generic replay object key was accepted by trusted derivative verifier")
+	}
+	foreignPart := part
+	foreignPart.CampaignID = "campaign-other"
+	if _, err := layout.ReplayPartObjectKey(foreignPart); err == nil {
+		t.Fatal("cross-campaign part key was accepted by trusted layout")
+	}
+	fullManifest, err := layout.ReplayPartManifestKey(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.VerifyReplayPartManifestKey(part, fullManifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest := protocol.ReplayDayManifest{
+		ManifestVersion: protocol.ReplayDayManifestVersion, ManifestID: "replay-layout-r1", DatasetID: part.DatasetID,
+		CampaignID: part.CampaignID, DayDefinitionID: part.DayDefinitionID, Date: part.Date, Revision: 1,
+		RawDayManifestKey: part.RawDayManifestKey, RawDayManifestSHA256: part.RawDayManifestSHA256,
+		ReplayContractID: part.ReplayContractID, FormatID: protocol.ReplayFormatID, ConversionID: part.ConversionID,
+		ConverterBuildID: part.ConverterBuildID, DependencyLockHash: part.DependencyLockHash,
+		WriterConfigurationHash: part.WriterConfigurationHash, TargetPlatformContract: part.TargetPlatformContract,
+		CompletenessStatus: "settled_snapshot",
+	}
+	fullReplay, err := layout.ReplayDayManifestKey(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.VerifyReplayDayManifestKey(manifest, fullReplay); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLayoutDerivesTrustedRcloneDerivativeKeys(t *testing.T) {
+	layout, err := NewLayout("v1", "r2:bucket/v1", layoutTestScope())
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := layoutTestPart()
+	partRclone, err := layout.RcloneReplayPartObjectKey(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partRclone != "r2:bucket/v1/"+CampaignPrefix(layout.Scope)+part.PartKey {
+		t.Fatalf("rclone Parquet key = %q", partRclone)
+	}
+	manifestRclone, err := layout.RcloneReplayPartManifestKey(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partManifestKey, err := protocol.PartManifestKey(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifestRclone != "r2:bucket/v1/"+CampaignPrefix(layout.Scope)+partManifestKey {
+		t.Fatalf("rclone part manifest key = %q", manifestRclone)
+	}
+}
+
+func layoutTestPart() protocol.PartManifest {
+	scope := protocol.ReplayScope{
+		DatasetID: layoutTestScope().DatasetID, CampaignID: layoutTestScope().CampaignID, DayDefinitionID: layoutTestScope().DayDefinitionID,
+		Date: "2024-03-09", ReplayContractID: "replay-v1", ConversionID: "conversion-v1",
+		RawDayManifestKey: "snapshots/raw/day-definition=utc-day-v1/date=2024-03-09/raw-day-1.json", RawDayManifestSHA256: [32]byte{0x55},
+	}
+	hash := [32]byte{0x11}
+	key, err := protocol.ReplayPartObjectKey(scope, 0, 0, hash)
+	if err != nil {
+		panic(err)
+	}
+	return protocol.PartManifest{
+		ManifestVersion: protocol.PartManifestVersion, DatasetID: scope.DatasetID, CampaignID: scope.CampaignID,
+		DayDefinitionID: scope.DayDefinitionID, Date: scope.Date, ReplayContractID: scope.ReplayContractID,
+		FormatID: protocol.ReplayFormatID, ConversionID: scope.ConversionID, ConverterBuildID: "converter-1",
+		DependencyLockHash: [32]byte{0x44}, WriterConfigurationHash: [32]byte{0x55}, TargetPlatformContract: "parquet-v1",
+		RawDayManifestKey: scope.RawDayManifestKey, RawDayManifestSHA256: scope.RawDayManifestSHA256,
+		PartSequence: 0, PartKey: key, PartSHA256: hash, PartBytes: 1, RowCount: 1, CanonicalRowBytes: 1,
+		FirstStreamSequence: 0, LastStreamSequence: 0, FirstRowChainHash: [32]byte{0x22}, LastRowChainHash: [32]byte{0x33},
 	}
 }
 

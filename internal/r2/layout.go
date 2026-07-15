@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/protocol"
 )
 
 type Layout struct {
@@ -54,6 +55,18 @@ func campaignPrefix(scope archive.ScopeConfig) string {
 
 func (l Layout) Prefix() string {
 	return l.prefix
+}
+
+// ImmutableCampaignPrefix is the only canonical full-key prefix accepted by
+// ReplayPublicationBundle sealing. It excludes a trailing slash so Protocol
+// V1 can derive every full key as prefix + "/" + relative key.
+func (l Layout) ImmutableCampaignPrefix() string {
+	return strings.TrimSuffix(joinRemoteKey(l.ImmutableRoot, l.prefix, "_"), "/_")
+}
+
+// RcloneCampaignPrefix returns the corresponding pinned-rclone prefix.
+func (l Layout) RcloneCampaignPrefix() string {
+	return strings.TrimSuffix(joinRemoteKey(l.RcloneRoot, l.prefix, "_"), "/_")
 }
 
 func (l Layout) RemoteKey(relative string) (string, error) {
@@ -135,6 +148,166 @@ func (l Layout) RcloneManifestKey(manifest archive.RawDayManifest) (string, erro
 		return "", err
 	}
 	return l.RcloneKey(relative)
+}
+
+func (l Layout) validateDerivativeScope(datasetID, campaignID, dayDefinitionID string) error {
+	if datasetID != l.Scope.DatasetID || campaignID != l.Scope.CampaignID || dayDefinitionID != l.Scope.DayDefinitionID {
+		return fmt.Errorf("derivative scope does not match trusted layout")
+	}
+	return nil
+}
+
+// ReplayPartObjectKey prepends only this trusted Layout's immutable campaign
+// root to the exact Protocol V1 campaign-relative Parquet key.
+func (l Layout) ReplayPartObjectKey(part protocol.PartManifest) (string, error) {
+	if err := part.Validate(); err != nil {
+		return "", err
+	}
+	if err := l.validateDerivativeScope(part.DatasetID, part.CampaignID, part.DayDefinitionID); err != nil {
+		return "", err
+	}
+	relative, err := protocol.ReplayPartObjectKey(
+		protocol.ReplayScope{
+			DatasetID: part.DatasetID, CampaignID: part.CampaignID, DayDefinitionID: part.DayDefinitionID,
+			Date: part.Date, ReplayContractID: part.ReplayContractID, ConversionID: part.ConversionID,
+			RawDayManifestKey: part.RawDayManifestKey, RawDayManifestSHA256: part.RawDayManifestSHA256,
+		}, part.FirstStreamSequence, part.LastStreamSequence, part.PartSHA256,
+	)
+	if err != nil || relative != part.PartKey {
+		return "", fmt.Errorf("part object key is not the exact Protocol V1 key")
+	}
+	return l.RemoteKey(relative)
+}
+
+func (l Layout) ReplayPartManifestKey(part protocol.PartManifest) (string, error) {
+	if err := part.Validate(); err != nil {
+		return "", err
+	}
+	if err := l.validateDerivativeScope(part.DatasetID, part.CampaignID, part.DayDefinitionID); err != nil {
+		return "", err
+	}
+	relative, err := protocol.PartManifestKey(part)
+	if err != nil {
+		return "", err
+	}
+	return l.RemoteKey(relative)
+}
+
+func (l Layout) ReplayDayManifestKey(manifest protocol.ReplayDayManifest) (string, error) {
+	if err := manifest.Validate(); err != nil {
+		return "", err
+	}
+	if err := l.validateDerivativeScope(manifest.DatasetID, manifest.CampaignID, manifest.DayDefinitionID); err != nil {
+		return "", err
+	}
+	relative, err := protocol.ReplayDayManifestKey(manifest)
+	if err != nil {
+		return "", err
+	}
+	return l.RemoteKey(relative)
+}
+
+// ReplayDerivativePrefix returns the trusted immutable-root prefix for one
+// exact campaign-relative replay conversion and UTC date. Callers cannot
+// supply a full remote key; the Protocol V1 helper derives the relative base.
+func (l Layout) ReplayDerivativePrefix(scope protocol.ReplayScope) (string, error) {
+	if err := scope.Validate(); err != nil {
+		return "", err
+	}
+	if err := l.validateDerivativeScope(scope.DatasetID, scope.CampaignID, scope.DayDefinitionID); err != nil {
+		return "", err
+	}
+	base, err := protocol.ReplayDerivativeBaseKey(scope)
+	if err != nil {
+		return "", err
+	}
+	full, err := l.RemoteKey(base)
+	if err != nil {
+		return "", err
+	}
+	return full + "/", nil
+}
+
+// RcloneReplayDerivativePrefix is the same trusted relative derivation for
+// the pinned rclone remote.
+func (l Layout) RcloneReplayDerivativePrefix(scope protocol.ReplayScope) (string, error) {
+	if err := scope.Validate(); err != nil {
+		return "", err
+	}
+	if err := l.validateDerivativeScope(scope.DatasetID, scope.CampaignID, scope.DayDefinitionID); err != nil {
+		return "", err
+	}
+	base, err := protocol.ReplayDerivativeBaseKey(scope)
+	if err != nil {
+		return "", err
+	}
+	full, err := l.RcloneKey(base)
+	if err != nil {
+		return "", err
+	}
+	return full + "/", nil
+}
+
+func (l Layout) VerifyReplayPartObjectKey(part protocol.PartManifest, fullKey string) error {
+	want, err := l.ReplayPartObjectKey(part)
+	if err != nil {
+		return err
+	}
+	if fullKey != want {
+		return fmt.Errorf("replay part object key does not match trusted layout")
+	}
+	return nil
+}
+
+func (l Layout) RcloneReplayPartObjectKey(part protocol.PartManifest) (string, error) {
+	if _, err := l.ReplayPartObjectKey(part); err != nil {
+		return "", err
+	}
+	return l.RcloneKey(part.PartKey)
+}
+
+func (l Layout) VerifyReplayPartManifestKey(part protocol.PartManifest, fullKey string) error {
+	want, err := l.ReplayPartManifestKey(part)
+	if err != nil {
+		return err
+	}
+	if fullKey != want {
+		return fmt.Errorf("replay part manifest key does not match trusted layout")
+	}
+	return nil
+}
+
+func (l Layout) RcloneReplayPartManifestKey(part protocol.PartManifest) (string, error) {
+	if _, err := l.ReplayPartManifestKey(part); err != nil {
+		return "", err
+	}
+	key, err := protocol.PartManifestKey(part)
+	if err != nil {
+		return "", err
+	}
+	return l.RcloneKey(key)
+}
+
+func (l Layout) VerifyReplayDayManifestKey(manifest protocol.ReplayDayManifest, fullKey string) error {
+	want, err := l.ReplayDayManifestKey(manifest)
+	if err != nil {
+		return err
+	}
+	if fullKey != want {
+		return fmt.Errorf("replay day manifest key does not match trusted layout")
+	}
+	return nil
+}
+
+func (l Layout) RcloneReplayDayManifestKey(manifest protocol.ReplayDayManifest) (string, error) {
+	if _, err := l.ReplayDayManifestKey(manifest); err != nil {
+		return "", err
+	}
+	key, err := protocol.ReplayDayManifestKey(manifest)
+	if err != nil {
+		return "", err
+	}
+	return l.RcloneKey(key)
 }
 
 func validateRemoteRoot(root string) error {

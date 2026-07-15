@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,9 +21,12 @@ import (
 )
 
 type fakeBackend struct {
-	mu      sync.Mutex
-	objects map[string][]byte
-	puts    []string
+	mu          sync.Mutex
+	objects     map[string][]byte
+	puts        []string
+	listExtras  []RemoteObject
+	listCount   int
+	listStarted chan struct{}
 }
 
 func newFakeBackend() *fakeBackend {
@@ -49,9 +54,41 @@ func (b *fakeBackend) Get(_ context.Context, key string) ([]byte, error) {
 	return append([]byte(nil), body...), nil
 }
 
+func (b *fakeBackend) GetLimited(_ context.Context, key string, maxBytes uint64) ([]byte, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	body, ok := b.objects[key]
+	if !ok {
+		return nil, ErrObjectNotFound
+	}
+	if uint64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("%w: fake metadata object is oversized", ErrResourceLimit)
+	}
+	return append([]byte(nil), body...), nil
+}
+
+func (b *fakeBackend) Open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	b.mu.Lock()
+	body, ok := b.objects[key]
+	if !ok {
+		b.mu.Unlock()
+		return nil, 0, ErrObjectNotFound
+	}
+	body = append([]byte(nil), body...)
+	b.mu.Unlock()
+	return io.NopCloser(bytes.NewReader(body)), int64(len(body)), nil
+}
+
 func (b *fakeBackend) List(_ context.Context, prefix string) ([]RemoteObject, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.listCount++
+	if b.listStarted != nil {
+		select {
+		case b.listStarted <- struct{}{}:
+		default:
+		}
+	}
 	keys := make([]string, 0)
 	for key := range b.objects {
 		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
@@ -63,6 +100,49 @@ func (b *fakeBackend) List(_ context.Context, prefix string) ([]RemoteObject, er
 	for _, key := range keys {
 		result = append(result, RemoteObject{Key: key, Size: int64(len(b.objects[key]))})
 	}
+	for _, extra := range b.listExtras {
+		if strings.HasPrefix(extra.Key, prefix) {
+			result = append(result, extra)
+		}
+	}
+	return result, nil
+}
+
+func (b *fakeBackend) ListLimited(_ context.Context, prefix string, maxObjects uint64) ([]RemoteObject, error) {
+	if maxObjects == 0 {
+		return nil, fmt.Errorf("%w: fake object count limit is zero", ErrResourceLimit)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.listCount++
+	if b.listStarted != nil {
+		select {
+		case b.listStarted <- struct{}{}:
+		default:
+		}
+	}
+	result := make([]RemoteObject, 0)
+	appendObject := func(remote RemoteObject) error {
+		if uint64(len(result)) >= maxObjects {
+			return fmt.Errorf("%w: fake derivative object count exceeds limit", ErrResourceLimit)
+		}
+		result = append(result, remote)
+		return nil
+	}
+	for key, body := range b.objects {
+		if strings.HasPrefix(key, prefix) {
+			if err := appendObject(RemoteObject{Key: key, Size: int64(len(body))}); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, extra := range b.listExtras {
+		if strings.HasPrefix(extra.Key, prefix) {
+			if err := appendObject(extra); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return result, nil
 }
 
@@ -70,6 +150,18 @@ func (b *fakeBackend) force(key string, body []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.objects[key] = append([]byte(nil), body...)
+}
+
+func (b *fakeBackend) remove(key string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.objects, key)
+}
+
+func (b *fakeBackend) currentListCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.listCount
 }
 
 type fakeRcloneExecutor struct {

@@ -3,14 +3,12 @@ package ingest
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -314,7 +312,15 @@ func (g *Gateway) startSession(hello protocol.HelloV1) (protocol.ResumeV1, strin
 	if err := g.validateHello(hello); err != nil {
 		return protocol.ResumeV1{}, "", 0, err
 	}
-	lease := sessionLeaseID(hello)
+	lease := protocol.DeriveSessionLeaseID(
+		hello.ProducerInstanceID,
+		hello.ProducerSessionID,
+		hello.CampaignID,
+		hello.ProviderID,
+		hello.StableFeedID,
+		hello.BrokerServerFingerprint,
+		hello.ExactSourceSymbol,
+	)
 	g.sessionMu.Lock()
 	defer g.sessionMu.Unlock()
 	now := time.Now()
@@ -714,21 +720,6 @@ func (g *Gateway) setLastError(err error) {
 	g.metricsMu.Lock()
 	g.metrics.LastError = err.Error()
 	g.metricsMu.Unlock()
-}
-
-func sessionLeaseID(hello protocol.HelloV1) string {
-	data := strings.Join([]string{
-		"tick-data-platform/lease/v1",
-		hello.ProducerInstanceID,
-		hello.ProducerSessionID,
-		hello.CampaignID,
-		hello.ProviderID,
-		hello.StableFeedID,
-		hello.BrokerServerFingerprint,
-		hello.ExactSourceSymbol,
-	}, "\x00")
-	hash := sha256.Sum256([]byte(data))
-	return "lease-" + hex.EncodeToString(hash[:16])
 }
 
 func protocolError(code protocol.ErrorCode, format string, args ...any) error {

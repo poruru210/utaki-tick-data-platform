@@ -8,9 +8,31 @@
 
 M0では、Protocol V1の契約とcross-language conformanceに必要な入力を固定します。
 
-M0の対象は、wire envelope、5種類のmessage、`mt5.mqltick.v1`、Gateway WAL entry、canonical JSON、hash domain、raw-day manifest、replay-day manifestです。
+M0の対象は、wire envelope、5種類のmessage、`mt5.mqltick.v1`、Gateway WAL entry、canonical JSON、hash domain、raw-day manifest、M0 replay-day manifest互換形です。
 
-`part-manifest-v1`はParquetのday-local part chainに属するため、M3へ延期します。
+`part-manifest-v1`、canonical replay row、marker、row-chain、part_set_rootはM3-1で凍結したProtocol V1 derivative contractです。
+
+`replay-publication-bundle-v1`と`replay-publication-final-observation-v1`はM3-3A-R1で凍結したpublication contractです。
+
+M2だけがpublisher claimを作成し、M3はbundleへbindした既存claimのExactだけを受理します。
+
+bundle、final observation、10個のresource limit、failure classificationは`hash-domains.md`と`fixtures/replay-publication-v1-conformance.json`で固定します。
+
+Final observationの各replay edgeはstrict canonical replay-day manifest bytes、trusted full key、part countを保持し、empty dayをmanifest証明なしで推定しません。
+
+part manifestはexact ReplayScope、raw-day manifest key+domain digest、ConversionTuple、part predecessor、previous row-chain hashをcanonical JSONへ含めます。
+
+part setは同一scope/raw binding/conversionだけを受理し、最後のpartの`last_row_chain_hash`とreplay-day manifestの`canonical_stream_row_chain_root`を一致させます。
+
+M3 derivativeの物理keyは、exact UTF-8 bytesへSHA-256を適用するProtocol V1の一元`ExactIdentityPathKey`から導出するcampaign-relative date-local keyです。
+
+baseは`derivatives/stream=<sha256(replay_contract_id)>/format=ticks-parquet-v1/conversion=<sha256(conversion_id)>/day-definition=<sha256(day_definition_id)>/date=YYYY-MM-DD`であり、hour partitionは持ちません。
+
+Parquet、part manifest、replay-day manifestのkeyは`manifests.md`の形式だけを受理し、`objects/replay`、`manifests/replay`、`snapshots/replay`のgeneric keyとaliasを拒否します。
+
+trusted `r2.Layout`は検証済みrelative keyへimmutable rootとcampaign prefixを一度だけprependします。
+
+M0のempty-parts replay fixtureは読み取り専用互換形として残し、M3の新規manifestはraw manifest key+SHA bindingとrevision predecessorを必須にします。
 
 TCP runtime、live MT5 collection、R2、Parquet、SQLite journal runtime、crash injection、production operationはM0の対象外です。
 

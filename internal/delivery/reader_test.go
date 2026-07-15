@@ -20,9 +20,18 @@ import (
 )
 
 type memoryReadBackend struct {
-	objects   map[string][]byte
-	openError map[string]error
+	objects          map[string][]byte
+	openError        map[string]error
+	closeError       map[string]error
+	duplicateListKey string
 }
+
+type memoryReadCloser struct {
+	io.Reader
+	closeErr error
+}
+
+func (r memoryReadCloser) Close() error { return r.closeErr }
 
 var _ r2.ReadBackend = (*memoryReadBackend)(nil)
 
@@ -34,6 +43,9 @@ func (b *memoryReadBackend) List(_ context.Context, prefix string) ([]r2.RemoteO
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Key < result[j].Key })
+	if b.duplicateListKey != "" && strings.HasPrefix(b.duplicateListKey, prefix) {
+		result = append(result, r2.RemoteObject{Key: b.duplicateListKey, Size: int64(len(b.objects[b.duplicateListKey]))})
+	}
 	return result, nil
 }
 
@@ -52,6 +64,9 @@ func (b *memoryReadBackend) Open(_ context.Context, key string) (io.ReadCloser, 
 	body, ok := b.objects[key]
 	if !ok {
 		return nil, 0, r2.ErrObjectNotFound
+	}
+	if closeErr := b.closeError[key]; closeErr != nil {
+		return memoryReadCloser{Reader: bytes.NewReader(append([]byte(nil), body...)), closeErr: closeErr}, int64(len(body)), nil
 	}
 	return io.NopCloser(bytes.NewReader(append([]byte(nil), body...))), int64(len(body)), nil
 }
@@ -136,7 +151,7 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend := &memoryReadBackend{objects: make(map[string][]byte), openError: make(map[string]error)}
+	backend := &memoryReadBackend{objects: make(map[string][]byte), openError: make(map[string]error), closeError: make(map[string]error)}
 	scopeDescriptor, err := scope.CanonicalConfigJSON()
 	if err != nil {
 		t.Fatal(err)
