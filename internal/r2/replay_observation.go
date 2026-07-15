@@ -452,6 +452,10 @@ func (o *ReplayBoundedObserver) observeReplayRevisions(ctx context.Context, budg
 		if err != nil {
 			return nil, ObservationAmbiguous
 		}
+		fullKey, err := bundle.Layout.ReplayDayManifestKey(manifest)
+		if err != nil || fullKey != key {
+			return nil, ObservationDifferent
+		}
 		manifest.ManifestSHA256 = digest
 		revisions = append(revisions, manifest)
 	}

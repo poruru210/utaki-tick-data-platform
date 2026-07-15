@@ -97,9 +97,14 @@ func replayObserverFixture(t *testing.T) (ReplayPublicationBundle, *replayObserv
 	if err != nil {
 		t.Fatal(err)
 	}
+	return bundle, replayObserverBackendForBundle(t, bundle, fixture.input.RawManifestBytes)
+}
+
+func replayObserverBackendForBundle(t *testing.T, bundle ReplayPublicationBundle, rawManifestBytes []byte) *replayObserverBackend {
+	t.Helper()
 	backend := &replayObserverBackend{objects: map[string][]byte{}, openErrors: map[string]error{}, openSizes: map[string]int64{}, openSteps: map[string][]replayObserverOpenStep{}}
 	backend.objects[bundle.Contract.Claim.FullKey] = []byte(bundle.Contract.Claim.CanonicalJSON)
-	backend.objects[bundle.Contract.RawManifest.FullKey] = append([]byte(nil), fixture.input.RawManifestBytes...)
+	backend.objects[bundle.Contract.RawManifest.FullKey] = append([]byte(nil), rawManifestBytes...)
 	for _, object := range bundle.Contract.RawObjects {
 		data, err := os.ReadFile(bundle.LocalSources.Artifacts[replayRawObjectID(object)].Path)
 		if err != nil {
@@ -125,7 +130,7 @@ func replayObserverFixture(t *testing.T) (ReplayPublicationBundle, *replayObserv
 	backend.list.Objects = append(backend.list.Objects, RemoteObject{Key: bundle.Contract.ReplayManifest.FullKey, Size: int64(bundle.Contract.ReplayManifest.Bytes)})
 	sort.Slice(backend.list.Objects, func(i, j int) bool { return backend.list.Objects[i].Key < backend.list.Objects[j].Key })
 	backend.list.Complete = true
-	return bundle, backend
+	return backend
 }
 
 func TestReplayObservationProducesProtocolFinalOnlyWhenExact(t *testing.T) {
@@ -400,6 +405,70 @@ func TestReplayObservationIncompletePaginationIsAmbiguous(t *testing.T) {
 	}
 	if observation.ParquetObjects[0].Class != ObservationAmbiguous || observation.Complete {
 		t.Fatalf("incomplete list = %+v", observation)
+	}
+}
+
+func TestReplayObservationRejectsReplayManifestAtWrongKey(t *testing.T) {
+	fixture := newReplayPublicationFixture(t, false)
+	baseBundle := fixture.sealedBundle(t)
+	scope, conversion, err := replayVerificationInputs(baseBundle.Contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previous := fixture.replay
+	previous.RawDayManifestKey = "raw/predecessor.json"
+	previous.RawDayManifestSHA256 = [32]byte{0xaa}
+	previousDigest, err := protocol.ReplayDayManifestDigest(previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous.ManifestSHA256 = previousDigest
+	previousBytes, err := protocol.ReplayDayManifestCanonicalJSON(previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := archive.BuildReplayDayManifest(archive.ReplayDayManifestInput{
+		Scope: scope, Conversion: conversion, CompletenessStatus: "settled_snapshot",
+		Revision: 2, Previous: &previous, Parts: fixture.parts,
+		CanonicalStreamRowChainRoot: fixture.replay.CanonicalStreamRowChainRoot,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentBytes, err := protocol.ReplayDayManifestCanonicalJSON(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input := replayBundleInputFromFixture(t, fixture)
+	input.PreviousReplayManifest = previousBytes
+	input.ReplayManifest = currentBytes
+	bundle, err := SealReplayPublicationBundle(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := replayObserverBackendForBundle(t, bundle, fixture.input.RawManifestBytes)
+
+	canonicalKey, err := bundle.Layout.ReplayDayManifestKey(previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongKey := canonicalKey[:len(canonicalKey)-len(".json")] + "-wrong.json"
+	backend.objects[wrongKey] = append([]byte(nil), previousBytes...)
+	backend.list.Objects = append(backend.list.Objects, RemoteObject{Key: wrongKey, Size: int64(len(previousBytes))})
+	sort.Slice(backend.list.Objects, func(i, j int) bool { return backend.list.Objects[i].Key < backend.list.Objects[j].Key })
+
+	observer, err := NewReplayBoundedObserver(backend, replayObserverLock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := observer.Observe(context.Background(), bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.ReplayManifest != ObservationDifferent || observation.ReplayGraph != ObservationAmbiguous || observation.Complete || observation.FinalObservation != nil {
+		t.Fatalf("wrong replay manifest key was accepted: %+v", observation)
 	}
 }
 
