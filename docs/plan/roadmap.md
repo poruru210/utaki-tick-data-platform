@@ -112,7 +112,7 @@ M2R-4はnetwork-free fake end-to-end test、optional isolated real-R2 smoke、re
 M2の対象外はParquet、replay-dayまたはpart manifest、handover、pruning、Worker、HTTP API、live brokerです。
 
 M2の実装と通常の検証gateは完了しました。
-Repository checkはpush run `29380124381`とPR run `29380126333`、Windows raceはpush run `29380124589`とPR run `29380126328`で成功しました。
+review修正後のRepository checkはpush run `29380482941`とPR run `29380484737`、Windows raceはpush run `29380482973`とPR run `29380484762`で成功しました。
 real R2 smokeはproductionと分離したbucketまたはprefixおよび明示的credentialがないためoptionalな未実施境界です。
 
 ## M3のReplay配信

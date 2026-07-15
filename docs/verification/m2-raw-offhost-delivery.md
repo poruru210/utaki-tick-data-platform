@@ -20,9 +20,9 @@ M2R-4のfake end-to-end testは、verified sealed WAL、local raw promotion、ca
 
 local race testはgccとclangが存在しないため実行せず、`mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/catalog`をWindows CIの実行境界へ移しました。
 
-GitHub ActionsのRepository checkはpush run `29380124381`とPR run `29380126333`で成功しました。
+review修正後のGitHub ActionsのRepository checkはpush run `29380482941`とPR run `29380484737`で成功しました。
 
-GitHub ActionsのWindows raceはpush run `29380124589`とPR run `29380126328`で成功しました。
+review修正後のGitHub ActionsのWindows raceはpush run `29380482973`とPR run `29380484762`で成功しました。
 
 実R2 smokeは必要なopt-in条件がないため未実施です。
 
