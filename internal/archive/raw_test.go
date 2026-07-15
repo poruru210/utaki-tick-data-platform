@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -28,7 +27,7 @@ func TestPromoteSealedSegmentIsByteExactAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	hashHex := hex.EncodeToString(sealed.ObjectSHA256[:])
-	if !strings.Contains(first.Key, hashHex) || first.SHA256 != sealed.ObjectSHA256 {
+	if first.Key != archive.RawWALObjectKey(sealed.ObjectSHA256) || first.Key != "objects/raw/wal-"+hashHex+".rtw" || first.SHA256 != sealed.ObjectSHA256 {
 		t.Fatalf("raw object key or hash does not use complete-file SHA-256: %+v", first)
 	}
 	destinationBytes, err := os.ReadFile(first.Path)
@@ -117,7 +116,7 @@ func TestPromoteSealedSegmentPublishesOnceUnderConcurrency(t *testing.T) {
 			t.Fatalf("worker %d returned a different object: %+v", i, results[i])
 		}
 	}
-	matches, err := filepath.Glob(filepath.Join(outbox, "raw-wal-segment-v1", "sha256", "*", "*.wal"))
+	matches, err := filepath.Glob(filepath.Join(outbox, "objects", "raw", "wal-*.rtw"))
 	if err != nil {
 		t.Fatal(err)
 	}

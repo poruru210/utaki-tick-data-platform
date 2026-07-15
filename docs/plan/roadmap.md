@@ -83,7 +83,7 @@ manifestはGoやMQL5の非公開型を参照しません。
 
 M2の完了条件は、ローカル保存とR2配置の結果をmanifestとhashで検証できることです。
 
-### 2026-07-15時点のローカルraw WAL基盤
+### 2026-07-15時点のM2 raw off-host delivery
 
 internal/walはactive WALへTWTR trailerを追加し、seal済みsegmentへ切り替えた後、次のgateway ingest sequenceとentry hash chainを引き継ぐ新しいactive WALを作成します。
 
@@ -99,7 +99,21 @@ internal/archiveは検証済みsegmentを再encodeも圧縮もせず、既存obj
 
 この段階では明示的なStore.Seal APIだけを提供し、自動rotation policyは実装しません。
 
-R2 upload、rclone tool lock、publisher claim、raw-day manifest、remote verification、delivery CLIは未実装であるため、M2全体は未完了です。
+Protocol V1 raw-day manifestはverified sealed WAL、day-selected ranges、full chain_objects、revision graph、raw_set_rootをcanonical bytesへ固定します。
+
+M2R-2はpinned rclone、campaign publisher claim、local exclusive lock、独立publication journal、immutable transfer、remote recheck、verification receiptを提供します。
+
+M2R-3はread-only ArchiveReader、tickctlのdatasets、campaigns、snapshots raw、fetch、tick-verifyのday、campaign commandsを提供します。
+
+M2R-4はnetwork-free fake end-to-end test、optional isolated real-R2 smoke、repository check workflow、Windows race workflow、verification recordを追加します。
+
+通常のM2検証はfake backendとfake rcloneだけで完結し、real R2 smokeは明示的なenable、confirmation、isolated bucketまたはprefix、endpoint、credential、pinned rclone binaryを要求します。
+
+M2の対象外はParquet、replay-dayまたはpart manifest、handover、pruning、Worker、HTTP API、live brokerです。
+
+M2の実装と通常の検証gateは完了しました。
+review修正後のRepository checkはpush run `29380482941`とPR run `29380484737`、Windows raceはpush run `29380482973`とPR run `29380484762`で成功しました。
+real R2 smokeはproductionと分離したbucketまたはprefixおよび明示的credentialがないためoptionalな未実施境界です。
 
 ## M3のReplay配信
 

@@ -8,11 +8,14 @@ import pytest
 from tools.tick_protocol import (
     ProtocolError,
     canonical_json,
+    decode_canonical_json,
     decode_frame,
     decode_message,
     duplicate_identity_status,
     gateway_batch_sha256,
     observation_hash,
+    raw_set_root,
+    raw_wal_object_key,
     source_payload_fingerprint,
 )
 
@@ -84,10 +87,39 @@ def test_python_decoder_rejects_mutations(fixture_name: str, expected_code: str)
 
 
 def test_canonical_json_fixture_is_stable() -> None:
-    for name in ("raw-day-manifest-v1.json", "replay-day-manifest-v1.json"):
+    for name in (
+        "raw-day-manifest-v1.json",
+        "raw-day-manifest-chain-slice-v1.json",
+        "replay-day-manifest-v1.json",
+    ):
         fixture = load_fixture(name)
         value = json.loads(fixture["canonical_json"])
         assert canonical_json(value) == fixture["canonical_json"]
+
+
+def test_canonical_json_strict_decoder_rejects_duplicate_float_and_noncanonical_bytes() -> None:
+    for raw in (
+        b'{"a":1,"a":2}',
+        b'{"a":1.0}',
+        b'{"a":1} ',
+        b'{"a":18446744073709551616}',
+        '{"a":"日本"}'.encode(),
+    ):
+        with pytest.raises(ValueError):
+            decode_canonical_json(raw)
+    with pytest.raises(ValueError):
+        canonical_json({"value": 1 << 64})
+
+
+def test_raw_set_root_matches_golden_manifest() -> None:
+    for name in ("raw-day-manifest-v1.json", "raw-day-manifest-chain-slice-v1.json"):
+        fixture = load_fixture(name)
+        manifest = decode_canonical_json(fixture["canonical_json"].encode("utf-8"))
+        assert raw_set_root(manifest["objects"]).hex() == manifest["raw_set_root"]
+
+
+def test_raw_wal_object_key_is_content_addressed() -> None:
+    assert raw_wal_object_key(bytes.fromhex("aa" * 32)) == "objects/raw/wal-" + "aa" * 32 + ".rtw"
 
 
 def test_duplicate_identity_returns_duplicate_ack_status() -> None:

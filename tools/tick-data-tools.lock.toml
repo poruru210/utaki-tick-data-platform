@@ -1,0 +1,29 @@
+lock_version = "tick-data-tools-lock-v1"
+rclone_version = "v1.74.4"
+
+[[rclone]]
+goos = "windows"
+goarch = "amd64"
+archive_url = "https://downloads.rclone.org/v1.74.4/rclone-v1.74.4-windows-amd64.zip"
+archive_sha256 = "ef097ef9de37a57feb7d9f9c7afb34148ad3c65be8025f1d8f7f521554a701ea"
+binary_sha256 = "492648a3867dbc620188a305e05ff3216aecbf4622bf1a6b5b978ed9c939e18c"
+binary_bytes = 78797824
+executable_name = "rclone.exe"
+
+[[rclone]]
+goos = "linux"
+goarch = "amd64"
+archive_url = "https://downloads.rclone.org/v1.74.4/rclone-v1.74.4-linux-amd64.zip"
+archive_sha256 = "fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d"
+binary_sha256 = "9f56ca5edfac24a3ed37226c2ba1de69f1ec9e05fa2526cddee5cd97e202be6b"
+binary_bytes = 79036578
+executable_name = "rclone"
+
+[[rclone]]
+goos = "linux"
+goarch = "arm64"
+archive_url = "https://downloads.rclone.org/v1.74.4/rclone-v1.74.4-linux-arm64.zip"
+archive_sha256 = "97685285c9ad6a0cf17d5844115d2a67245af6444db672187074bd9c358de419"
+binary_sha256 = "e062d30596c386046c8471f3035611d0438c22ef5fa42d3d6128dbf48ed5c76c"
+binary_bytes = 72482978
+executable_name = "rclone"

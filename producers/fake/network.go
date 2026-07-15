@@ -3,9 +3,11 @@ package fake
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	protocolv1 "tick-data-platform/protocol/v1/go"
 )
@@ -55,18 +57,45 @@ func (c *Client) Close() error {
 func (c *Client) Reconnect(ctx context.Context, address string) error {
 	_ = c.Close()
 	dialer := net.Dialer{}
-	connection, err := dialer.DialContext(ctx, "tcp", address)
-	if err != nil {
-		return err
+	for {
+		connection, err := dialer.DialContext(ctx, "tcp", address)
+		if err != nil {
+			return err
+		}
+		c.conn = connection
+		c.Address = address
+		if err := c.handshake(); err == nil {
+			return nil
+		} else {
+			_ = connection.Close()
+			c.conn = nil
+			var gatewayErr *GatewayError
+			if !errors.As(err, &gatewayErr) || gatewayErr.Code != protocolv1.ErrorCodeNumber(protocolv1.ErrSessionLeaseConflict) {
+				return err
+			}
+		}
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-	c.conn = connection
-	c.Address = address
-	if err := c.handshake(); err != nil {
-		_ = connection.Close()
-		c.conn = nil
-		return err
-	}
-	return nil
+}
+
+type GatewayError struct {
+	Code    uint16
+	Message string
+}
+
+func (e *GatewayError) Error() string {
+	return fmt.Sprintf("gateway error %d: %s", e.Code, e.Message)
 }
 
 func (c *Client) SendBatch(batch protocolv1.BatchFrameV1) (protocolv1.AckV1, error) {
@@ -116,7 +145,7 @@ func (c *Client) handshake() error {
 	resume, ok := message.(protocolv1.ResumeV1)
 	if !ok {
 		if gatewayError, isError := message.(protocolv1.ErrorV1); isError {
-			return fmt.Errorf("gateway hello error %d: %s", gatewayError.Code, gatewayError.Message)
+			return &GatewayError{Code: gatewayError.Code, Message: gatewayError.Message}
 		}
 		return fmt.Errorf("expected ResumeV1, got %T", message)
 	}

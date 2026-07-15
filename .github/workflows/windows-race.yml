@@ -18,22 +18,27 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Set up mise
+        uses: jdx/mise-action@v3
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          version: 2026.7.0
+
+      - name: Install mise-managed tools
+        shell: pwsh
+        run: |
+          mise trust
+          mise install
 
       - name: Verify CGO toolchain
         shell: pwsh
         run: |
           gcc --version
-          go version
+          mise exec -- go version
           $env:CGO_ENABLED = "1"
-          go env GOOS GOARCH CGO_ENABLED CC
+          mise exec -- go env GOOS GOARCH CGO_ENABLED CC
 
       - name: Run race detector
         shell: pwsh
         env:
           CGO_ENABLED: "1"
-        run: go test -race ./internal/ingest ./internal/wal ./internal/archive
+        run: mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/catalog
