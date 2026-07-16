@@ -393,6 +393,10 @@ func TestVerifySealedSegmentStopsOnTrailerMutation(t *testing.T) {
 		_ = file.Close()
 		t.Fatal(err)
 	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
