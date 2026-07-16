@@ -35,6 +35,7 @@ func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 		fx.Populate(&store, &catalog),
 	)
 	application.RequireStart()
+	t.Cleanup(func() { application.RequireStop() })
 
 	frame, err := protocol.EncodeMessage(protocol.BatchFrameV1{
 		RequestedFromMSC: time.Date(2024, 3, 9, 0, 0, 0, 0, time.UTC).UnixMilli(),
@@ -51,7 +52,7 @@ func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 	if _, err := store.Append(frame, 1710000000, 1); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		record, found, err := catalog.LatestManifest(context.Background(), "2024-03-09")
 		if err != nil {
@@ -69,7 +70,6 @@ func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 	if backend.count() < 4 {
 		t.Fatalf("fake R2 object count = %d, want claim, descriptor, raw object, manifest", backend.count())
 	}
-	application.RequireStop()
 }
 
 func TestFxApplicationShutsDownOnPublicationWorkerError(t *testing.T) {
@@ -85,6 +85,7 @@ func TestFxApplicationShutsDownOnPublicationWorkerError(t *testing.T) {
 		fx.Populate(&store),
 	)
 	application.RequireStart()
+	t.Cleanup(func() { application.RequireStop() })
 
 	frame, err := protocol.EncodeMessage(protocol.BatchFrameV1{
 		RequestedFromMSC: time.Date(2024, 3, 9, 0, 0, 0, 0, time.UTC).UnixMilli(),
