@@ -8,10 +8,10 @@ import (
 )
 
 const validRetentionConfig = `retention_config_version = "tick-retention-v1"
-endpoint = "https://example.invalid"
-bucket_env = "TICK_R2_BUCKET"
-access_key_env = "TICK_R2_ACCESS_KEY"
-secret_key_env = "TICK_R2_SECRET_KEY"
+endpoint = "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com"
+bucket = "tick-retention-test"
+credentials_path = "./credentials.json"
+credentials_protection = "managed-mount"
 region = "auto"
 immutable_root = "v1"
 dataset_id = "dataset"

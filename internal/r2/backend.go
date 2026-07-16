@@ -3,30 +3,49 @@ package r2
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
+	appcredentials "tick-data-platform/internal/credentials"
 )
 
 var (
-	ErrObjectNotFound    = errors.New("remote object not found")
-	ErrObjectExists      = errors.New("remote object already exists")
-	ErrPublisherConflict = errors.New("publisher claim conflict")
-	ErrMetadataTooLarge  = errors.New("remote metadata exceeds configured limit")
-	ErrResourceLimit     = errors.New("remote resource exceeds configured limit")
-	ErrRemotePermission  = errors.New("remote permission denied")
+	ErrObjectNotFound      = errors.New("remote object not found")
+	ErrObjectExists        = errors.New("remote object already exists")
+	ErrPublisherConflict   = errors.New("publisher claim conflict")
+	ErrMetadataTooLarge    = errors.New("remote metadata exceeds configured limit")
+	ErrResourceLimit       = errors.New("remote resource exceeds configured limit")
+	ErrRemotePermission    = errors.New("remote permission denied")
+	ErrLocalObjectChanged  = errors.New("local object changed before publication")
+	ErrImmutableCollision  = errors.New("remote immutable object content differs")
+	ErrRemoteCheckMismatch = errors.New("remote object content differs")
 )
+
+const remoteOutcomeProbeTimeout = 30 * time.Second
 
 type RemoteObject struct {
 	Key  string
 	Size int64
+}
+
+type RemoteObjectCommit struct {
+	ETag string
+}
+
+type RemoteObjectVerification struct {
+	ETag string
 }
 
 type ObjectBackend interface {
@@ -34,6 +53,15 @@ type ObjectBackend interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 	Open(ctx context.Context, key string) (io.ReadCloser, int64, error)
 	List(ctx context.Context, prefix string) ([]RemoteObject, error)
+}
+
+// WriteBackend is the production R2/S3 API boundary for immutable publication.
+// It deliberately exposes object writes as conditional, verified file transfers
+// instead of a generic remote command surface.
+type WriteBackend interface {
+	ObjectBackend
+	PutFileIfAbsent(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectCommit, error)
+	VerifyFile(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectVerification, error)
 }
 
 // BoundedObjectBackend is the stronger read boundary required by replay
@@ -149,8 +177,6 @@ type S3ReadBackendConfig struct {
 	Bucket           string
 	Endpoint         string
 	Region           string
-	AccessKeyEnv     string
-	SecretKeyEnv     string
 	MaxMetadataBytes int64
 }
 
@@ -160,14 +186,27 @@ type S3ReadBackend struct {
 	maxMetadataBytes int64
 }
 
-func NewS3ReadBackend(ctx context.Context, settings S3ReadBackendConfig) (*S3ReadBackend, error) {
-	if settings.Bucket == "" || settings.Endpoint == "" || settings.AccessKeyEnv == "" || settings.SecretKeyEnv == "" {
-		return nil, fmt.Errorf("read-only S3 configuration is incomplete")
+// NewS3ReadBackendWithProvider constructs a read-only backend after loading
+// credentials exactly once from the supplied provider. The backend never
+// consults process environment variables or the AWS default credential chain.
+func NewS3ReadBackendWithProvider(ctx context.Context, settings S3ReadBackendConfig, provider appcredentials.Provider) (*S3ReadBackend, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("read-only credential provider is required")
 	}
-	accessKey, accessOK := os.LookupEnv(settings.AccessKeyEnv)
-	secretKey, secretOK := os.LookupEnv(settings.SecretKeyEnv)
-	if !accessOK || !secretOK || accessKey == "" || secretKey == "" {
-		return nil, fmt.Errorf("read-only S3 credentials are unavailable")
+	loaded, err := provider.Load(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load read-only R2 credentials: %w", err)
+	}
+	return NewS3ReadBackendWithCredentials(ctx, settings, loaded)
+}
+
+// NewS3ReadBackendWithCredentials constructs a read-only backend from
+// credentials that have already crossed the provider boundary. Keeping this
+// constructor separate makes it possible to test the AWS SDK boundary without
+// teaching it how credentials are stored.
+func NewS3ReadBackendWithCredentials(ctx context.Context, settings S3ReadBackendConfig, loaded appcredentials.Credentials) (*S3ReadBackend, error) {
+	if settings.Bucket == "" || settings.Endpoint == "" || loaded.AccessKeyID == "" || loaded.SecretAccessKey == "" {
+		return nil, fmt.Errorf("read-only S3 configuration is incomplete")
 	}
 	if settings.Region == "" {
 		settings.Region = "auto"
@@ -178,7 +217,7 @@ func NewS3ReadBackend(ctx context.Context, settings S3ReadBackendConfig) (*S3Rea
 	awsConfig, err := config.LoadDefaultConfig(
 		ctx,
 		config.WithRegion(settings.Region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(loaded.AccessKeyID, loaded.SecretAccessKey, "")),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("load read-only S3 configuration")
@@ -286,6 +325,11 @@ func newS3Backend(ctx context.Context, settings S3BackendConfig, accessKeyEnv, s
 	if settings.Bucket == "" {
 		return nil, fmt.Errorf("S3 bucket is required")
 	}
+	if settings.Endpoint != "" {
+		if err := ValidateHTTPSHostEndpoint(settings.Endpoint); err != nil {
+			return nil, err
+		}
+	}
 	if settings.Region == "" {
 		settings.Region = "auto"
 	}
@@ -305,13 +349,43 @@ func newS3Backend(ctx context.Context, settings S3BackendConfig, accessKeyEnv, s
 	if err != nil {
 		return nil, fmt.Errorf("load S3 configuration")
 	}
+	return newS3BackendFromConfig(awsConfig, settings), nil
+}
+
+func newS3BackendWithCredentials(ctx context.Context, settings S3BackendConfig, accessKey, secretKey string) (*S3Backend, error) {
+	if accessKey == "" || secretKey == "" {
+		return nil, fmt.Errorf("S3 credentials are incomplete")
+	}
+	if settings.Bucket == "" {
+		return nil, fmt.Errorf("S3 bucket is required")
+	}
+	if settings.Endpoint == "" {
+		return nil, fmt.Errorf("S3 endpoint is required")
+	}
+	if err := ValidateHTTPSHostEndpoint(settings.Endpoint); err != nil {
+		return nil, err
+	}
+	if settings.Region == "" {
+		settings.Region = "auto"
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	awsConfig := aws.Config{
+		Region:      settings.Region,
+		Credentials: credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
+	}
+	return newS3BackendFromConfig(awsConfig, settings), nil
+}
+
+func newS3BackendFromConfig(awsConfig aws.Config, settings S3BackendConfig) *S3Backend {
 	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
 		options.UsePathStyle = true
 		if settings.Endpoint != "" {
 			options.BaseEndpoint = aws.String(settings.Endpoint)
 		}
 	})
-	return &S3Backend{client: client, bucket: settings.Bucket}, nil
+	return &S3Backend{client: client, bucket: settings.Bucket}
 }
 
 func (b *S3Backend) PutIfAbsent(ctx context.Context, key string, body []byte) error {
@@ -325,6 +399,179 @@ func (b *S3Backend) PutIfAbsent(ctx context.Context, key string, body []byte) er
 		return nil
 	}
 	return classifyRemoteError(err)
+}
+
+func (b *S3Backend) PutFileIfAbsent(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectCommit, error) {
+	if expectedBytes > uint64(^uint64(0)>>1) {
+		return RemoteObjectCommit{}, fmt.Errorf("%w: local object is too large", ErrResourceLimit)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		operationCtx := ctx
+		cancel := func() {}
+		if attempt > 0 {
+			operationCtx, cancel = remoteOutcomeProbeContext(ctx)
+		}
+		commit, err := b.putFileIfAbsentOnce(operationCtx, key, path, expectedSHA256, expectedBytes)
+		cancel()
+		if err == nil {
+			var verifyErr error
+			if attempt > 0 {
+				_, verifyErr = b.verifyAfterUnknownPut(ctx, key, path, expectedSHA256, expectedBytes)
+			} else {
+				_, verifyErr = b.VerifyFile(ctx, key, path, expectedSHA256, expectedBytes)
+			}
+			if verifyErr != nil {
+				return RemoteObjectCommit{}, verifyErr
+			}
+			return commit, nil
+		}
+		classified := classifyRemoteError(err)
+		if errors.Is(classified, ErrObjectExists) {
+			return b.verifyExistingImmutableObject(ctx, key, path, expectedSHA256, expectedBytes)
+		}
+		if isUnknownRemoteWriteOutcome(err, classified) {
+			verification, verifyErr := b.verifyAfterUnknownPut(ctx, key, path, expectedSHA256, expectedBytes)
+			if verifyErr == nil {
+				return RemoteObjectCommit{ETag: verification.ETag}, nil
+			}
+			if errors.Is(verifyErr, ErrObjectNotFound) && attempt == 0 {
+				continue
+			}
+			if errors.Is(verifyErr, ErrRemoteCheckMismatch) {
+				return RemoteObjectCommit{}, ErrImmutableCollision
+			}
+			return RemoteObjectCommit{}, verifyErr
+		}
+		return RemoteObjectCommit{}, classified
+	}
+	return RemoteObjectCommit{}, ErrObjectNotFound
+}
+
+func (b *S3Backend) putFileIfAbsentOnce(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectCommit, error) {
+	file, contentMD5, err := openVerifiedLocalFile(path, expectedSHA256, expectedBytes)
+	if err != nil {
+		return RemoteObjectCommit{}, err
+	}
+	defer file.Close()
+	size := int64(expectedBytes)
+	output, err := b.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(b.bucket),
+		Key:           aws.String(key),
+		Body:          file,
+		ContentMD5:    aws.String(base64.StdEncoding.EncodeToString(contentMD5[:])),
+		ContentLength: &size,
+		IfNoneMatch:   aws.String("*"),
+	})
+	if err != nil {
+		return RemoteObjectCommit{}, err
+	}
+	return RemoteObjectCommit{ETag: aws.ToString(output.ETag)}, nil
+}
+
+func (b *S3Backend) verifyExistingImmutableObject(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectCommit, error) {
+	verification, verifyErr := b.VerifyFile(ctx, key, path, expectedSHA256, expectedBytes)
+	if verifyErr == nil {
+		return RemoteObjectCommit{ETag: verification.ETag}, nil
+	}
+	if errors.Is(verifyErr, ErrRemoteCheckMismatch) {
+		return RemoteObjectCommit{}, ErrImmutableCollision
+	}
+	return RemoteObjectCommit{}, verifyErr
+}
+
+func (b *S3Backend) verifyAfterUnknownPut(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectVerification, error) {
+	probeCtx, cancel := remoteOutcomeProbeContext(ctx)
+	defer cancel()
+	return b.VerifyFile(probeCtx, key, path, expectedSHA256, expectedBytes)
+}
+
+func remoteOutcomeProbeContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), remoteOutcomeProbeTimeout)
+}
+
+func isUnknownRemoteWriteOutcome(original, classified error) bool {
+	if errors.Is(original, context.Canceled) || errors.Is(original, context.DeadlineExceeded) || errors.Is(classified, context.Canceled) || errors.Is(classified, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(original, &netErr) && netErr.Timeout()
+}
+
+func (b *S3Backend) VerifyFile(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectVerification, error) {
+	if err := verifyLocalFileIdentity(path, expectedSHA256, expectedBytes); err != nil {
+		return RemoteObjectVerification{}, err
+	}
+	output, err := b.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(b.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return RemoteObjectVerification{}, classifyRemoteError(err)
+	}
+	defer output.Body.Close()
+	if output.ContentLength != nil && (*output.ContentLength < 0 || uint64(*output.ContentLength) != expectedBytes) {
+		return RemoteObjectVerification{}, ErrRemoteCheckMismatch
+	}
+	hash := sha256.New()
+	read, err := io.Copy(hash, io.LimitReader(output.Body, int64(expectedBytes)+1))
+	if err != nil {
+		return RemoteObjectVerification{}, fmt.Errorf("read remote object for verification: %w", err)
+	}
+	if read < 0 || uint64(read) != expectedBytes {
+		return RemoteObjectVerification{}, ErrRemoteCheckMismatch
+	}
+	var got [32]byte
+	copy(got[:], hash.Sum(nil))
+	if got != expectedSHA256 {
+		return RemoteObjectVerification{}, ErrRemoteCheckMismatch
+	}
+	return RemoteObjectVerification{ETag: aws.ToString(output.ETag)}, nil
+}
+
+func verifyLocalFileIdentity(path string, expectedSHA256 [32]byte, expectedBytes uint64) error {
+	file, _, err := openVerifiedLocalFile(path, expectedSHA256, expectedBytes)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+func openVerifiedLocalFile(path string, expectedSHA256 [32]byte, expectedBytes uint64) (*os.File, [16]byte, error) {
+	var contentMD5 [16]byte
+	if path == "" || expectedSHA256 == ([32]byte{}) {
+		return nil, contentMD5, fmt.Errorf("%w: local object identity is incomplete", ErrLocalObjectChanged)
+	}
+	if expectedBytes > uint64(^uint64(0)>>1) {
+		return nil, contentMD5, fmt.Errorf("%w: local object is too large", ErrResourceLimit)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, contentMD5, fmt.Errorf("%w: open local object: %v", ErrLocalObjectChanged, err)
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 0 || uint64(info.Size()) != expectedBytes {
+		_ = file.Close()
+		return nil, contentMD5, fmt.Errorf("%w: local object size changed", ErrLocalObjectChanged)
+	}
+	shaHash := sha256.New()
+	md5Hash := md5.New()
+	read, err := io.Copy(io.MultiWriter(shaHash, md5Hash), io.LimitReader(file, int64(expectedBytes)+1))
+	if err != nil || read < 0 || uint64(read) != expectedBytes {
+		_ = file.Close()
+		return nil, contentMD5, fmt.Errorf("%w: local object bytes changed", ErrLocalObjectChanged)
+	}
+	var got [32]byte
+	copy(got[:], shaHash.Sum(nil))
+	if got != expectedSHA256 {
+		_ = file.Close()
+		return nil, contentMD5, fmt.Errorf("%w: local object digest changed", ErrLocalObjectChanged)
+	}
+	copy(contentMD5[:], md5Hash.Sum(nil))
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		_ = file.Close()
+		return nil, contentMD5, fmt.Errorf("%w: rewind local object: %v", ErrLocalObjectChanged, err)
+	}
+	return file, contentMD5, nil
 }
 
 func (b *S3Backend) Get(ctx context.Context, key string) ([]byte, error) {

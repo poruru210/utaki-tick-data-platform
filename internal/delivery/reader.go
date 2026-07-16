@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/credentials"
 	"tick-data-platform/internal/r2"
 )
 
@@ -21,18 +22,18 @@ func NewArchiveReaderV1(ctx context.Context, config ReaderConfig) (ArchiveReader
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	bucket, err := config.Bucket()
+	provider, err := credentials.NewFileProvider(credentials.FileConfig{
+		Path: config.CredentialsPath, Protection: credentials.ProtectionMode(config.CredentialsProtection),
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create reader credential provider: %w", err)
 	}
-	backend, err := r2.NewS3ReadBackend(ctx, r2.S3ReadBackendConfig{
-		Bucket:           bucket,
+	backend, err := r2.NewS3ReadBackendWithProvider(ctx, r2.S3ReadBackendConfig{
+		Bucket:           config.Bucket,
 		Endpoint:         config.Endpoint,
 		Region:           config.Region,
-		AccessKeyEnv:     config.AccessKeyEnv,
-		SecretKeyEnv:     config.SecretKeyEnv,
 		MaxMetadataBytes: int64(config.MaxMetadataBytes),
-	})
+	}, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func (r *archiveReaderV1) discoverScopes(ctx context.Context) ([]discoveredScope
 		if err != nil {
 			return nil, fmt.Errorf("%w: scope descriptor is invalid", archive.ErrIntegrity)
 		}
-		layout, err := r2.NewLayout(r.config.ImmutableRoot, "", scope)
+		layout, err := r2.NewLayout(r.config.ImmutableRoot, scope)
 		if err != nil {
 			return nil, fmt.Errorf("%w: scope layout is invalid", archive.ErrIntegrity)
 		}
@@ -211,7 +212,7 @@ func (r *archiveReaderV1) ListRawSnapshots(ctx context.Context, scope RawDayScop
 }
 
 func (r *archiveReaderV1) loadSnapshots(ctx context.Context, discovered discoveredScope) ([]SnapshotDescriptor, error) {
-	layout, err := r2.NewLayout(r.config.ImmutableRoot, "", discovered.Scope)
+	layout, err := r2.NewLayout(r.config.ImmutableRoot, discovered.Scope)
 	if err != nil {
 		return nil, fmt.Errorf("%w: campaign layout is invalid", archive.ErrIntegrity)
 	}

@@ -1,8 +1,8 @@
 retention_config_version = "tick-retention-v1"
 endpoint = "https://example.invalid"
-bucket_env = "TICK_R2_BUCKET"
-access_key_env = "TICK_R2_READ_ACCESS_KEY"
-secret_key_env = "TICK_R2_READ_SECRET_KEY"
+bucket = "replace-with-r2-bucket"
+credentials_path = "./secrets/tick-retention-r2.json"
+credentials_protection = "native-acl"
 region = "auto"
 immutable_root = "v1"
 

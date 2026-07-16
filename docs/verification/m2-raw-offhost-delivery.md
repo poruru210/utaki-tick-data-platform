@@ -2,7 +2,7 @@
 
 この記録は2026-07-15時点のM2R-4実装、ローカル検証、GitHub Actions検証境界を記録します。
 
-M2R-4のfake end-to-end testは、verified sealed WAL、local raw promotion、canonical raw-day manifest、conditional claim、fake rclone publication、read-only ArchiveReader、empty-cache fetch、day verification、campaign verificationをnetworkなしで接続します。
+M2R-4のfake end-to-end testは、verified sealed WAL、local raw promotion、canonical raw-day manifest、conditional claim、fake R2 SDK publication boundary、read-only ArchiveReader、empty-cache fetch、day verification、campaign verificationをnetworkなしで接続します。
 
 ## 実行結果
 
@@ -14,7 +14,7 @@ M2R-4のfake end-to-end testは、verified sealed WAL、local raw promotion、ca
 
 `git diff --check`は成功しました。
 
-`mise exec -- go test -tags real_r2_smoke ./internal/delivery -run TestOptionalRealR2Smoke -count=1`は、enable flag、confirmation、isolated bucketまたはprefix、endpoint、credential、pinned rclone binaryを指定していないためskipしました。
+`mise exec -- go test -tags real_r2_smoke ./internal/delivery -run TestOptionalRealR2Smoke -count=1`は、enable flag、confirmation、isolated bucketまたはprefix、endpoint、credentialを指定していないためskipしました。
 
 実R2 smokeはdefault testや`mise run check`へ含めず、明示的なbuild tagと環境変数を同時に指定した場合だけ実行します。
 
@@ -55,13 +55,13 @@ scope-specific `ProtocolLimits.MaxRecords`は`TestVerifyRawDaySnapshotUsesScoped
 thread-aware review readでは、上記2件のP2 threadを未解決として確認しました。
 指摘内容は最新headで修正済みですが、threadへの返信とresolveは明示依頼がないため実施していません。
 
-fake backendのconditional writeはclaimだけに使用し、scope descriptor、raw object、manifestの転送と検証はfake rcloneの`copyto --immutable`と`check --download`で再現します。
+fake backendのconditional writeはclaimだけに使用し、scope descriptor、raw object、manifestの転送と検証はfake `PutFileIfAbsent`と`VerifyFile`で再現します。
 
 ## optional real-R2 smoke
 
 smoke testは`-tags real_r2_smoke`でだけbuildされ、合成WAL bytesをisolated prefixへimmutableに公開します。
 
-smoke testは`TICK_M2_REAL_R2_SMOKE=1`、`TICK_M2_REAL_R2_CONFIRM=I_UNDERSTAND_NO_OVERWRITE`、isolated `TICK_M2_REAL_R2_BUCKET`、`TICK_M2_REAL_R2_PREFIX`、`TICK_M2_REAL_R2_ENDPOINT`、`TICK_M2_REAL_R2_REMOTE`、`TICK_M2_RCLONE_BINARY`、`RCLONE_CONFIG`、AWS credential envの全てを要求します。
+smoke testは`TICK_M2_REAL_R2_SMOKE=1`、`TICK_M2_REAL_R2_CONFIRM=I_UNDERSTAND_NO_OVERWRITE`、isolated `TICK_M2_REAL_R2_BUCKET`、`TICK_M2_REAL_R2_PREFIX`、`TICK_M2_REAL_R2_ENDPOINT`、AWS credential envの全てを要求します。
 
 smoke prefixは`m2-smoke/`から始まり、実行ごとにランダムなrun suffixを追加します。
 
@@ -73,10 +73,10 @@ smoke testはremote objectをdelete、move、sync、overwriteせず、credential
 
 secret、credential、WAL、SQLite journal、publication receipt、R2 object、実行用configはcommitしていません。
 
-M2R-4のlocal implementation evidenceはこの記録、fake end-to-end test、pinned-tool smoke harness、workflow定義、通常のfocused testで構成します。
+M2R-4のlocal implementation evidenceはこの記録、fake end-to-end test、SDK smoke harness、workflow定義、通常のfocused testで構成します。
 
 GitHub Actionsのcheck workflowとWindows race workflowは追加し、pushおよびPRの実行成功を確認しました。
 
 M2の対象外はParquet、replay-dayまたはpart manifest、handover、pruning、Worker、HTTP API、live brokerです。
 
-`RcloneExecutorFunc`はnetwork-free integration testがproduction Publisher APIを使うためのin-process command seamであり、通常のrclone runnerは引き続きpinned executable、exact argv、version、hash、byte lengthを検証します。
+network-free integration testはproduction Publisher APIをfake `WriteBackend`へ接続し、通常経路と同じ条件付きPut、読戻しVerify、publication journalを検証します。

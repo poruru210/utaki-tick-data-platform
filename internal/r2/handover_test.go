@@ -104,7 +104,7 @@ func handoverConfirmationFor(t *testing.T, seal HandoverSeal) HandoverConfirmati
 
 func TestHandoverObserveReconcileAndConditionalCreate(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("immutable-root", "", scope)
+	layout, err := NewLayout("immutable-root", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestHandoverObserveReconcileAndConditionalCreate(t *testing.T) {
 
 func TestHandoverReconcilerStopsUnsafeStates(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("immutable-root", "", scope)
+	layout, err := NewLayout("immutable-root", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestHandoverReconcilerStopsUnsafeStates(t *testing.T) {
 
 func TestHandoverRevocationAndUnknownOutcomeAreFailClosed(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("immutable-root", "", scope)
+	layout, err := NewLayout("immutable-root", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestHandoverRevocationAndUnknownOutcomeAreFailClosed(t *testing.T) {
 
 func TestHandoverRestartAfterEachStepAndConditionalFailure(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("immutable-root", "", scope)
+	layout, err := NewLayout("immutable-root", scope)
 	if err != nil {
 		t.Fatal(err)
 	}

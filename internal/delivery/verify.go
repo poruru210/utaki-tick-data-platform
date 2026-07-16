@@ -78,7 +78,7 @@ func (r *archiveReaderV1) VerifyCampaign(ctx context.Context, datasetID, campaig
 	if len(snapshots) == 0 {
 		return CampaignVerificationReport{}, fmt.Errorf("%w: campaign has no raw snapshots", archive.ErrIntegrity)
 	}
-	layout, err := r2.NewLayout(r.config.ImmutableRoot, "", selected.Scope)
+	layout, err := r2.NewLayout(r.config.ImmutableRoot, selected.Scope)
 	if err != nil {
 		return CampaignVerificationReport{}, fmt.Errorf("%w: campaign layout is invalid", archive.ErrIntegrity)
 	}

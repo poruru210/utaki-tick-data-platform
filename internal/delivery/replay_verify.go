@@ -23,7 +23,7 @@ func (r *archiveReaderV1) VerifyReplayDay(ctx context.Context, selector ReplaySn
 	if err != nil {
 		return ReplayDayVerificationReport{}, err
 	}
-	layout, err := r2.NewLayout(r.config.ImmutableRoot, "", snapshot.Scope)
+	layout, err := r2.NewLayout(r.config.ImmutableRoot, snapshot.Scope)
 	if err != nil {
 		return ReplayDayVerificationReport{}, err
 	}

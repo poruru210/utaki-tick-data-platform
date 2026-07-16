@@ -25,7 +25,6 @@ func TestReplayReceiptBindsCanonicalBundleAndFinalObservation(t *testing.T) {
 	}
 	for _, forbidden := range [][]byte{
 		[]byte(bundle.LocalSources.ReceiptPath),
-		[]byte(fixture.toolPath),
 		[]byte(`"journal"`), []byte(`"stage"`), []byte(`"event"`),
 		[]byte(`"retry"`), []byte(`"etag"`), []byte(`"credential"`), []byte(`"local_path"`),
 	} {

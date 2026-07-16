@@ -290,9 +290,6 @@ def test_python_final_observation_accepts_proven_empty_terminal_and_predecessor(
         domain_digest=empty_edge["manifest_digest"],
         full_key=empty_edge["full_key"],
         relative_key=empty_edge["full_key"][len(bundle["scope"]["immutable_prefix"]) + 1 :],
-        rclone_key=bundle["scope"]["rclone_prefix"]
-        + "/"
-        + empty_edge["full_key"][len(bundle["scope"]["immutable_prefix"]) + 1 :],
         revision=1,
     )
     observation = copy.deepcopy(fixture["final_observation"])
@@ -325,7 +322,6 @@ def test_python_final_observation_accepts_proven_empty_terminal_and_predecessor(
         domain_digest=successor_edge["manifest_digest"],
         full_key=successor_edge["full_key"],
         relative_key=relative,
-        rclone_key=bundle["scope"]["rclone_prefix"] + "/" + relative,
         revision=2,
     )
     observation = copy.deepcopy(fixture["final_observation"])

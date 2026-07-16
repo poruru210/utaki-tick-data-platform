@@ -45,7 +45,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p artifacts
-          mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/retention ./internal/operations ./internal/httpapi -count=1 -json | tee artifacts/linux-race.json
+          mise exec -- go test -race ./internal/app ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/retention ./internal/operations ./internal/httpapi -count=1 -json | tee artifacts/linux-race.json
 
       - name: Capture race environment
         if: always()

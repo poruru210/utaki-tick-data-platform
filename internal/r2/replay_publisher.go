@@ -35,8 +35,7 @@ type ReplayPublicationInput struct {
 type ReplayPublisher struct {
 	layout       Layout
 	remote       ReplayRemoteReadBackend
-	rclone       *RcloneRunner
-	actionTool   ReplayActionTool
+	writer       ReplayActionWriter
 	executor     ReplayActionExecutor
 	events       ReplayEventStore
 	receiptStore ReplayReceiptStore
@@ -53,13 +52,12 @@ type replayPublicationHooks struct {
 func NewReplayPublisher(
 	layout Layout,
 	remote ReplayRemoteReadBackend,
-	rclone *RcloneRunner,
-	actionTool ReplayActionTool,
+	writer ReplayActionWriter,
 	events ReplayEventStore,
 	receiptStore ReplayReceiptStore,
 	lockRoot string,
 ) (*ReplayPublisher, error) {
-	if remote == nil || rclone == nil || actionTool == nil {
+	if remote == nil || writer == nil {
 		return nil, fmt.Errorf("replay publisher dependencies are incomplete")
 	}
 	if receiptStore == nil {
@@ -72,13 +70,13 @@ func NewReplayPublisher(
 	if err != nil {
 		return nil, err
 	}
-	executor, err := NewNarrowReplayActionExecutor(actionTool)
+	executor, err := NewNarrowReplayActionExecutor(writer)
 	if err != nil {
 		return nil, err
 	}
 	return &ReplayPublisher{
-		layout: layout, remote: remote, rclone: rclone, executor: executor,
-		actionTool: actionTool, events: events, receiptStore: receiptStore, lockPath: lockPath,
+		layout: layout, remote: remote, writer: writer, executor: executor,
+		events: events, receiptStore: receiptStore, lockPath: lockPath,
 	}, nil
 }
 
@@ -91,7 +89,7 @@ func (p *ReplayPublisher) Publish(ctx context.Context, input ReplayPublicationIn
 		Parts: append([]parquet.PartArtifact(nil), input.Parts...), PartManifests: cloneByteSlices(input.PartManifestBytes),
 		ReplayManifest:         append([]byte(nil), input.ReplayManifestBytes...),
 		PreviousReplayManifest: append([]byte(nil), input.PreviousReplayManifestBytes...),
-		ReceiptPath:            input.ReceiptPath, RcloneBinaryPath: p.rclone.binaryPath, RcloneTool: p.rclone.Tool(),
+		ReceiptPath:            input.ReceiptPath,
 	})
 	if err != nil {
 		return ReplayVerificationReceipt{}, err

@@ -2,6 +2,7 @@
 package wal
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -40,23 +41,26 @@ type Entry struct {
 }
 
 type Store struct {
-	mu            sync.Mutex
-	root          string
-	path          string
-	gatewayID     string
-	file          *os.File
-	syncFile      func() error
-	statFile      func() (os.FileInfo, error)
-	entries       []Entry
-	sealed        []VerifiedSegment
-	last          [32]byte
-	next          uint64
-	start         uint64
-	activeAt      int
-	sealedBytes   int64
-	fileBytes     int64
-	poisoned      bool
-	prunedThrough uint64
+	mu             sync.Mutex
+	root           string
+	path           string
+	gatewayID      string
+	file           *os.File
+	syncFile       func() error
+	statFile       func() (os.FileInfo, error)
+	entries        []Entry
+	sealed         []VerifiedSegment
+	last           [32]byte
+	next           uint64
+	start          uint64
+	activeAt       int
+	sealedBytes    int64
+	fileBytes      int64
+	poisoned       bool
+	prunedThrough  uint64
+	anchor         *PruneAnchor
+	anchorProvider AnchorProvider
+	started        bool
 }
 
 func Open(root, gatewayID string) (*Store, error) {
@@ -72,9 +76,26 @@ type PruneAnchor struct {
 	ChainRoot   [32]byte
 }
 
+type AnchorProvider interface {
+	LoadWALAnchor(context.Context) (*PruneAnchor, error)
+}
+
 // OpenWithAnchor reopens a WAL after a verified prefix prune. The legacy Open
 // behavior remains sequence 1 plus a zero chain root when anchor is nil.
 func OpenWithAnchor(root, gatewayID string, anchor *PruneAnchor) (*Store, error) {
+	store, err := NewStoreWithAnchor(root, gatewayID, anchor)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Start(context.Background()); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+// NewStoreWithAnchor validates WAL identity without opening the filesystem.
+// Start performs recovery and opens the active file.
+func NewStoreWithAnchor(root, gatewayID string, anchor *PruneAnchor) (*Store, error) {
 	if root == "" {
 		return nil, fmt.Errorf("WAL root is empty")
 	}
@@ -83,9 +104,6 @@ func OpenWithAnchor(root, gatewayID string, anchor *PruneAnchor) (*Store, error)
 	}
 	if anchor != nil && (anchor.EndSequence == 0 || anchor.EndSequence == ^uint64(0) || anchor.ChainRoot == ([32]byte{})) {
 		return nil, fmt.Errorf("invalid WAL prune anchor")
-	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return nil, fmt.Errorf("create WAL root: %w", err)
 	}
 	store := &Store{
 		root:      root,
@@ -99,14 +117,69 @@ func OpenWithAnchor(root, gatewayID string, anchor *PruneAnchor) (*Store, error)
 		store.last = anchor.ChainRoot
 		store.start = anchor.EndSequence + 1
 		store.next = store.start
-	}
-	if err := store.initialize(); err != nil {
-		if store.file != nil {
-			_ = store.file.Close()
-		}
-		return nil, err
+		copyAnchor := *anchor
+		store.anchor = &copyAnchor
 	}
 	return store, nil
+}
+
+// NewStore constructs a WAL whose retention anchor is loaded during Start.
+// The provider must not perform work until its own lifecycle has started.
+func NewStore(root, gatewayID string, anchorProvider AnchorProvider) (*Store, error) {
+	store, err := NewStoreWithAnchor(root, gatewayID, nil)
+	if err != nil {
+		return nil, err
+	}
+	store.anchorProvider = anchorProvider
+	return store, nil
+}
+
+func (s *Store) Start(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return fmt.Errorf("WAL store is nil")
+	}
+	if s.started || s.file != nil {
+		return fmt.Errorf("WAL is already started")
+	}
+	if s.anchorProvider != nil {
+		anchor, err := s.anchorProvider.LoadWALAnchor(ctx)
+		if err != nil {
+			return err
+		}
+		if anchor != nil {
+			if anchor.EndSequence == 0 || anchor.EndSequence == ^uint64(0) || anchor.ChainRoot == ([32]byte{}) {
+				return fmt.Errorf("invalid WAL prune anchor")
+			}
+			s.prunedThrough = anchor.EndSequence
+			s.last = anchor.ChainRoot
+			s.start = anchor.EndSequence + 1
+			s.next = s.start
+			copyAnchor := *anchor
+			s.anchor = &copyAnchor
+		}
+	}
+	if err := os.MkdirAll(s.root, 0o700); err != nil {
+		return fmt.Errorf("create WAL root: %w", err)
+	}
+	if err := s.initialize(); err != nil {
+		if s.file != nil {
+			_ = s.file.Close()
+			s.file = nil
+		}
+		return err
+	}
+	s.started = true
+	return nil
+}
+
+func (s *Store) Stop(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.Close()
 }
 
 func (s *Store) Path() string {

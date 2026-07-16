@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/credentials"
 	"tick-data-platform/internal/ingest"
 	"tick-data-platform/internal/operations"
 	"tick-data-platform/internal/protocol"
@@ -69,21 +70,20 @@ func runPruneLocal(config ingest.Config, args []string) error {
 	if err := validatePruneScopeBinding(config, scope); err != nil {
 		return err
 	}
-	layout, err := r2.NewLayout(remoteConfig.ImmutableRoot, "", scope)
+	layout, err := r2.NewLayout(remoteConfig.ImmutableRoot, scope)
 	if err != nil {
 		return err
 	}
-	bucket, ok := os.LookupEnv(remoteConfig.BucketEnv)
-	if !ok || bucket == "" {
-		return fmt.Errorf("retention bucket is unavailable")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(limits.RequestTimeoutMS)*time.Millisecond)
 	defer cancel()
-	backend, err := r2.NewS3ReadBackend(ctx, r2.S3ReadBackendConfig{
-		Bucket: bucket, Endpoint: remoteConfig.Endpoint, Region: remoteConfig.Region,
-		AccessKeyEnv: remoteConfig.AccessKeyEnv, SecretKeyEnv: remoteConfig.SecretKeyEnv,
+	provider, err := credentials.NewFileProvider(remoteConfig.CredentialFileConfig())
+	if err != nil {
+		return err
+	}
+	backend, err := r2.NewS3ReadBackendWithProvider(ctx, r2.S3ReadBackendConfig{
+		Bucket: remoteConfig.Bucket, Endpoint: remoteConfig.Endpoint, Region: remoteConfig.Region,
 		MaxMetadataBytes: int64(limits.MaxProofBytes),
-	})
+	}, provider)
 	if err != nil {
 		return err
 	}

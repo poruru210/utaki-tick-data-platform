@@ -125,7 +125,7 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 		PublisherID:             "publisher-reader",
 		PublisherEpoch:          1,
 	}
-	layout, err := r2.NewLayout("v1", "", scope)
+	layout, err := r2.NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,9 +221,9 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 
 func testReaderConfig(cacheRoot string) ReaderConfig {
 	return ReaderConfig{
-		Version: ReaderConfigVersion, Endpoint: "https://reader.invalid",
-		BucketEnv: "TICK_READER_TEST_BUCKET", AccessKeyEnv: "TICK_READER_TEST_ACCESS",
-		SecretKeyEnv: "TICK_READER_TEST_SECRET", Region: "auto", ImmutableRoot: "v1",
+		Version: ReaderConfigVersion, Endpoint: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+		Bucket: "tick-reader-test", CredentialsPath: filepath.Join(cacheRoot, "credentials.json"),
+		Region: "auto", ImmutableRoot: "v1",
 		CacheRoot: cacheRoot, MaxMetadataBytes: 1 << 20, MaxRawObjectBytes: 1 << 30,
 	}
 }

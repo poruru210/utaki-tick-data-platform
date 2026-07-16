@@ -307,7 +307,7 @@ M3-3A-R0で、旧`intent`、`claimed`、`raw_verified`、`parquet_copied`、`par
 
 `ReplayPublicationBundle`の正確なtop-level key、nested object key、二つのdomain digest、10個のresource limitは`hash-domains.md`を正本とします。
 
-bundleはM2 claim、scope、ConversionTuple、raw manifestとraw object、Parquet object、part manifest、replay manifest、part set root、canonical row-chain root、pinned rclone identityをcanonical JSONへ含めます。
+bundleはM2 claim、scope、ConversionTuple、raw manifestとraw object、Parquet object、part manifest、replay manifest、part set root、canonical row-chain rootをcanonical JSONへ含めます。
 
 bundleはlocal path、file handle、clock、credential、endpoint secret、journal、event、retry state、自身のdigestを含めません。
 
@@ -327,7 +327,7 @@ callerはfull remote keyを渡しません。
 
 Protocol V1 helperがcampaign-relative keyを導出し、trusted `r2.Layout`がimmutable root、dataset、provider、feed、symbol、campaign prefixを一度だけprependします。
 
-publication receipt v1は、M2が作成したpublisher claimのexact key、canonical bytes、claim domain digest、final observation digest、bundle digest、exact raw manifest relative/full/rclone keyとdomain digest、検証済みraw objectのfull key、全Parquet objectのfull key、hash、bytes、inclusive range、part manifestのfull keyとdomain digest、replay manifestのfull keyとdomain digest、完全なConversionTuple、全resource limit、`part_set_root`、canonical row-chain root、`verification_complete=true`をbindします。
+publication receipt v1は、M2が作成したpublisher claimのexact key、canonical bytes、claim domain digest、final observation digest、bundle digest、exact raw manifest relative/full keyとdomain digest、検証済みraw objectのfull key、全Parquet objectのfull key、hash、bytes、inclusive range、part manifestのfull keyとdomain digest、replay manifestのfull keyとdomain digest、完全なConversionTuple、全resource limit、`part_set_root`、canonical row-chain root、`verification_complete=true`をbindします。
 
 receiptはcompleteなfinal observationからだけ構成し、journal intent hash、stage順位、retry文字列、ETag、local path、credential、future remote stateをauthorityとして使いません。
 

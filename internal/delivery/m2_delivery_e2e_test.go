@@ -100,12 +100,55 @@ func (b *m2E2EBackend) Open(ctx context.Context, key string) (io.ReadCloser, int
 	return io.NopCloser(bytes.NewReader(body)), int64(len(body)), nil
 }
 
+func (b *m2E2EBackend) PutFileIfAbsent(_ context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (r2.RemoteObjectCommit, error) {
+	body, err := m2E2EReadVerifiedFile(path, expectedSHA256, expectedBytes)
+	if err != nil {
+		return r2.RemoteObjectCommit{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if existing, ok := b.objects[key]; ok {
+		if bytes.Equal(existing, body) {
+			return r2.RemoteObjectCommit{ETag: "m2-e2e-etag-" + key}, nil
+		}
+		return r2.RemoteObjectCommit{}, r2.ErrImmutableCollision
+	}
+	b.objects[key] = append([]byte(nil), body...)
+	return r2.RemoteObjectCommit{ETag: "m2-e2e-etag-" + key}, nil
+}
+
+func (b *m2E2EBackend) VerifyFile(_ context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (r2.RemoteObjectVerification, error) {
+	local, err := m2E2EReadVerifiedFile(path, expectedSHA256, expectedBytes)
+	if err != nil {
+		return r2.RemoteObjectVerification{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	remote, ok := b.objects[key]
+	if !ok || !bytes.Equal(local, remote) {
+		return r2.RemoteObjectVerification{}, r2.ErrRemoteCheckMismatch
+	}
+	return r2.RemoteObjectVerification{ETag: "m2-e2e-etag-" + key}, nil
+}
+
+func m2E2EReadVerifiedFile(path string, expectedSHA256 [32]byte, expectedBytes uint64) ([]byte, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) != expectedBytes || sha256.Sum256(body) != expectedSHA256 {
+		return nil, r2.ErrLocalObjectChanged
+	}
+	return body, nil
+}
+
 var _ r2.ObjectBackend = (*m2E2EBackend)(nil)
 var _ r2.ReadBackend = (*m2E2EBackend)(nil)
+var _ r2.WriteBackend = (*m2E2EBackend)(nil)
 
 func TestM2RawOffhostDeliveryEndToEndFake(t *testing.T) {
 	scope := m2E2EScope()
-	layout, err := r2.NewLayout("v1", "v1", scope)
+	layout, err := r2.NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,61 +169,12 @@ func TestM2RawOffhostDeliveryEndToEndFake(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend := &m2E2EBackend{objects: make(map[string][]byte)}
-	rcloneBinary := []byte("m2-e2e-rclone")
-	binaryPath := filepath.Join(t.TempDir(), "rclone-test")
-	if err := os.WriteFile(binaryPath, rcloneBinary, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	toolHash := sha256.Sum256(rcloneBinary)
-	rclone, err := r2.NewRcloneRunnerWithExecutor(binaryPath, r2.RcloneTool{
-		GOOS: "test", GOARCH: "test", BinarySHA256: hex.EncodeToString(toolHash[:]), BinaryBytes: uint64(len(rcloneBinary)),
-	}, func(_ context.Context, _ string, args ...string) (string, error) {
-		if len(args) == 1 && args[0] == "version" {
-			return "rclone v1.74.4\n", nil
-		}
-		if len(args) != 4 {
-			return "", errors.New("unexpected fake rclone arguments")
-		}
-		localPath, remoteKey := args[2], args[3]
-		switch args[0] {
-		case "copyto":
-			body, err := os.ReadFile(localPath)
-			if err != nil {
-				return "", err
-			}
-			if existing, err := backend.Get(context.Background(), remoteKey); err == nil {
-				if !bytes.Equal(existing, body) {
-					return "", errors.New("fake immutable collision")
-				}
-				return "", nil
-			}
-			backend.mu.Lock()
-			backend.objects[remoteKey] = append([]byte(nil), body...)
-			backend.mu.Unlock()
-			return "", nil
-		case "check":
-			local, err := os.ReadFile(localPath)
-			if err != nil {
-				return "", err
-			}
-			remote, err := backend.Get(context.Background(), remoteKey)
-			if err != nil || !bytes.Equal(local, remote) {
-				return "", errors.New("fake rclone check mismatch")
-			}
-			return "", nil
-		default:
-			return "", errors.New("forbidden fake rclone operation")
-		}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	journal, err := r2.OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = journal.Close() })
-	publisher, err := r2.NewPublisher(layout, backend, rclone, journal, "")
+	publisher, err := r2.NewPublisher(layout, backend, journal, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,8 +204,8 @@ func TestM2RawOffhostDeliveryEndToEndFake(t *testing.T) {
 
 	cacheRoot := t.TempDir()
 	reader, err := NewArchiveReaderV1WithBackend(ReaderConfig{
-		Version: ReaderConfigVersion, Endpoint: "https://reader.invalid",
-		BucketEnv: "M2_E2E_BUCKET", AccessKeyEnv: "M2_E2E_ACCESS", SecretKeyEnv: "M2_E2E_SECRET",
+		Version: ReaderConfigVersion, Endpoint: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+		Bucket: "m2-e2e-bucket", CredentialsPath: filepath.Join(t.TempDir(), "credentials.json"),
 		Region: "auto", ImmutableRoot: "v1", CacheRoot: cacheRoot,
 		MaxMetadataBytes: 1 << 20, MaxRawObjectBytes: 1 << 30,
 	}, backend)

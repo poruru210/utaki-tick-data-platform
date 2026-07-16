@@ -12,28 +12,20 @@ import (
 
 type Layout struct {
 	ImmutableRoot string
-	RcloneRoot    string
 	Scope         archive.ScopeConfig
 	prefix        string
 }
 
-func NewLayout(immutableRoot, rcloneRoot string, scope archive.ScopeConfig) (Layout, error) {
+func NewLayout(immutableRoot string, scope archive.ScopeConfig) (Layout, error) {
 	if _, err := scope.ConfigHash(); err != nil {
 		return Layout{}, err
 	}
 	if err := validateRemoteRoot(immutableRoot); err != nil {
 		return Layout{}, err
 	}
-	if rcloneRoot == "" {
-		rcloneRoot = immutableRoot
-	}
-	if err := validateRemoteRoot(rcloneRoot); err != nil {
-		return Layout{}, err
-	}
 	prefix := campaignPrefix(scope)
 	return Layout{
 		ImmutableRoot: strings.TrimRight(immutableRoot, "/"),
-		RcloneRoot:    strings.TrimRight(rcloneRoot, "/"),
 		Scope:         scope,
 		prefix:        prefix,
 	}, nil
@@ -64,23 +56,11 @@ func (l Layout) ImmutableCampaignPrefix() string {
 	return strings.TrimSuffix(joinRemoteKey(l.ImmutableRoot, l.prefix, "_"), "/_")
 }
 
-// RcloneCampaignPrefix returns the corresponding pinned-rclone prefix.
-func (l Layout) RcloneCampaignPrefix() string {
-	return strings.TrimSuffix(joinRemoteKey(l.RcloneRoot, l.prefix, "_"), "/_")
-}
-
 func (l Layout) RemoteKey(relative string) (string, error) {
 	if err := validateRelativeKey(relative); err != nil {
 		return "", err
 	}
 	return joinRemoteKey(l.ImmutableRoot, l.prefix, relative), nil
-}
-
-func (l Layout) RcloneKey(relative string) (string, error) {
-	if err := validateRelativeKey(relative); err != nil {
-		return "", err
-	}
-	return joinRemoteKey(l.RcloneRoot, l.prefix, relative), nil
 }
 
 func (l Layout) ScopeDescriptorKey() (string, error) {
@@ -151,19 +131,19 @@ func validateManifestDate(date string) error {
 	return nil
 }
 
-func (l Layout) RcloneRawObjectKey(object archive.RawChainObject) (string, error) {
+func (l Layout) RawObjectKey(object archive.RawChainObject) (string, error) {
 	if object.Key != archive.RawWALObjectKey(object.SHA256) {
 		return "", fmt.Errorf("%w: raw object key does not match its hash", archive.ErrIntegrity)
 	}
-	return l.RcloneKey(object.Key)
+	return l.RemoteKey(object.Key)
 }
 
-func (l Layout) RcloneManifestKey(manifest archive.RawDayManifest) (string, error) {
+func (l Layout) ManifestObjectKey(manifest archive.RawDayManifest) (string, error) {
 	relative, err := l.manifestRelativeKey(manifest)
 	if err != nil {
 		return "", err
 	}
-	return l.RcloneKey(relative)
+	return l.RemoteKey(relative)
 }
 
 func (l Layout) validateDerivativeScope(datasetID, campaignID, dayDefinitionID string) error {
@@ -244,26 +224,6 @@ func (l Layout) ReplayDerivativePrefix(scope protocol.ReplayScope) (string, erro
 	return full + "/", nil
 }
 
-// RcloneReplayDerivativePrefix is the same trusted relative derivation for
-// the pinned rclone remote.
-func (l Layout) RcloneReplayDerivativePrefix(scope protocol.ReplayScope) (string, error) {
-	if err := scope.Validate(); err != nil {
-		return "", err
-	}
-	if err := l.validateDerivativeScope(scope.DatasetID, scope.CampaignID, scope.DayDefinitionID); err != nil {
-		return "", err
-	}
-	base, err := protocol.ReplayDerivativeBaseKey(scope)
-	if err != nil {
-		return "", err
-	}
-	full, err := l.RcloneKey(base)
-	if err != nil {
-		return "", err
-	}
-	return full + "/", nil
-}
-
 func (l Layout) VerifyReplayPartObjectKey(part protocol.PartManifest, fullKey string) error {
 	want, err := l.ReplayPartObjectKey(part)
 	if err != nil {
@@ -273,13 +233,6 @@ func (l Layout) VerifyReplayPartObjectKey(part protocol.PartManifest, fullKey st
 		return fmt.Errorf("replay part object key does not match trusted layout")
 	}
 	return nil
-}
-
-func (l Layout) RcloneReplayPartObjectKey(part protocol.PartManifest) (string, error) {
-	if _, err := l.ReplayPartObjectKey(part); err != nil {
-		return "", err
-	}
-	return l.RcloneKey(part.PartKey)
 }
 
 func (l Layout) VerifyReplayPartManifestKey(part protocol.PartManifest, fullKey string) error {
@@ -293,17 +246,6 @@ func (l Layout) VerifyReplayPartManifestKey(part protocol.PartManifest, fullKey 
 	return nil
 }
 
-func (l Layout) RcloneReplayPartManifestKey(part protocol.PartManifest) (string, error) {
-	if _, err := l.ReplayPartManifestKey(part); err != nil {
-		return "", err
-	}
-	key, err := protocol.PartManifestKey(part)
-	if err != nil {
-		return "", err
-	}
-	return l.RcloneKey(key)
-}
-
 func (l Layout) VerifyReplayDayManifestKey(manifest protocol.ReplayDayManifest, fullKey string) error {
 	want, err := l.ReplayDayManifestKey(manifest)
 	if err != nil {
@@ -313,17 +255,6 @@ func (l Layout) VerifyReplayDayManifestKey(manifest protocol.ReplayDayManifest, 
 		return fmt.Errorf("replay day manifest key does not match trusted layout")
 	}
 	return nil
-}
-
-func (l Layout) RcloneReplayDayManifestKey(manifest protocol.ReplayDayManifest) (string, error) {
-	if _, err := l.ReplayDayManifestKey(manifest); err != nil {
-		return "", err
-	}
-	key, err := protocol.ReplayDayManifestKey(manifest)
-	if err != nil {
-		return "", err
-	}
-	return l.RcloneKey(key)
 }
 
 func validateRemoteRoot(root string) error {

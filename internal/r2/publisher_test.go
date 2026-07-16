@@ -21,12 +21,21 @@ import (
 )
 
 type fakeBackend struct {
-	mu          sync.Mutex
-	objects     map[string][]byte
-	puts        []string
-	listExtras  []RemoteObject
-	listCount   int
-	listStarted chan struct{}
+	mu                       sync.Mutex
+	objects                  map[string][]byte
+	puts                     []string
+	listExtras               []RemoteObject
+	listCount                int
+	listStarted              chan struct{}
+	filePuts                 []string
+	fileVerifies             []string
+	failVerify               bool
+	failManifest             bool
+	mutateOnObjectVerify     bool
+	objectVerifyCount        int
+	timeoutNext              bool
+	mutateOnDescriptorVerify bool
+	descriptorVerifyCount    int
 }
 
 func newFakeBackend() *fakeBackend {
@@ -164,82 +173,74 @@ func (b *fakeBackend) currentListCount() int {
 	return b.listCount
 }
 
-type fakeRcloneExecutor struct {
-	backend                 *fakeBackend
-	calls                   [][]string
-	mu                      sync.Mutex
-	failOn                  string
-	mutateOnObjectCheck     bool
-	objectCheckCount        int
-	timeoutNext             bool
-	mutateOnDescriptorCheck bool
-	descriptorCheckCount    int
+func (b *fakeBackend) PutFileIfAbsent(_ context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectCommit, error) {
+	body, err := readVerifiedFakeFile(path, expectedSHA256, expectedBytes)
+	if err != nil {
+		return RemoteObjectCommit{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.timeoutNext {
+		b.timeoutNext = false
+		return RemoteObjectCommit{}, context.DeadlineExceeded
+	}
+	b.filePuts = append(b.filePuts, key)
+	if b.failManifest && strings.Contains(key, "snapshots/raw") {
+		return RemoteObjectCommit{}, errors.New("injected manifest copy failure")
+	}
+	if existing, ok := b.objects[key]; ok {
+		if bytes.Equal(existing, body) {
+			return RemoteObjectCommit{ETag: "fake-etag-" + key}, nil
+		}
+		return RemoteObjectCommit{}, ErrImmutableCollision
+	}
+	b.objects[key] = append([]byte(nil), body...)
+	return RemoteObjectCommit{ETag: "fake-etag-" + key}, nil
 }
 
-func (e *fakeRcloneExecutor) run(_ context.Context, executable string, args ...string) (string, error) {
-	e.mu.Lock()
-	e.calls = append(e.calls, append([]string{executable}, args...))
-	failOn := e.failOn
-	timeout := e.timeoutNext
-	e.timeoutNext = false
-	e.mu.Unlock()
-	if timeout {
-		return "", context.DeadlineExceeded
+func (b *fakeBackend) VerifyFile(_ context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectVerification, error) {
+	local, err := readVerifiedFakeFile(path, expectedSHA256, expectedBytes)
+	if err != nil {
+		return RemoteObjectVerification{}, err
 	}
-	if len(args) == 1 && args[0] == "version" {
-		return "rclone v1.74.4\n", nil
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.timeoutNext {
+		b.timeoutNext = false
+		return RemoteObjectVerification{}, context.DeadlineExceeded
 	}
-	if len(args) != 4 && len(args) != 3 {
-		return "", errors.New("unexpected fake rclone argv")
+	b.fileVerifies = append(b.fileVerifies, key)
+	if b.failVerify {
+		return RemoteObjectVerification{}, errors.New("injected remote verification failure")
 	}
-	operation := args[0]
-	if operation == failOn {
-		return "", errors.New("injected rclone failure")
+	if b.mutateOnObjectVerify && strings.Contains(key, "objects/raw") {
+		b.objectVerifyCount++
+		if b.objectVerifyCount == 3 {
+			b.objects[key] = []byte("tampered-remote-object")
+		}
 	}
-	if operation == "copyto" {
-		body, err := os.ReadFile(args[2])
-		if err != nil {
-			return "", err
+	if b.mutateOnDescriptorVerify && strings.Contains(key, "scope-descriptor-v1.json") {
+		b.descriptorVerifyCount++
+		if b.descriptorVerifyCount == 2 {
+			b.objects[key] = []byte("tampered-remote-scope-descriptor")
 		}
-		if existing, err := e.backend.Get(context.Background(), args[3]); err == nil {
-			if !bytes.Equal(existing, body) {
-				return "", errors.New("immutable content collision")
-			}
-			return "", nil
-		}
-		e.backend.force(args[3], body)
-		return "", nil
 	}
-	if operation == "check" {
-		local, err := os.ReadFile(args[2])
-		if err != nil {
-			return "", err
-		}
-		if e.mutateOnObjectCheck && bytes.Contains([]byte(args[3]), []byte("objects/raw")) {
-			e.mu.Lock()
-			e.objectCheckCount++
-			mutate := e.objectCheckCount == 3
-			e.mu.Unlock()
-			if mutate {
-				e.backend.force(args[3], []byte("tampered-remote-object"))
-			}
-		}
-		if e.mutateOnDescriptorCheck && bytes.Contains([]byte(args[3]), []byte("scope-descriptor-v1.json")) {
-			e.mu.Lock()
-			e.descriptorCheckCount++
-			mutate := e.descriptorCheckCount == 2
-			e.mu.Unlock()
-			if mutate {
-				e.backend.force(args[3], []byte("tampered-remote-scope-descriptor"))
-			}
-		}
-		remote, err := e.backend.Get(context.Background(), args[3])
-		if err != nil || !bytes.Equal(local, remote) {
-			return "", errors.New("fake rclone check mismatch")
-		}
-		return "", nil
+	remote, ok := b.objects[key]
+	if !ok || !bytes.Equal(local, remote) {
+		return RemoteObjectVerification{}, ErrRemoteCheckMismatch
 	}
-	return "", errors.New("forbidden fake operation")
+	return RemoteObjectVerification{ETag: "fake-etag-" + key}, nil
+}
+
+func readVerifiedFakeFile(path string, expectedSHA256 [32]byte, expectedBytes uint64) ([]byte, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) != expectedBytes || sha256.Sum256(body) != expectedSHA256 {
+		return nil, ErrLocalObjectChanged
+	}
+	return body, nil
 }
 
 func TestPublisherFirstAndIdempotentRetry(t *testing.T) {
@@ -271,7 +272,7 @@ func TestPublisherFirstAndIdempotentRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := fixture.backend.Get(context.Background(), descriptorKey); err != nil {
-		t.Fatalf("scope descriptor was not transferred through rclone: %v", err)
+		t.Fatalf("scope descriptor was not published through R2 API: %v", err)
 	}
 	claimKey, err = fixture.layout.ClaimKey(fixture.scope.PublisherEpoch)
 	if err != nil {
@@ -282,6 +283,27 @@ func TestPublisherFirstAndIdempotentRetry(t *testing.T) {
 	fixture.backend.mu.Unlock()
 	if len(puts) != 1 || puts[0] != claimKey {
 		t.Fatalf("conditional backend writes = %v, want publisher claim only %q", puts, claimKey)
+	}
+	states, err := fixture.journal.ObjectStateRecords(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantStates := []string{ObjectStateSealedLocal, ObjectStateUploading, ObjectStateRemoteCommitted, ObjectStateRemoteVerified}
+	if len(states) != len(wantStates) {
+		t.Fatalf("object state count = %d, want %d: %+v", len(states), len(wantStates), states)
+	}
+	raw := fixture.manifest.ChainObjects[0]
+	rawRemoteKey, err := fixture.layout.RemoteKey(raw.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, state := range states {
+		if state.State != wantStates[index] || state.Identity != key || state.ObjectKey != rawRemoteKey || state.LocalPath != fixture.input.ObjectPaths[raw.Key] || state.Size != raw.Bytes || state.SHA256 != raw.SHA256 || state.MD5 == ([16]byte{}) || state.UploadMethod != UploadMethodS3PutObjectV1 {
+			t.Fatalf("object state[%d] = %+v", index, state)
+		}
+	}
+	if states[2].RemoteETag == "" || states[3].RemoteETag == "" || states[3].RemoteVerifiedAt.IsZero() {
+		t.Fatalf("remote commit/verification metadata missing: %+v", states)
 	}
 }
 
@@ -310,9 +332,9 @@ func TestPublisherRejectsPublisherConflictAndLockConflict(t *testing.T) {
 
 func TestPublisherCheckFailureStopsBeforeManifest(t *testing.T) {
 	fixture := newPublicationFixture(t)
-	fixture.executor.failOn = "check"
+	fixture.backend.failVerify = true
 	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err == nil {
-		t.Fatal("check/download failure was not returned")
+		t.Fatal("remote verification failure was not returned")
 	}
 	manifestKey, err := fixture.layout.ManifestKey(fixture.manifest)
 	if err != nil {
@@ -325,7 +347,7 @@ func TestPublisherCheckFailureStopsBeforeManifest(t *testing.T) {
 
 func TestPublisherRemoteRawMutationStopsBeforeManifest(t *testing.T) {
 	fixture := newPublicationFixture(t)
-	fixture.executor.mutateOnObjectCheck = true
+	fixture.backend.mutateOnObjectVerify = true
 	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err == nil {
 		t.Fatal("remote raw mutation was not detected")
 	}
@@ -340,11 +362,11 @@ func TestPublisherRemoteRawMutationStopsBeforeManifest(t *testing.T) {
 
 func TestPublisherScopeDescriptorMutationStopsBeforeManifest(t *testing.T) {
 	fixture := newPublicationFixture(t)
-	fixture.executor.mutateOnDescriptorCheck = true
+	fixture.backend.mutateOnDescriptorVerify = true
 	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err == nil {
 		t.Fatal("remote scope descriptor mutation was not detected")
 	}
-	descriptorKey, err := fixture.layout.RcloneKey("scope-descriptor-v1.json")
+	descriptorKey, err := fixture.layout.ScopeDescriptorKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +385,7 @@ func TestPublisherScopeDescriptorMutationStopsBeforeManifest(t *testing.T) {
 
 func TestPublisherRawImmutableCollisionPreservesOriginalAndOmitsManifest(t *testing.T) {
 	fixture := newPublicationFixture(t)
-	rawKey, err := fixture.layout.RcloneRawObjectKey(fixture.manifest.ChainObjects[0])
+	rawKey, err := fixture.layout.RawObjectKey(fixture.manifest.ChainObjects[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,16 +394,16 @@ func TestPublisherRawImmutableCollisionPreservesOriginalAndOmitsManifest(t *test
 	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err == nil {
 		t.Fatal("raw immutable collision was accepted")
 	}
-	fixture.executor.mu.Lock()
+	fixture.backend.mu.Lock()
 	copyAttempted := false
-	for _, call := range fixture.executor.calls {
-		if len(call) == 5 && call[1] == "copyto" && call[2] == "--immutable" && call[4] == rawKey {
+	for _, key := range fixture.backend.filePuts {
+		if key == rawKey {
 			copyAttempted = true
 		}
 	}
-	fixture.executor.mu.Unlock()
+	fixture.backend.mu.Unlock()
 	if !copyAttempted {
-		t.Fatalf("immutable raw copyto was not attempted for %q", rawKey)
+		t.Fatalf("immutable raw PutObject was not attempted for %q", rawKey)
 	}
 	got, err := fixture.backend.Get(context.Background(), rawKey)
 	if err != nil || !bytes.Equal(got, original) {
@@ -404,18 +426,6 @@ func TestPublisherDoesNotExposeEnvironmentSecret(t *testing.T) {
 	fixture.input.ReceiptPath = receiptPath
 	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err != nil {
 		t.Fatal(err)
-	}
-	fixture.executor.mu.Lock()
-	var argv bytes.Buffer
-	for _, call := range fixture.executor.calls {
-		for _, argument := range call {
-			argv.WriteString(argument)
-			argv.WriteByte('\x00')
-		}
-	}
-	fixture.executor.mu.Unlock()
-	if bytes.Contains(argv.Bytes(), []byte(secret)) {
-		t.Fatal("environment secret appeared in recorded rclone argv")
 	}
 	manifestKey, err := fixture.layout.ManifestKey(fixture.manifest)
 	if err != nil {
@@ -446,7 +456,7 @@ func TestPublisherDoesNotExposeEnvironmentSecret(t *testing.T) {
 		t.Fatal("environment secret appeared in receipt bytes")
 	}
 
-	fixture.executor.failOn = "check"
+	fixture.backend.failVerify = true
 	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); err == nil || bytes.Contains([]byte(err.Error()), []byte(secret)) {
 		t.Fatalf("returned error exposed secret or was absent: %v", err)
 	}
@@ -454,7 +464,7 @@ func TestPublisherDoesNotExposeEnvironmentSecret(t *testing.T) {
 
 func TestPublisherRetriesAfterContextDeadline(t *testing.T) {
 	fixture := newPublicationFixture(t)
-	fixture.executor.timeoutNext = true
+	fixture.backend.timeoutNext = true
 	if _, err := fixture.publisher(t, nil).Publish(context.Background(), fixture.input); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("timeout error = %v, want context deadline", err)
 	}
@@ -490,7 +500,7 @@ func TestPublisherFailureBeforeManifestLeavesDataWithoutManifest(t *testing.T) {
 	fixture := newPublicationFixture(t)
 	// The descriptor is intentionally allowed through, while the manifest is
 	// failed after objects have been copied and checked by the fake below.
-	fixture.executor.failManifest = true
+	fixture.backend.failManifest = true
 	publisher := fixture.publisher(t, nil)
 	if _, err := publisher.Publish(context.Background(), fixture.input); err == nil {
 		t.Fatal("manifest copy failure was not returned")
@@ -510,27 +520,13 @@ type publicationFixture struct {
 	manifest archive.RawDayManifest
 	input    PublicationInput
 	backend  *fakeBackend
-	executor *testRcloneExecutor
 	journal  *PublicationJournal
-	toolPath string
-}
-
-type testRcloneExecutor struct {
-	fakeRcloneExecutor
-	failManifest bool
-}
-
-func (e *testRcloneExecutor) run(ctx context.Context, executable string, args ...string) (string, error) {
-	if e.failManifest && len(args) > 0 && args[0] == "copyto" && len(args) > 3 && bytes.Contains([]byte(args[3]), []byte("snapshots/raw")) {
-		return "", errors.New("injected manifest copy failure")
-	}
-	return e.fakeRcloneExecutor.run(ctx, executable, args...)
 }
 
 func newPublicationFixture(t *testing.T) *publicationFixture {
 	t.Helper()
 	scope := layoutTestScope()
-	layout, err := NewLayout("v1", "v1", scope)
+	layout, err := NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,12 +547,6 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 		t.Fatal(err)
 	}
 	backend := newFakeBackend()
-	executor := &testRcloneExecutor{fakeRcloneExecutor: fakeRcloneExecutor{backend: backend}}
-	data := []byte("fake-rclone-binary")
-	toolPath := filepath.Join(t.TempDir(), "rclone.exe")
-	if err := os.WriteFile(toolPath, data, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	journal, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -565,17 +555,13 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 	return &publicationFixture{
 		scope: scope, layout: layout, manifest: manifest,
 		input:   PublicationInput{Manifest: manifest, ManifestBytes: manifestBytes, ObjectPaths: map[string]string{object.Key: object.Path}},
-		backend: backend, executor: executor, journal: journal, toolPath: toolPath,
+		backend: backend, journal: journal,
 	}
 }
 
 func (f *publicationFixture) publisher(t *testing.T, afterStage func(string) error) *Publisher {
 	t.Helper()
-	publisher, err := NewPublisher(f.layout, f.backend, &RcloneRunner{
-		binaryPath: f.toolPath,
-		tool:       RcloneTool{GOOS: "windows", GOARCH: "amd64", BinaryBytes: uint64(len("fake-rclone-binary")), BinarySHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("fake-rclone-binary")))},
-		executor:   f.executor,
-	}, f.journal, filepath.Join(filepath.Dir(f.journal.Path()), "campaign.lock"))
+	publisher, err := NewPublisher(f.layout, f.backend, f.journal, filepath.Join(filepath.Dir(f.journal.Path()), "campaign.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}

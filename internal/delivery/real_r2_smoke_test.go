@@ -6,9 +6,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -22,9 +22,6 @@ const (
 	realR2BucketEnv    = "TICK_M2_REAL_R2_BUCKET"
 	realR2PrefixEnv    = "TICK_M2_REAL_R2_PREFIX"
 	realR2EndpointEnv  = "TICK_M2_REAL_R2_ENDPOINT"
-	realR2RemoteEnv    = "TICK_M2_REAL_R2_REMOTE"
-	realR2BinaryEnv    = "TICK_M2_RCLONE_BINARY"
-	realR2ConfigEnv    = "RCLONE_CONFIG"
 	realR2AccessEnv    = "AWS_ACCESS_KEY_ID"
 	realR2SecretEnv    = "AWS_SECRET_ACCESS_KEY"
 	realR2Confirmation = "I_UNDERSTAND_NO_OVERWRITE"
@@ -38,8 +35,7 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 		t.Skipf("set %s to the explicit no-overwrite confirmation", realR2ConfirmEnv)
 	}
 	for _, name := range []string{
-		realR2BucketEnv, realR2PrefixEnv, realR2EndpointEnv, realR2RemoteEnv,
-		realR2BinaryEnv, realR2ConfigEnv, realR2AccessEnv, realR2SecretEnv,
+		realR2BucketEnv, realR2PrefixEnv, realR2EndpointEnv, realR2AccessEnv, realR2SecretEnv,
 	} {
 		if strings.TrimSpace(os.Getenv(name)) == "" {
 			t.Skipf("required smoke variable %s is unavailable", name)
@@ -50,22 +46,6 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 	if !strings.HasPrefix(prefix, "m2-smoke/") || strings.Contains(prefix, "..") || strings.ContainsAny(prefix, "\\\r\n") {
 		t.Skip("the smoke prefix must be an isolated m2-smoke/ prefix without traversal")
 	}
-	remote := os.Getenv(realR2RemoteEnv)
-	if !validSmokeRemote(remote) {
-		t.Skip("the smoke rclone remote name is not a simple configured remote name")
-	}
-	if stat, err := os.Stat(os.Getenv(realR2ConfigEnv)); err != nil || !stat.Mode().IsRegular() {
-		t.Skip("the configured rclone profile is unavailable")
-	}
-
-	lock, err := r2.LoadToolLock(filepath.Join("..", "..", "tools", "tick-data-tools.lock.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rclone, err := r2.NewRcloneRunnerForPlatform(lock, os.Getenv(realR2BinaryEnv), runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		t.Skip("the pinned rclone lock has no entry for this smoke platform")
-	}
 
 	var suffixBytes [16]byte
 	if _, err := rand.Read(suffixBytes[:]); err != nil {
@@ -73,11 +53,10 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 	}
 	suffix := hex.EncodeToString(suffixBytes[:])
 	immutableRoot := prefix + "/run-" + suffix
-	rcloneRoot := remote + ":" + bucket + "/" + immutableRoot
 	scope := m2E2EScope()
 	scope.CampaignID = "real-r2-smoke-" + suffix
 	scope.PublisherID = "real-r2-smoke-publisher-" + suffix
-	layout, err := r2.NewLayout(immutableRoot, rcloneRoot, scope)
+	layout, err := r2.NewLayout(immutableRoot, scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +87,7 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = journal.Close() })
-	publisher, err := r2.NewPublisher(layout, backend, rclone, journal, "")
+	publisher, err := r2.NewPublisher(layout, backend, journal, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +96,14 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	credentialsPath := filepath.Join(t.TempDir(), "reader-credentials.json")
+	credentialsBody := fmt.Sprintf(`{"format_version":1,"access_key_id":%q,"secret_access_key":%q}`, os.Getenv(realR2AccessEnv), os.Getenv(realR2SecretEnv))
+	if err := os.WriteFile(credentialsPath, []byte(credentialsBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	reader, err := NewArchiveReaderV1(context.Background(), ReaderConfig{
 		Version: ReaderConfigVersion, Endpoint: endpoint,
-		BucketEnv: realR2BucketEnv, AccessKeyEnv: realR2AccessEnv, SecretKeyEnv: realR2SecretEnv,
+		Bucket: bucket, CredentialsPath: credentialsPath,
 		Region: "auto", ImmutableRoot: immutableRoot, CacheRoot: t.TempDir(),
 		MaxMetadataBytes: 1 << 20, MaxRawObjectBytes: 1 << 30,
 	})
@@ -136,16 +120,4 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 	if _, err := reader.VerifyCampaign(context.Background(), scope.DatasetID, scope.CampaignID, hex.EncodeToString(object.Segment.ChainRoot[:])); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func validSmokeRemote(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, char := range value {
-		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '_' && char != '-' {
-			return false
-		}
-	}
-	return true
 }

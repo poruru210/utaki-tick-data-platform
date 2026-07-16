@@ -43,7 +43,7 @@ jobs:
           CGO_ENABLED: "1"
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/retention ./internal/operations ./internal/httpapi -count=1 -json > artifacts/windows-race.json
+          mise exec -- go test -race ./internal/app ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/retention ./internal/operations ./internal/httpapi -count=1 -json > artifacts/windows-race.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Capture race environment

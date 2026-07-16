@@ -11,16 +11,12 @@ import (
 
 func TestLayoutUsesImmutableRootExactlyOnce(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("v1", "r2:isolated-bucket/v1", scope)
+	layout, err := NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	objectKey := archive.RawWALObjectKey([32]byte{1})
 	remoteObject, err := layout.RemoteKey(objectKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rcloneObject, err := layout.RcloneKey(objectKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,26 +31,19 @@ func TestLayoutUsesImmutableRootExactlyOnce(t *testing.T) {
 	if remoteObject != "v1/"+wantPrefix+objectKey {
 		t.Fatalf("S3 key = %q, want %q", remoteObject, "v1/"+wantPrefix+objectKey)
 	}
-	if rcloneObject != "r2:isolated-bucket/v1/"+wantPrefix+objectKey {
-		t.Fatalf("rclone locator = %q, want %q", rcloneObject, "r2:isolated-bucket/v1/"+wantPrefix+objectKey)
-	}
-	if strings.Count(remoteObject, "v1/") != 1 || strings.Count(rcloneObject, "v1/") != 1 {
-		t.Fatalf("immutable roots were duplicated: S3=%q rclone=%q", remoteObject, rcloneObject)
+	if strings.Count(remoteObject, "v1/") != 1 {
+		t.Fatalf("immutable root was duplicated: S3=%q", remoteObject)
 	}
 }
 
 func TestLayoutDerivesReplayBundlePrefixesWithoutCallerKeys(t *testing.T) {
-	layout, err := NewLayout("v1", "r2:isolated-bucket/v1", layoutTestScope())
+	layout, err := NewLayout("v1", layoutTestScope())
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantImmutable := "v1/" + CampaignPrefix(layout.Scope)
-	wantRclone := "r2:isolated-bucket/v1/" + CampaignPrefix(layout.Scope)
 	if got := layout.ImmutableCampaignPrefix(); got != strings.TrimSuffix(wantImmutable, "/") {
 		t.Fatalf("immutable campaign prefix = %q", got)
-	}
-	if got := layout.RcloneCampaignPrefix(); got != strings.TrimSuffix(wantRclone, "/") {
-		t.Fatalf("rclone campaign prefix = %q", got)
 	}
 }
 
@@ -72,7 +61,7 @@ func TestLayoutSeparatesDatasetsWithTheSameCampaignIdentity(t *testing.T) {
 
 func TestLayoutDerivesManifestLocatorFromOneRelativeKey(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("smoke/v1", "r2:isolated-bucket/smoke/v1", scope)
+	layout, err := NewLayout("smoke/v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,25 +78,20 @@ func TestLayoutDerivesManifestLocatorFromOneRelativeKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rcloneKey, err := layout.RcloneManifestKey(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
 	wantRelative := "snapshots/raw/day-definition=" + archive.IdentityPathKey(scope.DayDefinitionID) +
 		"/date=2024-03-09/raw-day-2-" + fmt.Sprintf("%x", digest) + ".json"
 	wantS3 := "smoke/v1/" + CampaignPrefix(scope) + wantRelative
-	wantRclone := "r2:isolated-bucket/smoke/v1/" + CampaignPrefix(scope) + wantRelative
-	if s3Key != wantS3 || rcloneKey != wantRclone {
-		t.Fatalf("manifest locators differ: S3=%q rclone=%q want S3=%q rclone=%q", s3Key, rcloneKey, wantS3, wantRclone)
+	if s3Key != wantS3 {
+		t.Fatalf("manifest key = %q want %q", s3Key, wantS3)
 	}
-	if strings.Count(s3Key, CampaignPrefix(scope)) != 1 || strings.Count(rcloneKey, CampaignPrefix(scope)) != 1 {
-		t.Fatalf("campaign prefix was duplicated: S3=%q rclone=%q", s3Key, rcloneKey)
+	if strings.Count(s3Key, CampaignPrefix(scope)) != 1 {
+		t.Fatalf("campaign prefix was duplicated: S3=%q", s3Key)
 	}
 }
 
 func TestLayoutRejectsUnsafeRoots(t *testing.T) {
 	for _, root := range []string{"/v1", "//server/share", "C:/v1", "v1/../x", "v1/./x"} {
-		if _, err := NewLayout(root, "r2:bucket/v1", layoutTestScope()); err == nil {
+		if _, err := NewLayout(root, layoutTestScope()); err == nil {
 			t.Fatalf("unsafe immutable root %q was accepted", root)
 		}
 	}
@@ -115,7 +99,7 @@ func TestLayoutRejectsUnsafeRoots(t *testing.T) {
 
 func TestLayoutRejectsForgedManifestDigestAndTraversalDate(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("v1", "r2:bucket/v1", scope)
+	layout, err := NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,14 +110,11 @@ func TestLayoutRejectsForgedManifestDigestAndTraversalDate(t *testing.T) {
 		if _, err := layout.ManifestKey(manifest); err == nil {
 			t.Fatalf("forged manifest key input was accepted: %+v", manifest)
 		}
-		if _, err := layout.RcloneManifestKey(manifest); err == nil {
-			t.Fatalf("forged rclone manifest key input was accepted: %+v", manifest)
-		}
 	}
 }
 
 func TestLayoutValidatesTrustedFullDerivativeKeys(t *testing.T) {
-	layout, err := NewLayout("v1", "r2:bucket/v1", layoutTestScope())
+	layout, err := NewLayout("v1", layoutTestScope())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,32 +163,6 @@ func TestLayoutValidatesTrustedFullDerivativeKeys(t *testing.T) {
 	}
 	if err := layout.VerifyReplayDayManifestKey(manifest, fullReplay); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestLayoutDerivesTrustedRcloneDerivativeKeys(t *testing.T) {
-	layout, err := NewLayout("v1", "r2:bucket/v1", layoutTestScope())
-	if err != nil {
-		t.Fatal(err)
-	}
-	part := layoutTestPart()
-	partRclone, err := layout.RcloneReplayPartObjectKey(part)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if partRclone != "r2:bucket/v1/"+CampaignPrefix(layout.Scope)+part.PartKey {
-		t.Fatalf("rclone Parquet key = %q", partRclone)
-	}
-	manifestRclone, err := layout.RcloneReplayPartManifestKey(part)
-	if err != nil {
-		t.Fatal(err)
-	}
-	partManifestKey, err := protocol.PartManifestKey(part)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if manifestRclone != "r2:bucket/v1/"+CampaignPrefix(layout.Scope)+partManifestKey {
-		t.Fatalf("rclone part manifest key = %q", manifestRclone)
 	}
 }
 

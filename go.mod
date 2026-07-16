@@ -13,6 +13,9 @@ require (
 	github.com/gofrs/flock v0.13.0
 	github.com/parquet-go/parquet-go v0.30.1
 	github.com/pelletier/go-toml/v2 v2.2.4
+	go.uber.org/fx v1.24.0
+	go.uber.org/goleak v1.2.0
+	golang.org/x/sys v0.38.0
 	modernc.org/sqlite v1.39.1
 )
 
@@ -41,8 +44,10 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
+	go.uber.org/dig v1.19.0 // indirect
+	go.uber.org/multierr v1.10.0 // indirect
+	go.uber.org/zap v1.26.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
-	golang.org/x/sys v0.38.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	modernc.org/libc v1.66.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

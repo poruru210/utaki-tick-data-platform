@@ -47,19 +47,24 @@ type ReplayActionExecutor interface {
 }
 
 type NarrowReplayActionExecutor struct {
-	tool ReplayActionTool
+	writer ReplayActionWriter
 }
 
-func NewNarrowReplayActionExecutor(tool ReplayActionTool) (*NarrowReplayActionExecutor, error) {
-	if tool == nil {
-		return nil, fmt.Errorf("replay action tool is nil")
+type ReplayActionWriter interface {
+	PutFileIfAbsent(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectCommit, error)
+	VerifyFile(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectVerification, error)
+}
+
+func NewNarrowReplayActionExecutor(writer ReplayActionWriter) (*NarrowReplayActionExecutor, error) {
+	if writer == nil {
+		return nil, fmt.Errorf("replay action writer is nil")
 	}
-	return &NarrowReplayActionExecutor{tool: tool}, nil
+	return &NarrowReplayActionExecutor{writer: writer}, nil
 }
 
 type resolvedReplayAction struct {
 	artifact  ReplayLocalArtifact
-	rcloneKey string
+	remoteKey string
 	digest    string
 	bytes     uint64
 	relative  string
@@ -82,11 +87,17 @@ func (e *NarrowReplayActionExecutor) Execute(ctx context.Context, bundle ReplayP
 	}
 	defer cleanup()
 
-	if err := e.tool.CopyToImmutable(ctx, path, resolved.rcloneKey); err != nil {
-		return classifyReplayActionToolError(result, err, true), nil
+	contentDigest, err := protocol.ParseHashHex(resolved.artifact.ContentSHA256)
+	if err != nil {
+		result.Class = ReplayActionDifferent
+		result.ErrorClass = ReplayActionErrorLocalDifferent
+		return result, nil
 	}
-	if err := e.tool.CheckDownload(ctx, path, resolved.rcloneKey); err != nil {
-		return classifyReplayActionToolError(result, err, false), nil
+	if _, err := e.writer.PutFileIfAbsent(ctx, resolved.remoteKey, path, contentDigest, resolved.bytes); err != nil {
+		return classifyReplayActionWriteError(result, err, true), nil
+	}
+	if _, err := e.writer.VerifyFile(ctx, resolved.remoteKey, path, contentDigest, resolved.bytes); err != nil {
+		return classifyReplayActionWriteError(result, err, false), nil
 	}
 	result.Class = ReplayActionCompleted
 	result.ErrorClass = ReplayActionErrorNone
@@ -97,27 +108,27 @@ func resolveReplayAction(bundle ReplayPublicationBundle, action ReplayAction) (r
 	if action.ObjectID == "" {
 		return resolvedReplayAction{}, fmt.Errorf("replay action object ID is empty")
 	}
-	var kind, rcloneKey, digest, relative string
+	var kind, remoteKey, digest, relative string
 	var bytes uint64
 	switch action.Kind {
 	case ReplayActionUploadParquet:
 		for _, object := range bundle.Contract.ParquetObjects {
 			if ReplayObjectID(object.ObjectID) == action.ObjectID {
-				kind, rcloneKey, digest, relative, bytes = "parquet", object.RcloneKey, object.SHA256, object.RelativeKey, object.Bytes
+				kind, remoteKey, digest, relative, bytes = "parquet", object.FullKey, object.SHA256, object.RelativeKey, object.Bytes
 				break
 			}
 		}
 	case ReplayActionUploadPartManifest:
 		for _, object := range bundle.Contract.PartManifests {
 			if ReplayObjectID(object.ObjectID) == action.ObjectID {
-				kind, rcloneKey, digest, relative, bytes = "part_manifest", object.RcloneKey, object.DomainDigest, object.RelativeKey, object.Bytes
+				kind, remoteKey, digest, relative, bytes = "part_manifest", object.FullKey, object.DomainDigest, object.RelativeKey, object.Bytes
 				break
 			}
 		}
 	case ReplayActionUploadReplayManifest:
 		if replayManifestObjectID(bundle.Contract) == action.ObjectID {
 			object := bundle.Contract.ReplayManifest
-			kind, rcloneKey, digest, relative, bytes = "replay_manifest", object.RcloneKey, object.DomainDigest, object.RelativeKey, object.Bytes
+			kind, remoteKey, digest, relative, bytes = "replay_manifest", object.FullKey, object.DomainDigest, object.RelativeKey, object.Bytes
 		}
 	default:
 		return resolvedReplayAction{}, fmt.Errorf("unsupported replay action kind %q", action.Kind)
@@ -132,7 +143,7 @@ func resolveReplayAction(bundle ReplayPublicationBundle, action ReplayAction) (r
 	if kind == "parquet" && artifact.ContentSHA256 != digest {
 		return resolvedReplayAction{}, fmt.Errorf("sealed Parquet content hash does not match replay action")
 	}
-	return resolvedReplayAction{artifact: artifact, rcloneKey: rcloneKey, digest: digest, bytes: bytes, relative: relative}, nil
+	return resolvedReplayAction{artifact: artifact, remoteKey: remoteKey, digest: digest, bytes: bytes, relative: relative}, nil
 }
 
 func materializeReplayActionSource(action resolvedReplayAction) (string, func(), error) {
@@ -190,13 +201,13 @@ func materializeReplayActionSource(action resolvedReplayAction) (string, func(),
 	return temporary.Name(), cleanup, nil
 }
 
-func classifyReplayActionToolError(result ReplayActionResult, err error, copyPhase bool) ReplayActionResult {
-	if copyPhase && errors.Is(err, ErrRcloneCollision) {
+func classifyReplayActionWriteError(result ReplayActionResult, err error, copyPhase bool) ReplayActionResult {
+	if copyPhase && (errors.Is(err, ErrImmutableCollision) || errors.Is(err, ErrObjectExists)) {
 		result.Class = ReplayActionDifferent
 		result.ErrorClass = ReplayActionErrorCollision
 		return result
 	}
-	if !copyPhase && (errors.Is(err, ErrRcloneCheckMismatch) || errors.Is(err, ErrReplayCheckDifferent)) {
+	if !copyPhase && (errors.Is(err, ErrRemoteCheckMismatch) || errors.Is(err, ErrReplayCheckDifferent)) {
 		result.Class = ReplayActionDifferent
 		result.ErrorClass = ReplayActionErrorCheckMismatch
 		return result

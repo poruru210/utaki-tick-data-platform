@@ -15,7 +15,7 @@ import (
 	"tick-data-platform/internal/protocol"
 )
 
-var ErrReplayCheckDifferent = ErrRcloneCheckMismatch
+var ErrReplayCheckDifferent = ErrRemoteCheckMismatch
 
 type ReplayObservationLock interface {
 	AssertHeld(bundle ReplayPublicationBundle) error

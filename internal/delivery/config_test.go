@@ -13,10 +13,10 @@ func TestLoadReaderConfigIsVersionedStrictAndDoesNotEchoSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reader.toml")
 	content := strings.Join([]string{
 		`reader_config_version = "tick-reader-v1"`,
-		`endpoint = "https://reader.invalid"`,
-		`bucket_env = "TICK_READER_TEST_BUCKET"`,
-		`access_key_env = "TICK_READER_TEST_ACCESS"`,
-		`secret_key_env = "TICK_READER_TEST_SECRET"`,
+		`endpoint = "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com"`,
+		`bucket = "tick-reader-test"`,
+		`credentials_path = "./credentials.json"`,
+		`credentials_protection = "managed-mount"`,
 		`region = "auto"`,
 		`immutable_root = "v1"`,
 		`cache_root = "./cache"`,

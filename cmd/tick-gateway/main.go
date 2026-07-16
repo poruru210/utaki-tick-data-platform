@@ -3,13 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
+	"tick-data-platform/internal/app"
+	appconfig "tick-data-platform/internal/config"
 	"tick-data-platform/internal/ingest"
 )
 
@@ -21,6 +23,15 @@ func main() {
 	configPath, err := flagValue(os.Args[2:], "--config")
 	if err != nil {
 		fatalf("%v", err)
+	}
+	switch command {
+	case "run":
+		configValue, err := appconfig.Load(configPath)
+		if err != nil {
+			fatalf("load config: %v", err)
+		}
+		run(configValue)
+		return
 	}
 	config, err := ingest.LoadConfig(configPath)
 	if err != nil {
@@ -36,8 +47,6 @@ func main() {
 			fatalf("close initialized gateway: %v", err)
 		}
 		fmt.Printf("initialized gateway WAL=%s journal=%s\n", config.WALRoot, config.JournalPath)
-	case "run":
-		run(config)
 	case "status", "reconcile", "verify-local":
 		gateway, err := ingest.Open(config)
 		if err != nil {
@@ -76,17 +85,27 @@ func hasFlag(args []string, name string) bool {
 	return false
 }
 
-func run(config ingest.Config) {
-	gateway, err := ingest.Open(config)
+func run(configValue appconfig.Config) {
+	application, err := app.NewProductionApp(configValue)
 	if err != nil {
-		fatalf("open gateway: %v", err)
+		fatalf("create production application: %v", err)
 	}
-	defer func() { _ = gateway.Close() }()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	fmt.Printf("tick-gateway listening on %s\n", config.ListenAddress)
-	if err := gateway.ListenAndServe(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		fatalf("gateway stopped: %v", err)
+	startCtx, cancelStart := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelStart()
+	if err := application.Start(startCtx); err != nil {
+		fatalf("start production application: %v", err)
+	}
+	fmt.Printf("tick-gateway production application started\n")
+	select {
+	case <-ctx.Done():
+	case <-application.Done():
+	}
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelStop()
+	if err := application.Stop(stopCtx); err != nil {
+		fatalf("stop production application: %v", err)
 	}
 }
 

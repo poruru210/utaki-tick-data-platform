@@ -79,10 +79,6 @@ func testReceipt() VerificationReceipt {
 	return VerificationReceipt{
 		ReceiptVersion:       "publication-verification-receipt-v1",
 		ManifestKey:          "v1/snapshots/raw/test.json",
-		RcloneVersion:        RcloneVersion,
-		RcloneGOOS:           "windows",
-		RcloneGOARCH:         "amd64",
-		RcloneBinarySHA256:   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		VerificationComplete: true,
 	}
 }

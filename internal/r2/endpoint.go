@@ -3,6 +3,7 @@ package r2
 import (
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // ValidateHTTPSHostEndpoint accepts only the production R2 endpoint shape.
@@ -12,6 +13,10 @@ func ValidateHTTPSHostEndpoint(value string) error {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return fmt.Errorf("endpoint must be an HTTPS host-only URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "r2.cloudflarestorage.com" || !strings.HasSuffix(host, ".r2.cloudflarestorage.com") {
+		return fmt.Errorf("endpoint host is not an allowed R2 host")
 	}
 	return nil
 }

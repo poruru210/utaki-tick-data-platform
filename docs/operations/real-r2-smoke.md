@@ -13,11 +13,10 @@ raw-only smokeとM4 handover harnessのskip記録はありますが、external p
   `m4-smoke/<run-id>/`相当の隔離namespaceへ固定する。`..`、backslash、改行、
   `v1/`直下を許可しない。
 - old writer、new writer、read-only readerは別credentialとし、credential value、
-  endpoint、rclone config、account IDをlog、JSON、commitへ書かない。
+  endpoint、account IDをlog、JSON、commitへ書かない。
 - remote objectのdelete、move、sync、overwriteは行わない。probeが誤ってwrite
   成功した場合も削除で後始末せず、runをfailとして隔離prefixを保持する。
-- rclone binaryは`tools/tick-data-tools.lock.toml`の対象platformとhashが一致し、
-  config fileはowner-only permissionであることを確認する。
+- R2 uploadはAWS SDK for Go v2のS3 API境界だけを使い、runtimeに外部転送toolを要求しない。
 
 ## Existing raw smoke
 
@@ -26,8 +25,7 @@ raw-only smokeとM4 handover harnessのskip記録はありますが、external p
 secret storeまたはprocess environmentから注入します。
 
 `TICK_M2_REAL_R2_SMOKE`、`TICK_M2_REAL_R2_CONFIRM`、`TICK_M2_REAL_R2_BUCKET`、
-`TICK_M2_REAL_R2_PREFIX`、`TICK_M2_REAL_R2_ENDPOINT`、`TICK_M2_REAL_R2_REMOTE`、
-`TICK_M2_RCLONE_BINARY`、`RCLONE_CONFIG`、`AWS_ACCESS_KEY_ID`、
+`TICK_M2_REAL_R2_PREFIX`、`TICK_M2_REAL_R2_ENDPOINT`、`AWS_ACCESS_KEY_ID`、
 `AWS_SECRET_ACCESS_KEY`
 
 実行コマンド:
@@ -173,7 +171,7 @@ set TICK_M4_REAL_R2_SMOKE=1 to run the isolated real-R2 handover smoke
 repository外に次のsecret-free summaryを保存し、tracked verification recordから
 artifact digest、保存場所、retention期限だけを参照します。
 
-- run identity、commit、OS、Go/rclone version、config digest
+- run identity、commit、OS、Go version、R2 SDK publication config digest
 - synthetic scope key digest、immutable prefix digest、seal digest
 - old process stop、old credential revoke、operator confirmationの3つのdigestと時刻
 - old write denied、new write accepted、read-only write deniedのredacted status code
@@ -186,4 +184,4 @@ raw artifactのsha256、保存場所の非secret参照、retention期限を
 `report_digest`と`artifact_store`へ転記します。skipまたはtest logだけの画面確認ではpassに
 しません。
 
-credential value、endpoint、bucket名、local absolute path、rclone config本文は保存しません。
+credential value、endpoint、bucket名、local absolute pathは保存しません。

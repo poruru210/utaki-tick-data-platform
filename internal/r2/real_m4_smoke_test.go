@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/credentials"
 	"tick-data-platform/internal/operations"
 	"tick-data-platform/internal/protocol"
 )
@@ -70,7 +71,7 @@ func TestOptionalM4RealR2HandoverSmoke(t *testing.T) {
 	}
 
 	scope := m4RealR2Scope(runID)
-	layout, err := NewLayout(prefix, "", scope)
+	layout, err := NewLayout(prefix, scope)
 	if err != nil {
 		t.Fatalf("construct isolated layout failed (%T)", err)
 	}
@@ -169,13 +170,11 @@ func m4RealR2Verify(t *testing.T, settings S3BackendConfig, layout Layout, limit
 	if err != nil {
 		t.Fatalf("construct new writer failed (%T)", err)
 	}
-	readOnly, err := NewS3ReadBackend(context.Background(), S3ReadBackendConfig{
-		Bucket:       settings.Bucket,
-		Endpoint:     settings.Endpoint,
-		Region:       settings.Region,
-		AccessKeyEnv: readAccessEnv,
-		SecretKeyEnv: readSecretEnv,
-	})
+	readOnly, err := NewS3ReadBackendWithProvider(context.Background(), S3ReadBackendConfig{
+		Bucket:   settings.Bucket,
+		Endpoint: settings.Endpoint,
+		Region:   settings.Region,
+	}, m4StaticCredentialProvider{accessKey: os.Getenv(readAccessEnv), secretKey: os.Getenv(readSecretEnv)})
 	if err != nil {
 		t.Fatalf("construct read-only backend failed (%T)", err)
 	}
@@ -385,6 +384,15 @@ func m4RealR2Verify(t *testing.T, settings S3BackendConfig, layout Layout, limit
 		t.Fatalf("read-only candidate inventory was not exact (%T)", err)
 	}
 	t.Logf("M4 real-R2 handover ready: run=%s seal=%s prior-claim=%s", runID, protocol.EncodeHashHex(seal.Digest), protocol.EncodeHashHex(mustM4RealR2ClaimDigest(t, expectedPriorBytes)))
+}
+
+type m4StaticCredentialProvider struct {
+	accessKey string
+	secretKey string
+}
+
+func (p m4StaticCredentialProvider) Load(context.Context) (credentials.Credentials, error) {
+	return credentials.Credentials{AccessKeyID: p.accessKey, SecretAccessKey: p.secretKey}, nil
 }
 
 func m4RealR2Context(t *testing.T, limits operations.ResourceLimits) (context.Context, context.CancelFunc) {

@@ -17,7 +17,7 @@ Copy-Item local/tick-reader.toml.example local/tick-reader.toml
 
 API token、R2 credential、アカウント情報、接続先の秘密値は、設定ファイルに直接コミットしません。
 
-秘密情報は環境変数またはローカルのsecret storeから注入します。
+秘密情報は、OSのSecret管理またはアクセス権を制限したcredential bundleへ保存し、設定にはそのファイルパスだけを指定します。
 
 実際のtickデータ、WAL、SQLite、Parquet、R2用のruntime TOMLもコミットしません。
 
@@ -33,11 +33,11 @@ MT5 producerを実行するときは、MetaTrader 5の端末、対象symbol、lo
 
 `tick-reader.toml`は`reader_config_version = "tick-reader-v1"`のstrict設定として扱い、未知のキーを拒否します。
 
-`endpoint`、`bucket_env`、`access_key_env`、`secret_key_env`、`region`、`immutable_root`、`cache_root`、サイズ上限を明示します。
+`endpoint`、`bucket`、`credentials_path`、`credentials_protection`、`region`、`immutable_root`、`cache_root`、サイズ上限を明示します。
 
 `endpoint`は必須のHTTP(S) URLであり、R2のreaderは`region = "auto"`を使用します。
 
-bucket名とcredential値は設定ファイルへ書かず、設定で指定した環境変数から実行時だけ読み取ります。
+bucket名は設定ファイルへ書けます。credential値は設定ファイルへ書かず、`credentials_path`で指定したbundleから起動時に一度だけ読み取ります。
 
 `tickctl`と`tick-verify`はimmutableなscope descriptor、raw manifest、sealed WALだけを読み取り、書き込み用credentialを要求しません。
 

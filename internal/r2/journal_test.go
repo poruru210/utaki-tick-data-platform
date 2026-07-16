@@ -1,6 +1,8 @@
 package r2
 
 import (
+	"context"
+	"crypto/sha256"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -42,6 +44,39 @@ func TestPublicationJournalAdvanceStageIsIdempotentAndMonotonic(t *testing.T) {
 	}
 }
 
+func TestPublicationJournalListsUnfinishedIntentForRecovery(t *testing.T) {
+	journal, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	intent := testPublicationIntent(t)
+	if _, err := journal.CreateOrGetIntent(intent); err != nil {
+		t.Fatal(err)
+	}
+	unfinished, err := journal.ListUnfinished(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unfinished) != 1 || unfinished[0].Identity != intent.ManifestKey || unfinished[0].Stage != StageIntent {
+		t.Fatalf("unfinished intents = %+v", unfinished)
+	}
+	input := unfinished[0].Input
+	if input.Manifest.ManifestSHA256 != intent.Manifest.ManifestSHA256 || string(input.ManifestBytes) != string(intent.ManifestBytes) || input.ManifestPath != intent.ManifestPath || input.ReceiptPath != intent.ReceiptPath {
+		t.Fatalf("recovered input = %+v", input)
+	}
+	if err := journal.AdvanceStage(intent.ManifestKey, StageReceiptSaved); err != nil {
+		t.Fatal(err)
+	}
+	unfinished, err = journal.ListUnfinished(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unfinished) != 0 {
+		t.Fatalf("terminal intent remained unfinished: %+v", unfinished)
+	}
+}
+
 func testPublicationIntent(t *testing.T) PublicationIntent {
 	t.Helper()
 	scope := layoutTestScope()
@@ -58,18 +93,21 @@ func testPublicationIntent(t *testing.T) PublicationIntent {
 	if err != nil {
 		t.Fatal(err)
 	}
+	descriptorBytes := []byte(`{"scope":"test"}`)
+	descriptorHash := sha256.Sum256(descriptorBytes)
 	return PublicationIntent{
-		Scope:                    scope,
-		Claim:                    claim,
-		ClaimKey:                 "claim",
-		ClaimHash:                claimHash,
-		ScopeDescriptorKey:       "descriptor",
-		ScopeDescriptorRcloneKey: "r2:descriptor",
-		ScopeDescriptorPath:      "descriptor.json",
-		ManifestKey:              "manifest",
-		Manifest:                 manifest,
-		ManifestBytes:            manifestBytes,
-		ManifestPath:             "manifest.json",
-		ReceiptPath:              "receipt.json",
+		Scope:                 scope,
+		Claim:                 claim,
+		ClaimKey:              "claim",
+		ClaimHash:             claimHash,
+		ScopeDescriptorKey:    "descriptor",
+		ScopeDescriptorPath:   "descriptor.json",
+		ScopeDescriptorSHA256: descriptorHash,
+		ScopeDescriptorBytes:  uint64(len(descriptorBytes)),
+		ManifestKey:           "manifest",
+		Manifest:              manifest,
+		ManifestBytes:         manifestBytes,
+		ManifestPath:          "manifest.json",
+		ReceiptPath:           "receipt.json",
 	}
 }

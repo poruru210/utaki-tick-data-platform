@@ -42,7 +42,6 @@
                 "last_stream_sequence": 9,
                 "object_id": "q",
                 "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/parquet/0-9-2222222222222222222222222222222222222222222222222222222222222222.parquet",
-                "rclone_key": "r/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/parquet/0-9-2222222222222222222222222222222222222222222222222222222222222222.parquet",
                 "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
             }
         ],
@@ -53,8 +52,7 @@
                 "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json",
                 "object_id": "m",
                 "part_sequence": 0,
-                "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json",
-                "rclone_key": "r/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json"
+                "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json"
             }
         ],
         "part_set_root": "8888888888888888888888888888888888888888888888888888888888888888",
@@ -63,7 +61,6 @@
             "domain_digest": "5555555555555555555555555555555555555555555555555555555555555555",
             "full_key": "i/raw.json",
             "relative_key": "raw.json",
-            "rclone_key": "r/raw.json",
             "revision": 1
         },
         "raw_objects": [
@@ -71,7 +68,6 @@
                 "bytes": 2000,
                 "full_key": "i/objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
                 "relative_key": "objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
-                "rclone_key": "r/objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
                 "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
             }
         ],
@@ -80,14 +76,7 @@
             "domain_digest": "275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0",
             "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0.json",
             "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0.json",
-            "rclone_key": "r/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0.json",
             "revision": 1
-        },
-        "rclone_identity": {
-            "binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "goarch": "a",
-            "goos": "w",
-            "version": "1"
         },
         "scope": {
             "broker_server_fingerprint": "b",
@@ -100,16 +89,15 @@
             "provider_id": "p",
             "publisher_epoch": 7,
             "publisher_id": "w",
-            "rclone_prefix": "r",
             "scope_config_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "scope_key": "s",
             "settle_policy": "z",
             "stable_feed_id": "f"
         }
     },
-    "publication_bundle_digest": "3bbd26b16fa1ba327b2d85fbec18eb2fc92771e1018796cd69c0ea0c0a183712",
+    "publication_bundle_digest": "a62c5aad1ea054b435e2467f4a3fdca1a7d12033f45ff2049655d173fe598db8",
     "final_observation": {
-        "bundle_digest": "3bbd26b16fa1ba327b2d85fbec18eb2fc92771e1018796cd69c0ea0c0a183712",
+        "bundle_digest": "a62c5aad1ea054b435e2467f4a3fdca1a7d12033f45ff2049655d173fe598db8",
         "claim": {
             "canonical_json": "{\"broker_server_fingerprint\":\"b\",\"campaign_id\":\"c\",\"claim_version\":\"publisher-claim-v1\",\"config_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"dataset_id\":\"d\",\"day_definition_id\":\"u\",\"exact_source_symbol\":\"X\",\"provider_id\":\"p\",\"publisher_epoch\":7,\"publisher_id\":\"w\",\"scope_key\":\"s\",\"settle_policy\":\"z\",\"stable_feed_id\":\"f\"}",
             "domain_digest": "528b1f0c098bbab6a3804116159c6bbb8e3b7b9fc43c8c4d59289d8544b56cf7",
@@ -167,7 +155,7 @@
             }
         ]
     },
-    "final_observation_digest": "999db1e5948455cf66911ba2ec44023545af1c66f72b479515ead580415de218",
+    "final_observation_digest": "1c7e2f9f149a67b6ba61d16a8522eb7e56bac834d352be68dbb0d756400554ff",
     "negative_cases": [
         {
             "case_id": "unknown_key",

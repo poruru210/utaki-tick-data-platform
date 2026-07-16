@@ -859,7 +859,6 @@ _BUNDLE_KEYS = {
     "raw_manifest",
     "raw_objects",
     "replay_manifest",
-    "rclone_identity",
     "scope",
 }
 _CLAIM_KEYS = {"canonical_json", "domain_digest", "full_key"}
@@ -881,10 +880,9 @@ _RAW_MANIFEST_KEYS = {
     "domain_digest",
     "full_key",
     "relative_key",
-    "rclone_key",
     "revision",
 }
-_RAW_OBJECT_KEYS = {"bytes", "full_key", "relative_key", "rclone_key", "sha256"}
+_RAW_OBJECT_KEYS = {"bytes", "full_key", "relative_key", "sha256"}
 _PARQUET_OBJECT_KEYS = {
     "bytes",
     "first_stream_sequence",
@@ -892,7 +890,6 @@ _PARQUET_OBJECT_KEYS = {
     "last_stream_sequence",
     "object_id",
     "relative_key",
-    "rclone_key",
     "sha256",
 }
 _PART_PUBLICATION_KEYS = {
@@ -902,17 +899,14 @@ _PART_PUBLICATION_KEYS = {
     "object_id",
     "part_sequence",
     "relative_key",
-    "rclone_key",
 }
 _REPLAY_PUBLICATION_MANIFEST_KEYS = {
     "bytes",
     "domain_digest",
     "full_key",
     "relative_key",
-    "rclone_key",
     "revision",
 }
-_RCLONE_IDENTITY_KEYS = {"binary_sha256", "goarch", "goos", "version"}
 _PUBLICATION_SCOPE_KEYS = {
     "broker_server_fingerprint",
     "campaign_id",
@@ -924,7 +918,6 @@ _PUBLICATION_SCOPE_KEYS = {
     "provider_id",
     "publisher_epoch",
     "publisher_id",
-    "rclone_prefix",
     "scope_config_hash",
     "scope_key",
     "settle_policy",
@@ -1174,10 +1167,8 @@ def _validate_publication_relative_key(value: Any) -> str:
 
 def _validate_publication_keys(scope: dict[str, Any], item: dict[str, Any]) -> None:
     relative = _validate_publication_relative_key(item["relative_key"])
-    if item["full_key"] != f"{scope['immutable_prefix']}/{relative}" or item["rclone_key"] != (
-        f"{scope['rclone_prefix']}/{relative}"
-    ):
-        raise ProtocolError("WRONG_KEY", "full or rclone key is not the trusted-prefix derivation")
+    if item["full_key"] != f"{scope['immutable_prefix']}/{relative}":
+        raise ProtocolError("WRONG_KEY", "full key is not the trusted-prefix derivation")
 
 
 def _checked_publication_total(total: int, next_value: int, limit: int) -> int:
@@ -1209,7 +1200,6 @@ def _validate_publication_scope(scope: Any) -> dict[str, Any]:
     _require_publication_uint("publisher_epoch", scope["publisher_epoch"])
     _require_publication_hash("scope_config_hash", scope["scope_config_hash"])
     _validate_publication_prefix("immutable_prefix", scope["immutable_prefix"])
-    _validate_publication_prefix("rclone_prefix", scope["rclone_prefix"])
     return scope
 
 
@@ -1467,10 +1457,6 @@ def publication_bundle_value(bundle: Any) -> dict[str, Any]:
     minimum_requests += revision
     if minimum_requests > limits["max_observation_requests"]:
         raise ProtocolError("RESOURCE_LIMIT", "complete observation request budget is too small")
-    rclone = _publication_exact_object(bundle["rclone_identity"], _RCLONE_IDENTITY_KEYS)
-    _require_publication_hash("rclone binary_sha256", rclone["binary_sha256"])
-    for key in ("goarch", "goos", "version"):
-        _require_publication_string(f"rclone {key}", rclone[key])
     return bundle
 
 

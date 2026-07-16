@@ -20,17 +20,17 @@ const (
 )
 
 type ReaderConfig struct {
-	Version           string `toml:"reader_config_version"`
-	Endpoint          string `toml:"endpoint"`
-	BucketEnv         string `toml:"bucket_env"`
-	AccessKeyEnv      string `toml:"access_key_env"`
-	SecretKeyEnv      string `toml:"secret_key_env"`
-	Region            string `toml:"region"`
-	ImmutableRoot     string `toml:"immutable_root"`
-	CacheRoot         string `toml:"cache_root"`
-	MaxMetadataBytes  uint64 `toml:"max_metadata_bytes"`
-	MaxRawObjectBytes uint64 `toml:"max_raw_object_bytes"`
-	MaxRemoteObjects  uint64 `toml:"max_remote_objects"`
+	Version               string `toml:"reader_config_version"`
+	Endpoint              string `toml:"endpoint"`
+	Bucket                string `toml:"bucket"`
+	CredentialsPath       string `toml:"credentials_path"`
+	CredentialsProtection string `toml:"credentials_protection"`
+	Region                string `toml:"region"`
+	ImmutableRoot         string `toml:"immutable_root"`
+	CacheRoot             string `toml:"cache_root"`
+	MaxMetadataBytes      uint64 `toml:"max_metadata_bytes"`
+	MaxRawObjectBytes     uint64 `toml:"max_raw_object_bytes"`
+	MaxRemoteObjects      uint64 `toml:"max_remote_objects"`
 }
 
 func LoadReaderConfig(path string) (ReaderConfig, error) {
@@ -60,14 +60,14 @@ func (c *ReaderConfig) Validate() error {
 	if err := r2.ValidateHTTPSHostEndpoint(c.Endpoint); err != nil {
 		return fmt.Errorf("reader %w", err)
 	}
-	for name, value := range map[string]string{
-		"bucket_env":     c.BucketEnv,
-		"access_key_env": c.AccessKeyEnv,
-		"secret_key_env": c.SecretKeyEnv,
-	} {
-		if !validEnvName(value) {
-			return fmt.Errorf("%s is not a valid environment variable name", name)
-		}
+	if strings.TrimSpace(c.Bucket) == "" {
+		return fmt.Errorf("reader bucket is required")
+	}
+	if strings.TrimSpace(c.CredentialsPath) == "" {
+		return fmt.Errorf("reader credentials_path is required")
+	}
+	if c.CredentialsProtection != "" && c.CredentialsProtection != "native-acl" && c.CredentialsProtection != "managed-mount" {
+		return fmt.Errorf("reader credentials_protection is unsupported")
 	}
 	if c.Region != "auto" {
 		return fmt.Errorf("reader region must be auto")
@@ -93,27 +93,11 @@ func (c *ReaderConfig) Validate() error {
 	return nil
 }
 
-func (c ReaderConfig) Bucket() (string, error) {
+func (c ReaderConfig) BucketName() (string, error) {
 	if err := c.Validate(); err != nil {
 		return "", err
 	}
-	value, ok := os.LookupEnv(c.BucketEnv)
-	if !ok || value == "" {
-		return "", fmt.Errorf("reader bucket is unavailable")
-	}
-	return value, nil
-}
-
-func validEnvName(value string) bool {
-	if value == "" || strings.ContainsAny(value, "=\x00\r\n") {
-		return false
-	}
-	for i, char := range value {
-		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && (i == 0 || char < '0' || char > '9') && char != '_' {
-			return false
-		}
-	}
-	return true
+	return c.Bucket, nil
 }
 
 func validateRemoteRoot(root string) error {

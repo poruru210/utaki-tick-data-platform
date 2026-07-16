@@ -41,6 +41,10 @@ type Gateway struct {
 	connectionsMu    sync.Mutex
 	connections      map[net.Conn]struct{}
 	handlers         sync.WaitGroup
+	serveDone        chan struct{}
+	serveErrors      chan error
+	serveCancel      context.CancelFunc
+	running          bool
 	reconcileMu      sync.Mutex
 	hooksMu          sync.Mutex
 	hooks            Hooks
@@ -86,51 +90,85 @@ func Open(config Config) (*Gateway, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	if err := retention.RecoverPrune(config.WALRoot, 1<<20); err != nil {
-		return nil, err
-	}
-	var anchor *wal.PruneAnchor
-	checkpoint, checkpointErr := retention.LoadLatestCheckpoint(config.WALRoot)
-	if checkpointErr == nil {
-		if _, err := retention.VerifyRetainedWAL(config.WALRoot, &checkpoint, 1<<20); err != nil {
-			return nil, err
-		}
-		anchor = &wal.PruneAnchor{EndSequence: checkpoint.EndSequence, ChainRoot: checkpoint.RetainedChainRoot}
-	} else if !errors.Is(checkpointErr, retention.ErrCheckpointAbsent) {
-		return nil, checkpointErr
-	}
-	store, err := wal.OpenWithAnchor(config.WALRoot, config.GatewayInstanceID, anchor)
+	recovery, err := retention.NewWALRecovery(config.WALRoot)
 	if err != nil {
 		return nil, err
 	}
-	if err := retention.PublishWallClock(config.WALRoot, uint64(time.Now().UnixMilli())); err != nil {
-		_ = store.Close()
+	if err := recovery.Start(context.Background()); err != nil {
 		return nil, err
 	}
-	journalStore, err := journal.Open(config.JournalPath, config.GatewayInstanceID, config.InitialFromMSC, config.InitialBatchCount)
+	store, err := wal.NewStore(config.WALRoot, config.GatewayInstanceID, recovery)
+	if err != nil {
+		_ = recovery.Stop(context.Background())
+		return nil, err
+	}
+	if err := store.Start(context.Background()); err != nil {
+		_ = recovery.Stop(context.Background())
+		return nil, err
+	}
+	journalStore, err := journal.NewStore(config.JournalPath, config.GatewayInstanceID, config.InitialFromMSC, config.InitialBatchCount)
 	if err != nil {
 		_ = store.Close()
+		_ = recovery.Stop(context.Background())
+		return nil, err
+	}
+	if err := journalStore.Start(context.Background()); err != nil {
+		_ = store.Close()
+		_ = recovery.Stop(context.Background())
 		return nil, err
 	}
 	disk, err := NewDiskStateMachine(config.WALRoot, DiskWatermarks{HighFreeBytes: config.DiskHighFreeBytes, CriticalFreeBytes: config.DiskCriticalFreeBytes, EmergencyFreeBytes: config.DiskEmergencyFreeBytes}, OSDiskUsageProvider{})
 	if err != nil {
 		_ = store.Close()
 		_ = journalStore.Close()
+		_ = recovery.Stop(context.Background())
 		return nil, err
 	}
-	gateway := &Gateway{
+	gateway, err := NewGateway(config, store, journalStore, disk)
+	if err != nil {
+		_ = store.Close()
+		_ = journalStore.Close()
+		_ = recovery.Stop(context.Background())
+		return nil, err
+	}
+	if err := gateway.Recover(context.Background()); err != nil {
+		_ = gateway.Close()
+		_ = recovery.Stop(context.Background())
+		return nil, err
+	}
+	return gateway, nil
+}
+
+// NewGateway constructs the ingest domain object without opening files,
+// sockets, or starting goroutines. The caller owns the supplied stores.
+func NewGateway(config Config, store *wal.Store, journalStore *journal.Store, disk *DiskStateMachine) (*Gateway, error) {
+	config = config.withDefaults()
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+	if store == nil || journalStore == nil || disk == nil {
+		return nil, fmt.Errorf("gateway dependencies are incomplete")
+	}
+	return &Gateway{
 		config:      config,
 		wal:         store,
 		journal:     journalStore,
 		started:     time.Now(),
 		connections: make(map[net.Conn]struct{}),
 		disk:        disk,
+	}, nil
+}
+
+// Recover performs the durable local recovery that must happen after the WAL
+// and ingest journal have started but before the listener accepts data.
+func (g *Gateway) Recover(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	if err := gateway.reconcileJournal(); err != nil {
-		_ = gateway.Close()
-		return nil, err
+	if err := retention.PublishWallClock(g.config.WALRoot, uint64(time.Now().UnixMilli())); err != nil {
+		return err
 	}
-	return gateway, nil
+	return g.reconcileJournal()
 }
 
 func (g *Gateway) Config() Config { return g.config }
@@ -146,38 +184,118 @@ func (g *Gateway) SetHooks(hooks Hooks) {
 }
 
 func (g *Gateway) ListenAndServe(ctx context.Context) error {
+	if err := g.Start(ctx); err != nil {
+		return err
+	}
+	g.mu.Lock()
+	done := g.serveDone
+	errorsCh := g.serveErrors
+	g.mu.Unlock()
+	select {
+	case err := <-errorsCh:
+		return err
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		if err := g.Shutdown(context.Background()); err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
+// Start recovers local state, binds the listener synchronously, and starts the
+// accept loop in the background. It does not close WAL or journal resources;
+// their lifecycle is owned by the composition root.
+func (g *Gateway) Start(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	g.mu.Lock()
+	if g.closed || g.running {
+		g.mu.Unlock()
+		return net.ErrClosed
+	}
+	g.mu.Unlock()
+	if err := g.Recover(ctx); err != nil {
+		return err
+	}
 	listener, err := net.Listen("tcp", g.config.ListenAddress)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", g.config.ListenAddress, err)
 	}
-	return g.Serve(ctx, listener)
-}
-
-func (g *Gateway) Serve(ctx context.Context, listener net.Listener) error {
+	serveCtx, serveCancel := context.WithCancel(context.Background())
 	g.mu.Lock()
 	if g.closed {
 		g.mu.Unlock()
+		serveCancel()
 		_ = listener.Close()
 		return net.ErrClosed
 	}
 	g.listener = listener
+	g.running = true
+	g.serveDone = make(chan struct{})
+	g.serveErrors = make(chan error, 1)
+	g.serveCancel = serveCancel
 	g.mu.Unlock()
+	go func() { _ = g.Serve(serveCtx, listener) }()
+	return nil
+}
+
+func (g *Gateway) Serve(ctx context.Context, listener net.Listener) (serveErr error) {
+	g.mu.Lock()
+	if g.closed {
+		done := g.serveDone
+		g.mu.Unlock()
+		_ = listener.Close()
+		if done != nil {
+			close(done)
+		}
+		return net.ErrClosed
+	}
+	if g.running && g.listener != nil && g.listener != listener {
+		g.mu.Unlock()
+		_ = listener.Close()
+		return fmt.Errorf("gateway listener is already running")
+	}
+	g.listener = listener
+	g.running = true
+	if g.serveDone == nil {
+		g.serveDone = make(chan struct{})
+		g.serveErrors = make(chan error, 1)
+	}
+	done := g.serveDone
+	errorsCh := g.serveErrors
+	g.mu.Unlock()
+	serveCtx, cancel := context.WithCancel(ctx)
 	closeDone := make(chan struct{})
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-serveCtx.Done():
 			_ = listener.Close()
 		case <-closeDone:
 		}
 	}()
 	defer func() {
 		close(closeDone)
+		cancel()
 		_ = listener.Close()
 		g.mu.Lock()
 		if g.listener == listener {
 			g.listener = nil
+			g.running = false
+			g.serveCancel = nil
+			g.serveDone = done
+			g.serveErrors = errorsCh
 		}
 		g.mu.Unlock()
+		if serveErr != nil {
+			select {
+			case errorsCh <- serveErr:
+			default:
+			}
+		}
+		close(done)
 	}()
 	for {
 		connection, err := listener.Accept()
@@ -209,19 +327,42 @@ func (g *Gateway) Serve(ctx context.Context, listener net.Listener) error {
 				delete(g.connections, connection)
 				g.connectionsMu.Unlock()
 			}()
-			if err := g.HandleConn(ctx, connection); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			if err := g.HandleConn(serveCtx, connection); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 				g.setLastError(err)
 			}
 		}()
 	}
 }
 
-func (g *Gateway) Close() error {
+// Shutdown stops listener and handlers within ctx but leaves WAL and journal
+// open for their own lifecycle hooks.
+func (g *Gateway) Shutdown(ctx context.Context) error {
+	return g.shutdown(ctx, true)
+}
+
+func (g *Gateway) Stop(ctx context.Context) error {
+	return g.Shutdown(ctx)
+}
+
+func (g *Gateway) Errors() <-chan error {
 	g.mu.Lock()
-	listener := g.listener
-	g.listener = nil
+	defer g.mu.Unlock()
+	return g.serveErrors
+}
+
+func (g *Gateway) shutdown(ctx context.Context, waitServe bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	g.mu.Lock()
 	g.closed = true
+	listener := g.listener
+	done := g.serveDone
+	serveCancel := g.serveCancel
 	g.mu.Unlock()
+	if serveCancel != nil {
+		serveCancel()
+	}
 	if listener != nil {
 		_ = listener.Close()
 	}
@@ -230,12 +371,33 @@ func (g *Gateway) Close() error {
 		_ = connection.Close()
 	}
 	g.connectionsMu.Unlock()
-	g.sessionMu.Lock()
-	g.sessionMu.Unlock()
-	g.handlers.Wait()
+	if waitServe && done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	handlersDone := make(chan struct{})
+	go func() {
+		g.handlers.Wait()
+		close(handlersDone)
+	}()
+	select {
+	case <-handlersDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (g *Gateway) Close() error {
 	var first error
+	if err := g.shutdown(context.Background(), false); err != nil {
+		first = err
+	}
 	if g.wal != nil {
-		if err := g.wal.Close(); err != nil {
+		if err := g.wal.Close(); err != nil && first == nil {
 			first = err
 		}
 	}

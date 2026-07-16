@@ -4,7 +4,7 @@
 
 対象は、active WALのsealとrotation、seal済みsegmentの完全性検証、segment間chainの継続、content-addressed local outboxへのbyte-exactなpromoteです。
 
-R2 upload、rclone、publisher claim、raw-day manifest、remote verification、delivery CLI、Parquet、local pruningは対象外です。
+R2 upload、publisher claim、raw-day manifest、remote verification、delivery CLI、Parquet、local pruningは対象外です。
 
 ## Hashの境界
 

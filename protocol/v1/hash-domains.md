@@ -186,29 +186,26 @@ part_set_root
 raw_manifest
 raw_objects
 replay_manifest
-rclone_identity
 scope
 ```
 
 `claim`は`canonical_json`、`domain_digest`、`full_key`を持ちます。
 
-`scope`は`broker_server_fingerprint`、`campaign_id`、`dataset_id`、`date`、`day_definition_id`、`exact_source_symbol`、`immutable_prefix`、`provider_id`、`publisher_epoch`、`publisher_id`、`rclone_prefix`、`scope_config_hash`、`scope_key`、`settle_policy`、`stable_feed_id`を持ちます。
+`scope`は`broker_server_fingerprint`、`campaign_id`、`dataset_id`、`date`、`day_definition_id`、`exact_source_symbol`、`immutable_prefix`、`provider_id`、`publisher_epoch`、`publisher_id`、`scope_config_hash`、`scope_key`、`settle_policy`、`stable_feed_id`を持ちます。
 
 `conversion`は`replay_contract_id`、`format_id`、`conversion_id`、`converter_build_id`、`dependency_lock_hash`、`writer_configuration_hash`、`target_platform_contract`、`max_rows_per_part`、`max_canonical_bytes_per_part`、`max_rows_per_row_group`を持ちます。
 
 `limits`は`max_metadata_object_bytes`、`max_total_metadata_bytes`、`max_parquet_object_bytes`、`max_total_parquet_bytes`、`max_list_objects`、`max_graph_nodes`、`max_parts`、`max_observation_bytes`、`max_observation_requests`、`max_publication_rounds`を持ちます。
 
-`raw_manifest`は`bytes`、`domain_digest`、`full_key`、`relative_key`、`rclone_key`、`revision`を持ちます。
+`raw_manifest`は`bytes`、`domain_digest`、`full_key`、`relative_key`、`revision`を持ちます。
 
-`raw_objects`の各要素は`bytes`、`full_key`、`relative_key`、`rclone_key`、`sha256`を持ちます。
+`raw_objects`の各要素は`bytes`、`full_key`、`relative_key`、`sha256`を持ちます。
 
-`parquet_objects`の各要素は`bytes`、`first_stream_sequence`、`full_key`、`last_stream_sequence`、`object_id`、`relative_key`、`rclone_key`、`sha256`を持ちます。
+`parquet_objects`の各要素は`bytes`、`first_stream_sequence`、`full_key`、`last_stream_sequence`、`object_id`、`relative_key`、`sha256`を持ちます。
 
-`part_manifests`の各要素は`bytes`、`domain_digest`、`full_key`、`object_id`、`part_sequence`、`relative_key`、`rclone_key`を持ちます。
+`part_manifests`の各要素は`bytes`、`domain_digest`、`full_key`、`object_id`、`part_sequence`、`relative_key`を持ちます。
 
-`replay_manifest`は`bytes`、`domain_digest`、`full_key`、`relative_key`、`rclone_key`、`revision`を持ちます。
-
-`rclone_identity`は`binary_sha256`、`goarch`、`goos`、`version`を持ちます。
+`replay_manifest`は`bytes`、`domain_digest`、`full_key`、`relative_key`、`revision`を持ちます。
 
 全SHA-256とdomain digestは64文字のlowercase hexadecimalで表します。
 

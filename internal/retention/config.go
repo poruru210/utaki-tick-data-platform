@@ -9,6 +9,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/credentials"
 	"tick-data-platform/internal/protocol"
 	"tick-data-platform/internal/r2"
 )
@@ -16,16 +17,16 @@ import (
 const ConfigVersion = "tick-retention-v1"
 
 // Config is the strict, secret-free configuration needed by the operator
-// prune command. Credential values are read only from the named environment
-// variables by the read-only R2 backend.
+// prune command. Credential values are read only from the protected bundle
+// named by CredentialsPath through credentials.FileProvider.
 type Config struct {
-	Version       string `toml:"retention_config_version"`
-	Endpoint      string `toml:"endpoint"`
-	BucketEnv     string `toml:"bucket_env"`
-	AccessKeyEnv  string `toml:"access_key_env"`
-	SecretKeyEnv  string `toml:"secret_key_env"`
-	Region        string `toml:"region"`
-	ImmutableRoot string `toml:"immutable_root"`
+	Version               string `toml:"retention_config_version"`
+	Endpoint              string `toml:"endpoint"`
+	Bucket                string `toml:"bucket"`
+	CredentialsPath       string `toml:"credentials_path"`
+	CredentialsProtection string `toml:"credentials_protection"`
+	Region                string `toml:"region"`
+	ImmutableRoot         string `toml:"immutable_root"`
 
 	DatasetID               string `toml:"dataset_id"`
 	CampaignID              string `toml:"campaign_id"`
@@ -74,12 +75,14 @@ func (c Config) Validate() error {
 	if err := r2.ValidateHTTPSHostEndpoint(c.Endpoint); err != nil {
 		return fmt.Errorf("retention %w", err)
 	}
-	for name, value := range map[string]string{
-		"bucket_env": c.BucketEnv, "access_key_env": c.AccessKeyEnv, "secret_key_env": c.SecretKeyEnv,
-	} {
-		if !validEnvironmentName(value) {
-			return fmt.Errorf("%s is not a valid environment variable name", name)
-		}
+	if strings.TrimSpace(c.Bucket) == "" {
+		return fmt.Errorf("retention bucket is required")
+	}
+	if strings.TrimSpace(c.CredentialsPath) == "" {
+		return fmt.Errorf("retention credentials_path is required")
+	}
+	if c.CredentialsProtection != "" && c.CredentialsProtection != string(credentials.ProtectionNativeACL) && c.CredentialsProtection != string(credentials.ProtectionManagedMount) {
+		return fmt.Errorf("retention credentials_protection is unsupported")
 	}
 	if c.Region != "auto" {
 		return fmt.Errorf("retention region must be auto")
@@ -103,7 +106,7 @@ func (c Config) Validate() error {
 	if err != nil {
 		return err
 	}
-	if _, err := r2.NewLayout(c.ImmutableRoot, "", scope); err != nil {
+	if _, err := r2.NewLayout(c.ImmutableRoot, scope); err != nil {
 		return fmt.Errorf("retention layout is invalid")
 	}
 	return nil
@@ -125,14 +128,8 @@ func (c Config) Scope() (archive.ScopeConfig, error) {
 	return scope, nil
 }
 
-func validEnvironmentName(value string) bool {
-	if value == "" || strings.ContainsAny(value, "=\x00\r\n") {
-		return false
+func (c Config) CredentialFileConfig() credentials.FileConfig {
+	return credentials.FileConfig{
+		Path: c.CredentialsPath, Protection: credentials.ProtectionMode(c.CredentialsProtection),
 	}
-	for index, char := range value {
-		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && (index == 0 || char < '0' || char > '9') && char != '_' {
-			return false
-		}
-	}
-	return true
 }

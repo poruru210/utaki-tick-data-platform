@@ -33,11 +33,11 @@ producerはデータ源固有の形式をIFへ変換します。
 
 GatewayはIFを検証し、受信済みデータを永続化して後続処理へ渡します。
 
-現在の実装は明示的なWAL seal、verified raw objectのpromote、Protocol V1 raw-day manifest、pinned rcloneによるimmutable R2 publication、read-only ArchiveReader、tickctl、tick-verifyを提供します。
+現在の実装は明示的なWAL seal、verified raw objectのpromote、Protocol V1 raw-day manifest、AWS SDK for Go v2によるimmutable R2 publication、read-only ArchiveReader、tickctl、tick-verifyを提供します。
 
-M2の通常検証はnetwork-freeなfake backendとfake rcloneによるものです。
+M2の通常検証はnetwork-freeなfake backendによるものです。
 
-real R2 smokeは、明示的な確認、isolated bucketまたはprefix、endpoint、credentialの存在、pinned rclone binaryを同時に指定した場合だけsynthetic bytesで実行できます。
+real R2 smokeは、明示的な確認、isolated bucketまたはprefix、endpoint、credentialの存在を同時に指定した場合だけsynthetic bytesで実行できます。
 
 M2はParquet、replay-dayまたはpart manifest、handover、pruning、Worker、HTTP API、live brokerを実装対象から除外します。
 

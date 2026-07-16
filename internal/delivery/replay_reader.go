@@ -100,7 +100,7 @@ func (r *archiveReaderV1) loadReplaySnapshotRecords(ctx context.Context, filter 
 			filter.DayDefinitionID != "" && discovered.Scope.DayDefinitionID != filter.DayDefinitionID {
 			continue
 		}
-		layout, err := r2.NewLayout(r.config.ImmutableRoot, "", discovered.Scope)
+		layout, err := r2.NewLayout(r.config.ImmutableRoot, discovered.Scope)
 		if err != nil {
 			return nil, fmt.Errorf("%w: replay scope layout is invalid", archive.ErrIntegrity)
 		}

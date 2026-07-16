@@ -25,10 +25,13 @@ import (
 )
 
 type m3NetworkFreeBackend struct {
-	mu        sync.Mutex
-	objects   map[string][]byte
-	writes    int
-	putIfNone []string
+	mu            sync.Mutex
+	objects       map[string][]byte
+	writes        int
+	putIfNone     []string
+	filePuts      []string
+	fileChecks    []string
+	fileMutations []string
 }
 
 func newM3NetworkFreeBackend() *m3NetworkFreeBackend {
@@ -100,6 +103,52 @@ func (b *m3NetworkFreeBackend) ListLimited(ctx context.Context, prefix string, m
 	return objects, nil
 }
 
+func (b *m3NetworkFreeBackend) PutFileIfAbsent(_ context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (r2.RemoteObjectCommit, error) {
+	local, err := m3NetworkFreeReadVerifiedFile(path, expectedSHA256, expectedBytes)
+	if err != nil {
+		return r2.RemoteObjectCommit{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.filePuts = append(b.filePuts, key)
+	if existing, ok := b.objects[key]; ok {
+		if bytes.Equal(existing, local) {
+			return r2.RemoteObjectCommit{ETag: "m3-e2e-etag-" + key}, nil
+		}
+		return r2.RemoteObjectCommit{}, r2.ErrImmutableCollision
+	}
+	b.objects[key] = append([]byte(nil), local...)
+	b.writes++
+	b.fileMutations = append(b.fileMutations, key)
+	return r2.RemoteObjectCommit{ETag: "m3-e2e-etag-" + key}, nil
+}
+
+func (b *m3NetworkFreeBackend) VerifyFile(_ context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (r2.RemoteObjectVerification, error) {
+	local, err := m3NetworkFreeReadVerifiedFile(path, expectedSHA256, expectedBytes)
+	if err != nil {
+		return r2.RemoteObjectVerification{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.fileChecks = append(b.fileChecks, key)
+	remote, ok := b.objects[key]
+	if !ok || !bytes.Equal(local, remote) {
+		return r2.RemoteObjectVerification{}, r2.ErrRemoteCheckMismatch
+	}
+	return r2.RemoteObjectVerification{ETag: "m3-e2e-etag-" + key}, nil
+}
+
+func m3NetworkFreeReadVerifiedFile(path string, expectedSHA256 [32]byte, expectedBytes uint64) ([]byte, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) != expectedBytes || sha256.Sum256(body) != expectedSHA256 {
+		return nil, r2.ErrLocalObjectChanged
+	}
+	return body, nil
+}
+
 func (b *m3NetworkFreeBackend) writeCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -112,121 +161,22 @@ func (b *m3NetworkFreeBackend) putIfAbsentKeys() []string {
 	return append([]string(nil), b.putIfNone...)
 }
 
-type m3M2NetworkFreeRclone struct {
-	backend         *m3NetworkFreeBackend
-	immutablePrefix string
-	rclonePrefix    string
-	copyMutations   int
-	copyKeys        []string
-	checkKeys       []string
+func (b *m3NetworkFreeBackend) filePutKeys() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.filePuts...)
 }
 
-func (f *m3M2NetworkFreeRclone) fullKey(remoteKey string) (string, error) {
-	prefix := f.rclonePrefix + "/"
-	if !strings.HasPrefix(remoteKey, prefix) {
-		return "", fmt.Errorf("fake M2 rclone key is outside the trusted prefix")
-	}
-	return f.immutablePrefix + "/" + strings.TrimPrefix(remoteKey, prefix), nil
+func (b *m3NetworkFreeBackend) fileCheckKeys() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.fileChecks...)
 }
 
-func (f *m3M2NetworkFreeRclone) execute(ctx context.Context, _ string, args ...string) (string, error) {
-	if len(args) == 1 && args[0] == "version" {
-		return "rclone " + r2.RcloneVersion + "\n", nil
-	}
-	if len(args) != 4 {
-		return "", errors.New("fake M2 rclone rejects an arbitrary operation shape")
-	}
-	localPath, remoteKey := args[2], args[3]
-	fullKey, err := f.fullKey(remoteKey)
-	if err != nil {
-		return "", err
-	}
-	switch {
-	case args[0] == "copyto" && args[1] == "--immutable":
-		local, err := os.ReadFile(localPath)
-		if err != nil {
-			return "", err
-		}
-		f.backend.mu.Lock()
-		defer f.backend.mu.Unlock()
-		if existing, ok := f.backend.objects[fullKey]; ok {
-			if !bytes.Equal(existing, local) {
-				return "", r2.ErrRcloneCollision
-			}
-		} else {
-			f.backend.objects[fullKey] = append([]byte(nil), local...)
-			f.backend.writes++
-			f.copyMutations++
-			f.copyKeys = append(f.copyKeys, remoteKey)
-		}
-		return "", nil
-	case args[0] == "check" && args[1] == "--download":
-		local, err := os.ReadFile(localPath)
-		if err != nil {
-			return "", err
-		}
-		remote, err := f.backend.Get(ctx, fullKey)
-		if err != nil || !bytes.Equal(local, remote) {
-			return "", r2.ErrRcloneCheckMismatch
-		}
-		f.checkKeys = append(f.checkKeys, remoteKey)
-		return "", nil
-	default:
-		return "", errors.New("fake M2 rclone rejects a forbidden operation")
-	}
-}
-
-type m3NetworkFreeActionTool struct {
-	backend         *m3NetworkFreeBackend
-	immutablePrefix string
-	rclonePrefix    string
-	copyKeys        []string
-	checkCalls      int
-}
-
-func (t *m3NetworkFreeActionTool) immutableKey(key string) (string, error) {
-	prefix := t.rclonePrefix + "/"
-	if !strings.HasPrefix(key, prefix) {
-		return "", fmt.Errorf("action key is outside the trusted prefix")
-	}
-	return t.immutablePrefix + "/" + strings.TrimPrefix(key, prefix), nil
-}
-
-func (t *m3NetworkFreeActionTool) CopyToImmutable(ctx context.Context, localPath, key string) error {
-	fullKey, err := t.immutableKey(key)
-	if err != nil {
-		return err
-	}
-	body, err := os.ReadFile(localPath)
-	if err != nil {
-		return err
-	}
-	if existing, getErr := t.backend.Get(ctx, fullKey); getErr == nil {
-		if !bytes.Equal(existing, body) {
-			return r2.ErrRcloneCollision
-		}
-	} else if err := t.backend.PutIfAbsent(ctx, fullKey, body); err != nil {
-		return err
-	}
-	t.copyKeys = append(t.copyKeys, key)
-	return nil
-}
-
-func (t *m3NetworkFreeActionTool) CheckDownload(ctx context.Context, localPath, key string) error {
-	fullKey, err := t.immutableKey(key)
-	if err != nil {
-		return err
-	}
-	local, err := os.ReadFile(localPath)
-	if err != nil {
-		return err
-	}
-	remote, err := t.backend.Get(ctx, fullKey)
-	if err != nil || !bytes.Equal(local, remote) {
-		return r2.ErrRcloneCheckMismatch
-	}
-	t.checkCalls++
-	return nil
+func (b *m3NetworkFreeBackend) fileMutationKeys() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.fileMutations...)
 }
 
 type m3FailingEventStore struct{ calls int }
@@ -251,7 +201,7 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 		ProtocolVersion: protocol.ProtocolVersion,
 		ProtocolLimits:  archive.ProtocolLimits{MaxFrameBytes: protocol.MaxFrameBytes, MaxRecords: protocol.MaxRecords, MaxStringBytes: protocol.MaxStringBytes},
 	}
-	layout, err := r2.NewLayout("v1", "fake:v1", scope)
+	layout, err := r2.NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,29 +212,11 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 	}
 	rawPaths := map[string]string{rawObject.Key: rawObject.Path}
 	backend := newM3NetworkFreeBackend()
-	m2BinaryBytes := []byte("network-free-m2-rclone-binary")
-	m2BinaryPath := filepath.Join(t.TempDir(), "m2-rclone.exe")
-	if err := os.WriteFile(m2BinaryPath, m2BinaryBytes, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	m2BinaryHash := sha256.Sum256(m2BinaryBytes)
-	m2ToolIdentity := r2.RcloneTool{GOOS: "windows", GOARCH: "amd64", BinarySHA256: fmt.Sprintf("%x", m2BinaryHash), BinaryBytes: uint64(len(m2BinaryBytes)), ExecutableName: "m2-rclone.exe"}
-	m2FakeRclone := &m3M2NetworkFreeRclone{backend: backend, immutablePrefix: layout.ImmutableCampaignPrefix(), rclonePrefix: layout.RcloneCampaignPrefix()}
-	if _, err := m2FakeRclone.execute(ctx, m2BinaryPath, "delete", "--immutable", "local", layout.RcloneCampaignPrefix()+"/forbidden"); err == nil {
-		t.Fatal("fake M2 rclone accepted a forbidden operation")
-	}
-	if _, err := m2FakeRclone.execute(ctx, m2BinaryPath, "copyto", "--overwrite", "local", layout.RcloneCampaignPrefix()+"/forbidden"); err == nil {
-		t.Fatal("fake M2 rclone accepted copyto without --immutable")
-	}
-	m2Runner, err := r2.NewRcloneRunnerWithExecutor(m2BinaryPath, m2ToolIdentity, m2FakeRclone.execute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	m2Journal, err := r2.OpenPublicationJournal(filepath.Join(t.TempDir(), "m2-publication.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m2Publisher, err := r2.NewPublisher(layout, backend, m2Runner, m2Journal, "")
+	m2Publisher, err := r2.NewPublisher(layout, backend, m2Journal, "")
 	if err != nil {
 		_ = m2Journal.Close()
 		t.Fatal(err)
@@ -325,7 +257,7 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 		_ = m2Journal.Close()
 		t.Fatal(err)
 	}
-	if !m2Receipt.VerificationComplete || m2Receipt.ReceiptVersion != "publication-verification-receipt-v1" || m2Receipt.ManifestKey != m2ManifestKey || m2Receipt.ManifestSHA256 != manifest.ManifestSHA256 || m2Receipt.ClaimHash != m2ClaimHash || m2Receipt.ScopeConfigHash != m2ScopeHash || len(m2Receipt.RawObjects) != 1 || m2Receipt.RawObjects[0].SHA256 != rawObject.SHA256 || m2Receipt.RawObjects[0].Bytes != uint64(rawObject.Bytes) || m2Receipt.RcloneVersion != r2.RcloneVersion || m2Receipt.RcloneBinarySHA256 != m2ToolIdentity.BinarySHA256 {
+	if !m2Receipt.VerificationComplete || m2Receipt.ReceiptVersion != "publication-verification-receipt-v1" || m2Receipt.ManifestKey != m2ManifestKey || m2Receipt.ManifestSHA256 != manifest.ManifestSHA256 || m2Receipt.ClaimHash != m2ClaimHash || m2Receipt.ScopeConfigHash != m2ScopeHash || len(m2Receipt.RawObjects) != 1 || m2Receipt.RawObjects[0].SHA256 != rawObject.SHA256 || m2Receipt.RawObjects[0].Bytes != uint64(rawObject.Bytes) {
 		_ = m2Journal.Close()
 		t.Fatalf("production M2 receipt identity mismatch: %+v", m2Receipt)
 	}
@@ -360,9 +292,11 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 		_ = m2Journal.Close()
 		t.Fatalf("production M2 conditional claim writes = %v", got)
 	}
-	if m2FakeRclone.copyMutations != 3 {
+	m2FileMutations := backend.fileMutationKeys()
+	expectedM2FileMutations := []string{m2ScopeKey, m2RawKey, m2ManifestKey}
+	if !equalM3E2EStrings(m2FileMutations, expectedM2FileMutations) {
 		_ = m2Journal.Close()
-		t.Fatalf("production M2 immutable copy mutations = %d, want scope/raw/manifest", m2FakeRclone.copyMutations)
+		t.Fatalf("production M2 SDK object mutations = %v, want %v", m2FileMutations, expectedM2FileMutations)
 	}
 	m2ReceiptCanonical, err := m2Receipt.CanonicalJSON()
 	if err != nil {
@@ -370,7 +304,7 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	m2Writes := backend.writeCount()
-	m2Copies := m2FakeRclone.copyMutations
+	m2Copies := len(backend.fileMutationKeys())
 	m2ClaimWrites := len(backend.putIfAbsentKeys())
 	m2RetryReceipt, err := m2Publisher.Publish(ctx, m2Input)
 	if err != nil {
@@ -382,7 +316,7 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 		_ = m2Journal.Close()
 		t.Fatal(err)
 	}
-	if !bytes.Equal(m2RetryCanonical, m2ReceiptCanonical) || backend.writeCount() != m2Writes || m2FakeRclone.copyMutations != m2Copies || len(backend.putIfAbsentKeys()) != m2ClaimWrites {
+	if !bytes.Equal(m2RetryCanonical, m2ReceiptCanonical) || backend.writeCount() != m2Writes || len(backend.fileMutationKeys()) != m2Copies || len(backend.putIfAbsentKeys()) != m2ClaimWrites {
 		_ = m2Journal.Close()
 		t.Fatal("same-content production M2 retry changed receipt identity, claim writes, or remote copy mutations")
 	}
@@ -457,35 +391,18 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	binaryBytes := []byte("network-free-rclone-binary")
-	binaryPath := filepath.Join(t.TempDir(), "rclone.exe")
-	if err := os.WriteFile(binaryPath, binaryBytes, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	binaryHash := sha256.Sum256(binaryBytes)
-	toolIdentity := r2.RcloneTool{GOOS: "windows", GOARCH: "amd64", BinarySHA256: fmt.Sprintf("%x", binaryHash), BinaryBytes: uint64(len(binaryBytes)), ExecutableName: "rclone.exe"}
-	runner, err := r2.NewRcloneRunnerWithExecutor(binaryPath, toolIdentity, func(_ context.Context, _ string, args ...string) (string, error) {
-		if len(args) == 1 && args[0] == "version" {
-			return "rclone " + r2.RcloneVersion + "\n", nil
-		}
-		return "", errors.New("network-free runner rejects process operations")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	remote, err := r2.NewReplayRemoteReadAdapter(backend)
 	if err != nil {
 		t.Fatal(err)
 	}
-	actionTool := &m3NetworkFreeActionTool{backend: backend, immutablePrefix: layout.ImmutableCampaignPrefix(), rclonePrefix: layout.RcloneCampaignPrefix()}
 	events := &m3FailingEventStore{}
 	receiptPath := filepath.Join(t.TempDir(), "receipt.json")
-	publisher, err := r2.NewReplayPublisher(layout, remote, runner, actionTool, events, r2.FileReplayReceiptStore{}, t.TempDir())
+	publisher, err := r2.NewReplayPublisher(layout, remote, backend, events, r2.FileReplayReceiptStore{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	publicationInput := r2.ReplayPublicationInput{Conversion: spec, Limits: protocol.ReplayPublicationImplementationBounds, RawManifestBytes: manifestBytes, RawObjectPaths: rawPaths, Parts: generated.Parts, PartManifestBytes: partBytes, ReplayManifestBytes: replayBytes, ReceiptPath: receiptPath}
-	bundle, err := r2.SealReplayPublicationBundle(r2.ReplayPublicationBundleInput{Layout: layout, Conversion: spec, Limits: publicationInput.Limits, RawManifest: manifestBytes, RawObjectPaths: rawPaths, Parts: generated.Parts, PartManifests: partBytes, ReplayManifest: replayBytes, ReceiptPath: receiptPath, RcloneBinaryPath: binaryPath, RcloneTool: toolIdentity})
+	bundle, err := r2.SealReplayPublicationBundle(r2.ReplayPublicationBundleInput{Layout: layout, Conversion: spec, Limits: publicationInput.Limits, RawManifest: manifestBytes, RawObjectPaths: rawPaths, Parts: generated.Parts, PartManifests: partBytes, ReplayManifest: replayBytes, ReceiptPath: receiptPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,25 +418,27 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 	}
 	expectedActionKeys := make([]string, 0, len(parts)*2+1)
 	for _, part := range parts {
-		key, _ := layout.RcloneReplayPartObjectKey(part)
+		key, _ := layout.ReplayPartObjectKey(part)
 		expectedActionKeys = append(expectedActionKeys, key)
 	}
 	for _, part := range parts {
-		key, _ := layout.RcloneReplayPartManifestKey(part)
+		key, _ := layout.ReplayPartManifestKey(part)
 		expectedActionKeys = append(expectedActionKeys, key)
 	}
-	replayActionKey, _ := layout.RcloneReplayDayManifestKey(replayManifest)
+	replayActionKey, _ := layout.ReplayDayManifestKey(replayManifest)
 	expectedActionKeys = append(expectedActionKeys, replayActionKey)
-	if !equalM3E2EStrings(actionTool.copyKeys, expectedActionKeys) || actionTool.checkCalls != len(expectedActionKeys) || events.calls == 0 {
-		t.Fatalf("approved actions/events differ: copies=%v checks=%d events=%d", actionTool.copyKeys, actionTool.checkCalls, events.calls)
+	m3MutationKeys := backend.fileMutationKeys()[m2Copies:]
+	m3CheckKeys := backend.fileCheckKeys()
+	if len(m3CheckKeys) < len(expectedActionKeys) || !equalM3E2EStrings(m3MutationKeys, expectedActionKeys) || !equalM3E2EStrings(m3CheckKeys[len(m3CheckKeys)-len(expectedActionKeys):], expectedActionKeys) || events.calls == 0 {
+		t.Fatalf("approved actions/events differ: mutations=%v checks=%v events=%d", m3MutationKeys, m3CheckKeys, events.calls)
 	}
 	writesAfterFirstPublish := backend.writeCount()
-	copiesAfterFirstPublish := len(actionTool.copyKeys)
+	mutationsAfterFirstPublish := len(backend.fileMutationKeys())
 	retryReceipt, err := publisher.Publish(ctx, publicationInput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retryReceipt.FinalObservationDigest != receipt.FinalObservationDigest || backend.writeCount() != writesAfterFirstPublish || len(actionTool.copyKeys) != copiesAfterFirstPublish {
+	if retryReceipt.FinalObservationDigest != receipt.FinalObservationDigest || backend.writeCount() != writesAfterFirstPublish || len(backend.fileMutationKeys()) != mutationsAfterFirstPublish {
 		t.Fatal("same-content M3 retry duplicated a remote mutation")
 	}
 
@@ -643,5 +562,5 @@ func equalM3E2EStrings(left, right []string) bool {
 
 var _ r2.BoundedObjectBackend = (*m3NetworkFreeBackend)(nil)
 var _ r2.ReadBackend = (*m3NetworkFreeBackend)(nil)
-var _ r2.ReplayActionTool = (*m3NetworkFreeActionTool)(nil)
+var _ r2.WriteBackend = (*m3NetworkFreeBackend)(nil)
 var _ r2.ReplayEventStore = (*m3FailingEventStore)(nil)

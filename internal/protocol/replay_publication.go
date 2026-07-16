@@ -41,8 +41,8 @@ const (
 )
 
 // ReplayPublicationScope is the secret-free trusted Layout scope bound into a
-// replay publication bundle. The two prefixes are already derived by Layout;
-// Protocol V1 only verifies that every full key is under the exact prefix.
+// replay publication bundle. The prefix is derived by Layout; Protocol V1 only
+// verifies that every full key is under the exact prefix.
 type ReplayPublicationScope struct {
 	BrokerServerFingerprint string `json:"broker_server_fingerprint"`
 	CampaignID              string `json:"campaign_id"`
@@ -54,7 +54,6 @@ type ReplayPublicationScope struct {
 	ProviderID              string `json:"provider_id"`
 	PublisherEpoch          uint64 `json:"publisher_epoch"`
 	PublisherID             string `json:"publisher_id"`
-	RclonePrefix            string `json:"rclone_prefix"`
 	ScopeConfigHash         string `json:"scope_config_hash"`
 	ScopeKey                string `json:"scope_key"`
 	SettlePolicy            string `json:"settle_policy"`
@@ -123,7 +122,6 @@ type ReplayPublicationRawManifest struct {
 	DomainDigest string `json:"domain_digest"`
 	FullKey      string `json:"full_key"`
 	RelativeKey  string `json:"relative_key"`
-	RcloneKey    string `json:"rclone_key"`
 	Revision     uint64 `json:"revision"`
 }
 
@@ -131,7 +129,6 @@ type ReplayPublicationRawObject struct {
 	Bytes       uint64 `json:"bytes"`
 	FullKey     string `json:"full_key"`
 	RelativeKey string `json:"relative_key"`
-	RcloneKey   string `json:"rclone_key"`
 	SHA256      string `json:"sha256"`
 }
 
@@ -142,7 +139,6 @@ type ReplayPublicationParquetObject struct {
 	LastStreamSequence  uint64 `json:"last_stream_sequence"`
 	ObjectID            string `json:"object_id"`
 	RelativeKey         string `json:"relative_key"`
-	RcloneKey           string `json:"rclone_key"`
 	SHA256              string `json:"sha256"`
 }
 
@@ -153,7 +149,6 @@ type ReplayPublicationPartManifest struct {
 	ObjectID     string `json:"object_id"`
 	PartSequence uint64 `json:"part_sequence"`
 	RelativeKey  string `json:"relative_key"`
-	RcloneKey    string `json:"rclone_key"`
 }
 
 type ReplayPublicationReplayManifest struct {
@@ -161,15 +156,7 @@ type ReplayPublicationReplayManifest struct {
 	DomainDigest string `json:"domain_digest"`
 	FullKey      string `json:"full_key"`
 	RelativeKey  string `json:"relative_key"`
-	RcloneKey    string `json:"rclone_key"`
 	Revision     uint64 `json:"revision"`
-}
-
-type ReplayPublicationRcloneIdentity struct {
-	BinarySHA256 string `json:"binary_sha256"`
-	GOARCH       string `json:"goarch"`
-	GOOS         string `json:"goos"`
-	Version      string `json:"version"`
 }
 
 type ReplayPublicationBundle struct {
@@ -184,7 +171,6 @@ type ReplayPublicationBundle struct {
 	RawManifest                 ReplayPublicationRawManifest     `json:"raw_manifest"`
 	RawObjects                  []ReplayPublicationRawObject     `json:"raw_objects"`
 	ReplayManifest              ReplayPublicationReplayManifest  `json:"replay_manifest"`
-	RcloneIdentity              ReplayPublicationRcloneIdentity  `json:"rclone_identity"`
 	Scope                       ReplayPublicationScope           `json:"scope"`
 }
 
@@ -443,9 +429,6 @@ func (bundle ReplayPublicationBundle) Validate() error {
 	}
 	if observationTotal > bundle.Limits.MaxObservationBytes {
 		return newError(ErrResourceLimit, "complete observation byte budget is too small")
-	}
-	if err := bundle.RcloneIdentity.validate(); err != nil {
-		return err
 	}
 	return nil
 }
@@ -751,9 +734,6 @@ func (scope ReplayPublicationScope) validate() error {
 	if err := validatePrefix("immutable_prefix", scope.ImmutablePrefix); err != nil {
 		return err
 	}
-	if err := validatePrefix("rclone_prefix", scope.RclonePrefix); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -878,7 +858,7 @@ func (manifest ReplayPublicationRawManifest) validate(scope ReplayPublicationSco
 	if err := validateNonzeroHash("raw manifest domain_digest", manifest.DomainDigest); err != nil {
 		return err
 	}
-	return validateObjectKeys(scope, manifest.RelativeKey, manifest.FullKey, manifest.RcloneKey)
+	return validateObjectKeys(scope, manifest.RelativeKey, manifest.FullKey)
 }
 
 func (object ReplayPublicationRawObject) validate(scope ReplayPublicationScope) error {
@@ -892,7 +872,7 @@ func (object ReplayPublicationRawObject) validate(scope ReplayPublicationScope) 
 	if object.RelativeKey != wantRelative {
 		return newError(ErrWrongKey, "raw object relative key mismatch")
 	}
-	return validateObjectKeys(scope, object.RelativeKey, object.FullKey, object.RcloneKey)
+	return validateObjectKeys(scope, object.RelativeKey, object.FullKey)
 }
 
 func (object ReplayPublicationParquetObject) validate(bundle ReplayPublicationBundle) error {
@@ -911,7 +891,7 @@ func (object ReplayPublicationParquetObject) validate(bundle ReplayPublicationBu
 	if err != nil || object.RelativeKey != wantRelative {
 		return newError(ErrWrongKey, "Parquet object relative key mismatch")
 	}
-	return validateObjectKeys(bundle.Scope, object.RelativeKey, object.FullKey, object.RcloneKey)
+	return validateObjectKeys(bundle.Scope, object.RelativeKey, object.FullKey)
 }
 
 func (manifest ReplayPublicationPartManifest) validate(bundle ReplayPublicationBundle) error {
@@ -932,7 +912,7 @@ func (manifest ReplayPublicationPartManifest) validate(bundle ReplayPublicationB
 	if manifest.RelativeKey != wantRelative {
 		return newError(ErrWrongKey, "part manifest relative key mismatch")
 	}
-	return validateObjectKeys(bundle.Scope, manifest.RelativeKey, manifest.FullKey, manifest.RcloneKey)
+	return validateObjectKeys(bundle.Scope, manifest.RelativeKey, manifest.FullKey)
 }
 
 func (manifest ReplayPublicationReplayManifest) validate(bundle ReplayPublicationBundle) error {
@@ -953,19 +933,7 @@ func (manifest ReplayPublicationReplayManifest) validate(bundle ReplayPublicatio
 	if manifest.RelativeKey != wantRelative {
 		return newError(ErrWrongKey, "replay manifest relative key mismatch")
 	}
-	return validateObjectKeys(bundle.Scope, manifest.RelativeKey, manifest.FullKey, manifest.RcloneKey)
-}
-
-func (identity ReplayPublicationRcloneIdentity) validate() error {
-	if err := validateNonzeroHash("rclone binary_sha256", identity.BinarySHA256); err != nil {
-		return err
-	}
-	for name, value := range map[string]string{"rclone goarch": identity.GOARCH, "rclone goos": identity.GOOS, "rclone version": identity.Version} {
-		if err := validatePublicationString(name, value); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateObjectKeys(bundle.Scope, manifest.RelativeKey, manifest.FullKey)
 }
 
 func (bundle ReplayPublicationBundle) replayScope() ReplayScope {
@@ -995,12 +963,12 @@ func (bundle ReplayPublicationBundle) expectedDerivatives() []ReplayObservedDeri
 	return result
 }
 
-func validateObjectKeys(scope ReplayPublicationScope, relative, full, rclone string) error {
+func validateObjectKeys(scope ReplayPublicationScope, relative, full string) error {
 	if err := validateRelativePublicationKey(relative); err != nil {
 		return err
 	}
-	if full != scope.ImmutablePrefix+"/"+relative || rclone != scope.RclonePrefix+"/"+relative {
-		return newError(ErrWrongKey, "full or rclone key is not the trusted-prefix derivation")
+	if full != scope.ImmutablePrefix+"/"+relative {
+		return newError(ErrWrongKey, "full key is not the trusted-prefix derivation")
 	}
 	return nil
 }
@@ -1155,7 +1123,7 @@ func validateBundleShape(value any) error {
 	for key, expected := range map[string]map[string]bool{
 		"claim": claimKeys, "conversion": conversionKeys, "limits": limitKeys,
 		"raw_manifest": rawManifestKeys, "replay_manifest": replayManifestKeys,
-		"rclone_identity": rcloneIdentityKeys, "scope": scopeKeys,
+		"scope": scopeKeys,
 	} {
 		if _, err := publicationExactObject(object[key], expected); err != nil {
 			return err
@@ -1202,17 +1170,16 @@ func keySet(values ...string) map[string]bool {
 }
 
 var (
-	bundleKeys                  = keySet("bundle_version", "canonical_stream_row_chain_root", "claim", "conversion", "limits", "parquet_objects", "part_manifests", "part_set_root", "raw_manifest", "raw_objects", "replay_manifest", "rclone_identity", "scope")
+	bundleKeys                  = keySet("bundle_version", "canonical_stream_row_chain_root", "claim", "conversion", "limits", "parquet_objects", "part_manifests", "part_set_root", "raw_manifest", "raw_objects", "replay_manifest", "scope")
 	claimKeys                   = keySet("canonical_json", "domain_digest", "full_key")
 	conversionKeys              = keySet("conversion_id", "converter_build_id", "dependency_lock_hash", "format_id", "max_canonical_bytes_per_part", "max_rows_per_part", "max_rows_per_row_group", "replay_contract_id", "target_platform_contract", "writer_configuration_hash")
 	limitKeys                   = keySet("max_graph_nodes", "max_list_objects", "max_metadata_object_bytes", "max_observation_bytes", "max_observation_requests", "max_parquet_object_bytes", "max_parts", "max_publication_rounds", "max_total_metadata_bytes", "max_total_parquet_bytes")
-	rawManifestKeys             = keySet("bytes", "domain_digest", "full_key", "relative_key", "rclone_key", "revision")
-	rawObjectKeys               = keySet("bytes", "full_key", "relative_key", "rclone_key", "sha256")
-	parquetObjectKeys           = keySet("bytes", "first_stream_sequence", "full_key", "last_stream_sequence", "object_id", "relative_key", "rclone_key", "sha256")
-	partManifestPublicationKeys = keySet("bytes", "domain_digest", "full_key", "object_id", "part_sequence", "relative_key", "rclone_key")
-	replayManifestKeys          = keySet("bytes", "domain_digest", "full_key", "relative_key", "rclone_key", "revision")
-	rcloneIdentityKeys          = keySet("binary_sha256", "goarch", "goos", "version")
-	scopeKeys                   = keySet("broker_server_fingerprint", "campaign_id", "dataset_id", "date", "day_definition_id", "exact_source_symbol", "immutable_prefix", "provider_id", "publisher_epoch", "publisher_id", "rclone_prefix", "scope_config_hash", "scope_key", "settle_policy", "stable_feed_id")
+	rawManifestKeys             = keySet("bytes", "domain_digest", "full_key", "relative_key", "revision")
+	rawObjectKeys               = keySet("bytes", "full_key", "relative_key", "sha256")
+	parquetObjectKeys           = keySet("bytes", "first_stream_sequence", "full_key", "last_stream_sequence", "object_id", "relative_key", "sha256")
+	partManifestPublicationKeys = keySet("bytes", "domain_digest", "full_key", "object_id", "part_sequence", "relative_key")
+	replayManifestKeys          = keySet("bytes", "domain_digest", "full_key", "relative_key", "revision")
+	scopeKeys                   = keySet("broker_server_fingerprint", "campaign_id", "dataset_id", "date", "day_definition_id", "exact_source_symbol", "immutable_prefix", "provider_id", "publisher_epoch", "publisher_id", "scope_config_hash", "scope_key", "settle_policy", "stable_feed_id")
 	finalObservationKeys        = keySet("bundle_digest", "claim", "complete", "derivative_objects", "observation_bytes", "observation_requests", "observation_version", "raw_manifest", "raw_objects", "replay_edges")
 	observedRawManifestKeys     = keySet("bytes", "domain_digest", "full_key")
 	observedRawObjectKeys       = keySet("bytes", "full_key", "sha256")

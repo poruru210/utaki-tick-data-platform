@@ -80,7 +80,7 @@ func observerLimits() ProofLimits {
 }
 
 func TestRawRetentionObserverRejectsClaimMismatchBeforeObjectProof(t *testing.T) {
-	layout, err := r2.NewLayout("immutable-root", "", observerScope())
+	layout, err := r2.NewLayout("immutable-root", observerScope())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestRawRetentionObserverRejectsClaimMismatchBeforeObjectProof(t *testing.T)
 }
 
 func TestRawRetentionObserverFailsClosedOnIncompleteManifestListing(t *testing.T) {
-	layout, err := r2.NewLayout("immutable-root", "", observerScope())
+	layout, err := r2.NewLayout("immutable-root", observerScope())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestRawRetentionObserverVerifiesFullRemoteSnapshotSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, err := r2.NewLayout("immutable-root", "", scope)
+	layout, err := r2.NewLayout("immutable-root", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestRawRetentionObserverVerifiesFullRemoteSnapshotSemantics(t *testing.T) {
 	}
 	otherScope := scope
 	otherScope.CampaignID = "other-campaign"
-	otherLayout, err := r2.NewLayout("immutable-root", "", otherScope)
+	otherLayout, err := r2.NewLayout("immutable-root", otherScope)
 	if err != nil {
 		t.Fatal(err)
 	}

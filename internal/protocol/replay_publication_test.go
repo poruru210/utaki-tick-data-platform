@@ -143,7 +143,7 @@ func TestReplayFinalObservationAcceptsProvenEmptyTerminalAndEmptyPredecessor(t *
 	emptyBundle.PartManifests = []ReplayPublicationPartManifest{}
 	emptyBundle.PartSetRoot = strings.Repeat("0", 64)
 	emptyBundle.CanonicalStreamRowChainRoot = strings.Repeat("0", 64)
-	emptyBundle.ReplayManifest = ReplayPublicationReplayManifest{Bytes: uint64(len(emptyCanonical)), DomainDigest: hex.EncodeToString(emptyDigest[:]), FullKey: emptyEdge.FullKey, RelativeKey: emptyRelative, RcloneKey: emptyBundle.Scope.RclonePrefix + "/" + emptyRelative, Revision: 1}
+	emptyBundle.ReplayManifest = ReplayPublicationReplayManifest{Bytes: uint64(len(emptyCanonical)), DomainDigest: hex.EncodeToString(emptyDigest[:]), FullKey: emptyEdge.FullKey, RelativeKey: emptyRelative, Revision: 1}
 	emptyObservation := replayTestObservation(t, emptyBundle, []ReplayObservedRevisionEdge{emptyEdge})
 	if _, err := ReplayFinalObservationCanonicalJSON(emptyObservation, emptyBundle); err != nil {
 		t.Fatalf("proven empty terminal rejected: %v", err)
@@ -165,7 +165,7 @@ func TestReplayFinalObservationAcceptsProvenEmptyTerminalAndEmptyPredecessor(t *
 	successorRelative, _ := ReplayDayManifestKey(successor)
 	successorEdge := replayTestEdge(successor, fixture.Bundle.Scope.ImmutablePrefix+"/"+successorRelative, successorCanonical)
 	successorBundle := fixture.Bundle
-	successorBundle.ReplayManifest = ReplayPublicationReplayManifest{Bytes: uint64(len(successorCanonical)), DomainDigest: hex.EncodeToString(successorDigest[:]), FullKey: successorEdge.FullKey, RelativeKey: successorRelative, RcloneKey: successorBundle.Scope.RclonePrefix + "/" + successorRelative, Revision: 2}
+	successorBundle.ReplayManifest = ReplayPublicationReplayManifest{Bytes: uint64(len(successorCanonical)), DomainDigest: hex.EncodeToString(successorDigest[:]), FullKey: successorEdge.FullKey, RelativeKey: successorRelative, Revision: 2}
 	successorObservation := replayTestObservation(t, successorBundle, []ReplayObservedRevisionEdge{predecessorEdge, successorEdge})
 	if _, err := ReplayFinalObservationCanonicalJSON(successorObservation, successorBundle); err != nil {
 		t.Fatalf("proven empty predecessor rejected: %v", err)
