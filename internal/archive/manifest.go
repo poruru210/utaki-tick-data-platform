@@ -725,6 +725,100 @@ func VerifyRawDayManifest(data []byte) (RawDayManifest, error) {
 	return manifest, nil
 }
 
+// RawDaySegmentCoverage is the independent semantic result for one verified
+// WAL object. It is intentionally narrower than a campaign report: callers
+// must still validate the manifest revision graph and the campaign chain, but
+// this result proves that every date-selected batch/range for this object is
+// exactly the range recorded by the manifest.
+type RawDaySegmentCoverage struct {
+	ManifestSHA256          [32]byte
+	Date                    string
+	ObjectKey               string
+	ObjectSHA256            [32]byte
+	ObjectBytes             uint64
+	SelectedRanges          []RawObjectRange
+	AcceptedRecordCount     uint64
+	ErrorCount              uint64
+	ChainSliceStartSequence uint64
+	ChainSliceStartRoot     [32]byte
+	ChainSliceEndSequence   uint64
+	ChainSliceEndRoot       [32]byte
+}
+
+// VerifyRawDaySegmentCoverage rederives the raw-day selection from one
+// verified sealed segment and compares it byte-for-byte with that object's
+// manifest ranges. Unlike a sequence-presence check, it validates each
+// BatchFrameV1 record date and ordinal, including the zero-record sentinel
+// rule, under the trusted scope's record limit.
+func VerifyRawDaySegmentCoverage(manifest RawDayManifest, segment wal.VerifiedSegment, objectKey string, objectSHA [32]byte, objectBytes uint64, scope ScopeConfig) (RawDaySegmentCoverage, error) {
+	normalizedScope, err := scope.normalized()
+	if err != nil {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: scope config is invalid: %v", ErrIntegrity, err)
+	}
+	if err := ValidateRawDayManifest(manifest); err != nil {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: manifest is invalid: %v", ErrIntegrity, err)
+	}
+	configHash, err := normalizedScope.ConfigHash()
+	if err != nil {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: scope config hash: %v", ErrIntegrity, err)
+	}
+	if manifest.DatasetID != normalizedScope.DatasetID || manifest.CampaignID != normalizedScope.CampaignID || manifest.DayDefinitionID != normalizedScope.DayDefinitionID || manifest.PublisherID != normalizedScope.PublisherID || manifest.PublisherEpoch != normalizedScope.PublisherEpoch || manifest.SettlePolicy != normalizedScope.SettlePolicy || manifest.ConfigHash != configHash {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: manifest scope does not match verification scope", ErrIntegrity)
+	}
+	manifestDigest, err := ManifestDigest(manifest)
+	if err != nil {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: manifest digest: %v", ErrIntegrity, err)
+	}
+	if manifest.ManifestSHA256 != ([32]byte{}) && manifest.ManifestSHA256 != manifestDigest {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: manifest digest does not match canonical bytes", ErrIntegrity)
+	}
+	if objectKey != RawWALObjectKey(objectSHA) || objectBytes == 0 || segment.ObjectSHA256 != objectSHA || segment.FileBytes < 0 || uint64(segment.FileBytes) != objectBytes || segment.StartSequence == 0 || segment.LastSequence < segment.StartSequence {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: verified segment identity does not match raw object", ErrIntegrity)
+	}
+	chainFound := false
+	for _, descriptor := range manifest.ChainObjects {
+		if descriptor.Key == objectKey && descriptor.SHA256 == objectSHA && descriptor.Bytes == objectBytes && descriptor.StartIngestSequence == segment.StartSequence && descriptor.EndIngestSequence == segment.LastSequence {
+			chainFound = true
+			break
+		}
+	}
+	if !chainFound {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: raw object is absent from manifest chain", ErrIntegrity)
+	}
+	selection, err := deriveDaySelection([]RawObject{{Key: objectKey, SHA256: objectSHA, Bytes: int64(objectBytes), Segment: segment}}, manifest.Date, 0, 0, normalizedScope.ProtocolLimits.MaxRecords)
+	if err != nil {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: derive raw-day selection: %v", ErrIntegrity, err)
+	}
+	actual := make([]RawObjectRange, 0)
+	for _, object := range manifest.Objects {
+		if object.Key == objectKey && object.SHA256 == objectSHA && object.Bytes == objectBytes {
+			actual = append(actual, object)
+		}
+	}
+	if len(actual) != len(selection.Objects) {
+		return RawDaySegmentCoverage{}, fmt.Errorf("%w: manifest selected range count differs from verified segment", ErrIntegrity)
+	}
+	for index := range actual {
+		if actual[index] != selection.Objects[index] {
+			return RawDaySegmentCoverage{}, fmt.Errorf("%w: manifest selected range %d differs from verified segment", ErrIntegrity, index)
+		}
+	}
+	return RawDaySegmentCoverage{
+		ManifestSHA256:          manifestDigest,
+		Date:                    manifest.Date,
+		ObjectKey:               objectKey,
+		ObjectSHA256:            objectSHA,
+		ObjectBytes:             objectBytes,
+		SelectedRanges:          append([]RawObjectRange(nil), selection.Objects...),
+		AcceptedRecordCount:     selection.AcceptedRecordCount,
+		ErrorCount:              selection.ErrorCount,
+		ChainSliceStartSequence: selection.ChainSliceStartSequence,
+		ChainSliceStartRoot:     selection.ChainSliceStartRoot,
+		ChainSliceEndSequence:   selection.ChainSliceEndSequence,
+		ChainSliceEndRoot:       selection.ChainSliceEndRoot,
+	}, nil
+}
+
 // VerifyRawDaySnapshot reopens every full sealed WAL object named by
 // ChainObjects and proves that the manifest is a semantic view of those bytes.
 // The caller supplies paths by their canonical campaign-relative object key.
@@ -843,6 +937,136 @@ func VerifyRawDaySnapshot(manifest RawDayManifest, objectPaths map[string]string
 		return fmt.Errorf("%w: chain_objects does not match WAL bytes", ErrIntegrity)
 	}
 	return nil
+}
+
+// RawDaySnapshotReport is the semantic evidence produced without granting a
+// verifier filesystem authority. The object bytes are supplied by a bounded
+// caller and are checked against the same manifest rederivation used by
+// VerifyRawDaySnapshot.
+type RawDaySnapshotReport struct {
+	ManifestSHA256           [32]byte
+	ObjectCount              uint64
+	AcceptedRecordCount      uint64
+	ErrorCount               uint64
+	ObservedThroughSourceMSC int64
+	ObservedThroughCapture   uint64
+	ChainSliceStartSequence  uint64
+	ChainSliceStartRoot      [32]byte
+	ChainSliceEndSequence    uint64
+	ChainSliceEndRoot        [32]byte
+}
+
+// VerifyRawDaySnapshotSegments is the read-only remote counterpart of
+// VerifyRawDaySnapshot. It verifies every ChainObjects descriptor and then
+// rederives all selected ranges, counts, watermarks, and chain roots from the
+// supplied verified bytes. The caller remains responsible for bounding and
+// deriving the remote reads.
+func VerifyRawDaySnapshotSegments(manifest RawDayManifest, objects []RawObject, scope ScopeConfig) (RawDaySnapshotReport, error) {
+	normalizedScope, err := scope.normalized()
+	if err != nil {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: scope config is invalid: %v", ErrIntegrity, err)
+	}
+	if err := ValidateRawDayManifest(manifest); err != nil {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: manifest is invalid: %v", ErrIntegrity, err)
+	}
+	configHash, err := normalizedScope.ConfigHash()
+	if err != nil {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: scope config hash cannot be computed: %v", ErrIntegrity, err)
+	}
+	if manifest.DatasetID != normalizedScope.DatasetID || manifest.CampaignID != normalizedScope.CampaignID || manifest.DayDefinitionID != normalizedScope.DayDefinitionID || manifest.PublisherID != normalizedScope.PublisherID || manifest.PublisherEpoch != normalizedScope.PublisherEpoch || manifest.SettlePolicy != normalizedScope.SettlePolicy || manifest.ConfigHash != configHash {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: manifest scope does not match verification scope", ErrIntegrity)
+	}
+	manifestDigest, err := ManifestDigest(manifest)
+	if err != nil {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: manifest digest cannot be computed: %v", ErrIntegrity, err)
+	}
+	if manifest.ManifestSHA256 != ([32]byte{}) && manifest.ManifestSHA256 != manifestDigest {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: manifest digest does not match canonical bytes", ErrIntegrity)
+	}
+	if len(manifest.ChainObjects) == 0 {
+		if len(objects) != 0 {
+			return RawDaySnapshotReport{}, fmt.Errorf("%w: objects exist for an empty manifest chain", ErrIntegrity)
+		}
+		return RawDaySnapshotReport{ManifestSHA256: manifestDigest}, nil
+	}
+	byKey := make(map[string]RawObject, len(objects))
+	for _, object := range objects {
+		if object.Key == "" || object.Bytes <= 0 || object.Segment.ObjectSHA256 != object.SHA256 || object.Segment.FileBytes != object.Bytes {
+			return RawDaySnapshotReport{}, fmt.Errorf("%w: supplied raw object is not verified", ErrIntegrity)
+		}
+		if _, duplicate := byKey[object.Key]; duplicate {
+			return RawDaySnapshotReport{}, fmt.Errorf("%w: supplied raw object is duplicated", ErrIntegrity)
+		}
+		byKey[object.Key] = object
+	}
+	if len(byKey) != len(manifest.ChainObjects) {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: supplied raw object count differs from manifest chain", ErrIntegrity)
+	}
+	verifiedObjects := make([]RawObject, len(manifest.ChainObjects))
+	for index, descriptor := range manifest.ChainObjects {
+		object, ok := byKey[descriptor.Key]
+		if !ok || object.SHA256 != descriptor.SHA256 || uint64(object.Bytes) != descriptor.Bytes || object.Segment.StartSequence != descriptor.StartIngestSequence || object.Segment.LastSequence != descriptor.EndIngestSequence {
+			return RawDaySnapshotReport{}, fmt.Errorf("%w: chain object %q metadata does not match verified bytes", ErrIntegrity, descriptor.Key)
+		}
+		verifiedObjects[index] = object
+		if index > 0 {
+			previous := verifiedObjects[index-1].Segment
+			if previous.LastSequence == ^uint64(0) || object.Segment.StartSequence != previous.LastSequence+1 || object.Segment.ChainStart != previous.ChainRoot {
+				return RawDaySnapshotReport{}, fmt.Errorf("%w: chain object sequence or hash continuity failed at %d", ErrIntegrity, index)
+			}
+		}
+	}
+	expectedSequence := manifest.ChainSliceStartSequence
+	expectedPrevious := manifest.ChainSliceStartRoot
+	reachedEnd := false
+	for _, object := range verifiedObjects {
+		for _, entry := range object.Segment.Entries {
+			if entry.Sequence < manifest.ChainSliceStartSequence {
+				continue
+			}
+			if entry.Sequence > manifest.ChainSliceEndSequence {
+				break
+			}
+			if entry.Sequence != expectedSequence || entry.PreviousEntryHash != expectedPrevious {
+				return RawDaySnapshotReport{}, fmt.Errorf("%w: selected WAL entry chain is discontinuous at sequence %d", ErrIntegrity, entry.Sequence)
+			}
+			expectedPrevious = entry.EntryHash
+			if entry.Sequence == manifest.ChainSliceEndSequence {
+				reachedEnd = true
+				break
+			}
+			expectedSequence++
+		}
+		if reachedEnd {
+			break
+		}
+	}
+	if !reachedEnd || expectedPrevious != manifest.ChainSliceEndRoot {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: selected WAL entry chain does not match manifest roots", ErrIntegrity)
+	}
+	selection, err := deriveDaySelection(verifiedObjects, manifest.Date, manifest.ChainSliceStartSequence, manifest.ChainSliceEndSequence, normalizedScope.ProtocolLimits.MaxRecords)
+	if err != nil {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: could not rederive selected ranges: %v", ErrIntegrity, err)
+	}
+	if !equalRawObjectRanges(selection.Objects, manifest.Objects) || selection.AcceptedRecordCount != manifest.AcceptedRecordCount || selection.ErrorCount != manifest.ErrorCount || selection.ObservedThroughSourceMSC != manifest.ObservedThroughSourceMSC || selection.ObservedThroughCaptureSeq != manifest.ObservedThroughCaptureSeq || selection.ChainSliceStartSequence != manifest.ChainSliceStartSequence || selection.ChainSliceStartRoot != manifest.ChainSliceStartRoot || selection.ChainSliceEndSequence != manifest.ChainSliceEndSequence || selection.ChainSliceEndRoot != manifest.ChainSliceEndRoot {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: manifest selection or watermark does not match WAL bytes", ErrIntegrity)
+	}
+	wantChainObjects := chainObjectsForSlice(verifiedObjects, manifest.ChainSliceStartSequence, manifest.ChainSliceEndSequence)
+	if !equalRawChainObjects(wantChainObjects, manifest.ChainObjects) {
+		return RawDaySnapshotReport{}, fmt.Errorf("%w: chain_objects does not match WAL bytes", ErrIntegrity)
+	}
+	return RawDaySnapshotReport{
+		ManifestSHA256:           manifestDigest,
+		ObjectCount:              uint64(len(verifiedObjects)),
+		AcceptedRecordCount:      selection.AcceptedRecordCount,
+		ErrorCount:               selection.ErrorCount,
+		ObservedThroughSourceMSC: selection.ObservedThroughSourceMSC,
+		ObservedThroughCapture:   selection.ObservedThroughCaptureSeq,
+		ChainSliceStartSequence:  selection.ChainSliceStartSequence,
+		ChainSliceStartRoot:      selection.ChainSliceStartRoot,
+		ChainSliceEndSequence:    selection.ChainSliceEndSequence,
+		ChainSliceEndRoot:        selection.ChainSliceEndRoot,
+	}, nil
 }
 
 func equalRawObjectRanges(left, right []RawObjectRange) bool {

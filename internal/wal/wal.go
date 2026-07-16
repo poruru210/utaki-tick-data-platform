@@ -40,30 +40,49 @@ type Entry struct {
 }
 
 type Store struct {
-	mu          sync.Mutex
-	root        string
-	path        string
-	gatewayID   string
-	file        *os.File
-	syncFile    func() error
-	statFile    func() (os.FileInfo, error)
-	entries     []Entry
-	sealed      []VerifiedSegment
-	last        [32]byte
-	next        uint64
-	start       uint64
-	activeAt    int
-	sealedBytes int64
-	fileBytes   int64
-	poisoned    bool
+	mu            sync.Mutex
+	root          string
+	path          string
+	gatewayID     string
+	file          *os.File
+	syncFile      func() error
+	statFile      func() (os.FileInfo, error)
+	entries       []Entry
+	sealed        []VerifiedSegment
+	last          [32]byte
+	next          uint64
+	start         uint64
+	activeAt      int
+	sealedBytes   int64
+	fileBytes     int64
+	poisoned      bool
+	prunedThrough uint64
 }
 
 func Open(root, gatewayID string) (*Store, error) {
+	return OpenWithAnchor(root, gatewayID, nil)
+}
+
+// PruneAnchor is the durable chain boundary left by retention after deleting
+// an old sealed prefix. It contains no filesystem path or caller-selected
+// authority; the next retained segment must begin at EndSequence+1 and link to
+// ChainRoot.
+type PruneAnchor struct {
+	EndSequence uint64
+	ChainRoot   [32]byte
+}
+
+// OpenWithAnchor reopens a WAL after a verified prefix prune. The legacy Open
+// behavior remains sequence 1 plus a zero chain root when anchor is nil.
+func OpenWithAnchor(root, gatewayID string, anchor *PruneAnchor) (*Store, error) {
 	if root == "" {
 		return nil, fmt.Errorf("WAL root is empty")
 	}
 	if gatewayID == "" || !utf8.ValidString(gatewayID) || len(gatewayID) > 255 {
 		return nil, fmt.Errorf("invalid gateway instance id")
+	}
+	if anchor != nil && (anchor.EndSequence == 0 || anchor.EndSequence == ^uint64(0) || anchor.ChainRoot == ([32]byte{})) {
+		return nil, fmt.Errorf("invalid WAL prune anchor")
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("create WAL root: %w", err)
@@ -74,6 +93,12 @@ func Open(root, gatewayID string) (*Store, error) {
 		gatewayID: gatewayID,
 		start:     1,
 		next:      1,
+	}
+	if anchor != nil {
+		store.prunedThrough = anchor.EndSequence
+		store.last = anchor.ChainRoot
+		store.start = anchor.EndSequence + 1
+		store.next = store.start
 	}
 	if err := store.initialize(); err != nil {
 		if store.file != nil {
@@ -115,9 +140,21 @@ func (s *Store) Last() (uint64, [32]byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.entries) == 0 {
-		return 0, [32]byte{}
+		return s.prunedThrough, s.last
 	}
 	return s.entries[len(s.entries)-1].Sequence, s.last
+}
+
+func (s *Store) PrunedThrough() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.prunedThrough
+}
+
+func (s *Store) ChainRoot() [32]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.last
 }
 
 func (s *Store) Count() int {

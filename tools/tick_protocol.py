@@ -32,6 +32,8 @@ RAW_DAY_MANIFEST_DOMAIN = b"tick-data-platform/raw-day-manifest/v1\0"
 PUBLISHER_CLAIM_DOMAIN = b"tick-data-platform/publisher-claim/v1\0"
 REPLAY_PUBLICATION_BUNDLE_DOMAIN = b"tick-data-platform/replay-publication-bundle/v1\0"
 REPLAY_FINAL_OBSERVATION_DOMAIN = b"tick-data-platform/replay-publication-final-observation/v1\0"
+HANDOVER_ARTIFACT_DOMAIN = b"tick-data-platform/publisher-handover/v1\0"
+HANDOVER_ARTIFACT_VERSION = "publisher-handover-v1"
 REPLAY_PUBLICATION_BUNDLE_VERSION = "replay-publication-bundle-v1"
 REPLAY_FINAL_OBSERVATION_VERSION = "replay-publication-final-observation-v1"
 
@@ -968,6 +970,20 @@ _PUBLISHER_CLAIM_KEYS = {
     "settle_policy",
     "stable_feed_id",
 }
+_HANDOVER_ARTIFACT_KEYS = {
+    "campaign_id",
+    "dataset_id",
+    "expected_next_claim_domain_digest",
+    "expected_next_claim_key",
+    "handover_version",
+    "next_publisher_epoch",
+    "operator_evidence_digest",
+    "prior_claim_domain_digest",
+    "prior_claim_key",
+    "prior_publisher_epoch",
+    "scope_key",
+    "transition_key",
+}
 
 
 def _publication_exact_object(value: Any, expected: set[str]) -> dict[str, Any]:
@@ -1030,6 +1046,114 @@ def _validate_publication_prefix(name: str, value: Any) -> str:
     ):
         raise ProtocolError("WRONG_KEY", f"{name} is not a canonical prefix")
     return value
+
+
+def _validate_handover_full_key(name: str, value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > MAX_PATH_BYTES
+        or value.startswith("/")
+        or "\\" in value
+        or "\r" in value
+        or "\n" in value
+        or "//" in value
+    ):
+        raise ProtocolError("WRONG_KEY", f"{name} is not a canonical full key")
+    if any(part in {"", ".", ".."} for part in value.split("/")):
+        raise ProtocolError("WRONG_KEY", f"{name} contains a forbidden key component")
+    return value
+
+
+def handover_artifact_key(immutable_prefix: str, next_epoch: int) -> str:
+    prefix = _validate_publication_prefix("immutable_prefix", immutable_prefix)
+    if isinstance(next_epoch, bool) or not isinstance(next_epoch, int) or next_epoch <= 0:
+        raise ProtocolError("INVALID_FIELD", "next publisher epoch is invalid")
+    return f"{prefix}/handover/next-epoch={next_epoch}.json"
+
+
+def handover_transition_key(immutable_prefix: str, next_epoch: int) -> str:
+    prefix = _validate_publication_prefix("immutable_prefix", immutable_prefix)
+    if isinstance(next_epoch, bool) or not isinstance(next_epoch, int) or next_epoch <= 0:
+        raise ProtocolError("INVALID_FIELD", "next publisher epoch is invalid")
+    return f"{prefix}/handover-transitions/next-epoch={next_epoch}.json"
+
+
+def _validate_handover_artifact(value: Any) -> dict[str, Any]:
+    artifact = _publication_exact_object(value, _HANDOVER_ARTIFACT_KEYS)
+    if artifact["handover_version"] != HANDOVER_ARTIFACT_VERSION:
+        raise ProtocolError("INVALID_FIELD", "invalid handover version")
+    for name in ("dataset_id", "campaign_id"):
+        _require_publication_string(name, artifact[name])
+    prior_epoch = _require_publication_uint(
+        "prior_publisher_epoch", artifact["prior_publisher_epoch"]
+    )
+    next_epoch = _require_publication_uint("next_publisher_epoch", artifact["next_publisher_epoch"])
+    if prior_epoch == 0 or next_epoch == 0 or next_epoch <= prior_epoch:
+        raise ProtocolError("INVALID_FIELD", "handover epochs must increase strictly")
+    _require_publication_hash("scope_key", artifact["scope_key"])
+    for name in (
+        "prior_claim_domain_digest",
+        "expected_next_claim_domain_digest",
+        "operator_evidence_digest",
+    ):
+        _require_publication_hash(name, artifact[name])
+    prior_key = _validate_handover_full_key("prior_claim_key", artifact["prior_claim_key"])
+    next_key = _validate_handover_full_key(
+        "expected_next_claim_key", artifact["expected_next_claim_key"]
+    )
+    transition_key = _validate_handover_full_key("transition_key", artifact["transition_key"])
+    if not prior_key.endswith(f"/publisher-claims/epoch={prior_epoch}.json"):
+        raise ProtocolError("WRONG_KEY", "prior claim key does not bind prior epoch")
+    if not next_key.endswith(f"/publisher-claims/epoch={next_epoch}.json"):
+        raise ProtocolError("WRONG_KEY", "expected next claim key does not bind next epoch")
+    if not transition_key.endswith(f"/handover-transitions/next-epoch={next_epoch}.json"):
+        raise ProtocolError("WRONG_KEY", "transition key does not bind next epoch")
+    return artifact
+
+
+def handover_artifact_canonical_json(artifact: dict[str, Any]) -> bytes:
+    _validate_handover_artifact(artifact)
+    return canonical_json(artifact).encode("utf-8")
+
+
+def handover_artifact_digest(artifact: dict[str, Any]) -> bytes:
+    return hashlib.sha256(
+        HANDOVER_ARTIFACT_DOMAIN + handover_artifact_canonical_json(artifact)
+    ).digest()
+
+
+def verify_handover_artifact(data: bytes) -> tuple[dict[str, Any], bytes]:
+    value = _decode_publication_canonical_json(data)
+    _validate_handover_artifact(value)
+    if handover_artifact_canonical_json(value) != data:
+        raise ProtocolError("INVALID_CANONICAL_JSON", "handover bytes are not canonical")
+    return value, hashlib.sha256(HANDOVER_ARTIFACT_DOMAIN + data).digest()
+
+
+def verify_handover_artifact_binding(
+    data: bytes, immutable_prefix: str, expected_scope_key: str, expected_artifact_key: str
+) -> tuple[dict[str, Any], bytes]:
+    artifact, digest = verify_handover_artifact(data)
+    prefix = _validate_publication_prefix("immutable_prefix", immutable_prefix)
+    expected_scope = _require_publication_hash("expected scope_key", expected_scope_key)
+    if expected_scope != bytes.fromhex(artifact["scope_key"]):
+        raise ProtocolError("SCOPE_COLLISION", "handover scope key differs from trusted scope")
+    want_artifact_key = handover_artifact_key(prefix, artifact["next_publisher_epoch"])
+    if expected_artifact_key != want_artifact_key:
+        raise ProtocolError(
+            "WRONG_KEY", "expected handover artifact key is not the trusted derivation"
+        )
+    want_prior = f"{prefix}/publisher-claims/epoch={artifact['prior_publisher_epoch']}.json"
+    want_next = f"{prefix}/publisher-claims/epoch={artifact['next_publisher_epoch']}.json"
+    want_transition = handover_transition_key(prefix, artifact["next_publisher_epoch"])
+    if (
+        artifact["prior_claim_key"] != want_prior
+        or artifact["expected_next_claim_key"] != want_next
+        or artifact["transition_key"] != want_transition
+    ):
+        raise ProtocolError("WRONG_KEY", "handover keys are outside the trusted campaign prefix")
+    return artifact, digest
 
 
 def _validate_publication_relative_key(value: Any) -> str:

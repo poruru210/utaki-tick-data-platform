@@ -15,7 +15,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fatalf("usage: tick-gateway <init|run|status|reconcile|verify-local> --config <path>")
+		fatalf("usage: tick-gateway <init|run|status|reconcile|verify-local|prune-local> --config <path>")
 	}
 	command := os.Args[1]
 	configPath, err := flagValue(os.Args[2:], "--config")
@@ -54,9 +54,26 @@ func main() {
 		if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
 			fatalf("write status: %v", err)
 		}
+	case "prune-local":
+		if err := pruneLocal(config, os.Args[2:]); err != nil {
+			fatalf("prune-local: %v", err)
+		}
 	default:
 		fatalf("unknown command %q", command)
 	}
+}
+
+func pruneLocal(config ingest.Config, args []string) error {
+	return runPruneLocal(config, args)
+}
+
+func hasFlag(args []string, name string) bool {
+	for _, arg := range args {
+		if arg == name {
+			return true
+		}
+	}
+	return false
 }
 
 func run(config ingest.Config) {

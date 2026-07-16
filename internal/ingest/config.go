@@ -11,39 +11,52 @@ import (
 )
 
 type Config struct {
-	ListenAddress        string
-	GatewayInstanceID    string
-	WALRoot              string
-	JournalPath          string
-	MaxFrameBytes        uint32
-	MaxRecords           uint32
-	InitialFromMSC       int64
-	InitialBatchCount    uint32
-	MaximumBatchCount    uint32
-	DenseBoundaryHardCap uint32
-	SessionLeaseTimeout  time.Duration
-	HeartbeatIdleTimeout time.Duration
+	ListenAddress          string
+	GatewayInstanceID      string
+	WALRoot                string
+	RawOutboxRoot          string
+	JournalPath            string
+	MaxFrameBytes          uint32
+	MaxRecords             uint32
+	InitialFromMSC         int64
+	InitialBatchCount      uint32
+	MaximumBatchCount      uint32
+	DenseBoundaryHardCap   uint32
+	SessionLeaseTimeout    time.Duration
+	HeartbeatIdleTimeout   time.Duration
+	DiskHighFreeBytes      uint64
+	DiskCriticalFreeBytes  uint64
+	DiskEmergencyFreeBytes uint64
 
 	ProducerInstanceID      string
 	ProducerBuildID         string
+	DatasetID               string
 	CampaignID              string
 	ProviderID              string
 	StableFeedID            string
 	BrokerServerFingerprint string
 	ExactSourceSymbol       string
+	GatewayBuildIdentity    string
+	DayDefinitionID         string
+	SettlePolicy            string
+	PublisherID             string
+	PublisherEpoch          uint64
 }
 
 func DefaultConfig() Config {
 	return Config{
-		ListenAddress:        "127.0.0.1:17001",
-		GatewayInstanceID:    "gateway-local-01",
-		MaxFrameBytes:        protocol.MaxFrameBytes,
-		MaxRecords:           protocol.MaxRecords,
-		InitialBatchCount:    128,
-		MaximumBatchCount:    protocol.MaxRecords,
-		DenseBoundaryHardCap: protocol.MaxRecords,
-		SessionLeaseTimeout:  30 * time.Second,
-		HeartbeatIdleTimeout: 60 * time.Second,
+		ListenAddress:          "127.0.0.1:17001",
+		GatewayInstanceID:      "gateway-local-01",
+		MaxFrameBytes:          protocol.MaxFrameBytes,
+		MaxRecords:             protocol.MaxRecords,
+		InitialBatchCount:      128,
+		MaximumBatchCount:      protocol.MaxRecords,
+		DenseBoundaryHardCap:   protocol.MaxRecords,
+		SessionLeaseTimeout:    30 * time.Second,
+		HeartbeatIdleTimeout:   60 * time.Second,
+		DiskHighFreeBytes:      512 << 20,
+		DiskCriticalFreeBytes:  256 << 20,
+		DiskEmergencyFreeBytes: 64 << 20,
 	}
 }
 
@@ -76,6 +89,15 @@ func (c Config) withDefaults() Config {
 	if c.HeartbeatIdleTimeout == 0 {
 		c.HeartbeatIdleTimeout = d.HeartbeatIdleTimeout
 	}
+	if c.DiskHighFreeBytes == 0 {
+		c.DiskHighFreeBytes = d.DiskHighFreeBytes
+	}
+	if c.DiskCriticalFreeBytes == 0 {
+		c.DiskCriticalFreeBytes = d.DiskCriticalFreeBytes
+	}
+	if c.DiskEmergencyFreeBytes == 0 {
+		c.DiskEmergencyFreeBytes = d.DiskEmergencyFreeBytes
+	}
 	return c
 }
 
@@ -104,6 +126,9 @@ func (c Config) Validate() error {
 	}
 	if c.SessionLeaseTimeout <= 0 || c.HeartbeatIdleTimeout <= 0 {
 		return fmt.Errorf("timeouts must be positive")
+	}
+	if err := (DiskWatermarks{HighFreeBytes: c.DiskHighFreeBytes, CriticalFreeBytes: c.DiskCriticalFreeBytes, EmergencyFreeBytes: c.DiskEmergencyFreeBytes}).Validate(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -157,6 +182,13 @@ func setConfigValue(config *Config, key, raw string) error {
 		}
 		return uint32(value), nil
 	}
+	uint64Value := func() (uint64, error) {
+		value, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid integer for %s: %w", key, err)
+		}
+		return value, nil
+	}
 	intValue := func() (int64, error) {
 		value, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
@@ -195,6 +227,8 @@ func setConfigValue(config *Config, key, raw string) error {
 		return setString(&config.GatewayInstanceID)
 	case "wal_root":
 		return setString(&config.WALRoot)
+	case "raw_outbox_root":
+		return setString(&config.RawOutboxRoot)
 	case "journal_path":
 		return setString(&config.JournalPath)
 	case "max_frame_bytes":
@@ -223,10 +257,33 @@ func setConfigValue(config *Config, key, raw string) error {
 		}
 		config.HeartbeatIdleTimeout = time.Duration(value) * time.Millisecond
 		return nil
+	case "disk_high_free_bytes":
+		value, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid integer for %s: %w", key, err)
+		}
+		config.DiskHighFreeBytes = value
+		return nil
+	case "disk_critical_free_bytes":
+		value, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid integer for %s: %w", key, err)
+		}
+		config.DiskCriticalFreeBytes = value
+		return nil
+	case "disk_emergency_free_bytes":
+		value, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid integer for %s: %w", key, err)
+		}
+		config.DiskEmergencyFreeBytes = value
+		return nil
 	case "producer_instance_id":
 		return setString(&config.ProducerInstanceID)
 	case "producer_build_id":
 		return setString(&config.ProducerBuildID)
+	case "dataset_id":
+		return setString(&config.DatasetID)
 	case "campaign_id":
 		return setString(&config.CampaignID)
 	case "provider_id":
@@ -237,6 +294,21 @@ func setConfigValue(config *Config, key, raw string) error {
 		return setString(&config.BrokerServerFingerprint)
 	case "exact_source_symbol":
 		return setString(&config.ExactSourceSymbol)
+	case "gateway_build_identity":
+		return setString(&config.GatewayBuildIdentity)
+	case "day_definition_id":
+		return setString(&config.DayDefinitionID)
+	case "settle_policy":
+		return setString(&config.SettlePolicy)
+	case "publisher_id":
+		return setString(&config.PublisherID)
+	case "publisher_epoch":
+		value, err := uint64Value()
+		if err != nil {
+			return err
+		}
+		config.PublisherEpoch = value
+		return nil
 	default:
 		return nil
 	}

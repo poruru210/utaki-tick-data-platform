@@ -8,3 +8,4 @@ immutable_root = "v1"
 cache_root = "./cache/tick-reader"
 max_metadata_bytes = 1048576
 max_raw_object_bytes = 8589934592
+max_remote_objects = 1048576

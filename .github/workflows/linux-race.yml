@@ -1,0 +1,75 @@
+name: Linux race detector
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  race:
+    name: Go race detector (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up mise
+        uses: jdx/mise-action@v3
+        with:
+          version: 2026.7.0
+
+      - name: Install mise-managed tools
+        run: |
+          mise trust
+          mise install
+
+      - name: Install C toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential
+          gcc --version
+
+      - name: Verify CGO toolchain
+        run: |
+          mise exec -- go version
+          mise exec -- go env GOOS GOARCH CGO_ENABLED CC
+
+      - name: Run race detector
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/retention ./internal/operations ./internal/httpapi -count=1 -json | tee artifacts/linux-race.json
+
+      - name: Capture race environment
+        if: always()
+        run: |
+          mkdir -p artifacts
+          {
+            echo "run_id=${{ github.run_id }}"
+            echo "sha=${{ github.sha }}"
+            echo "ref=${{ github.ref }}"
+            echo "runner_os=${{ runner.os }}"
+            echo "runner_arch=${{ runner.arch }}"
+            echo "go=$(mise exec -- go version)"
+            echo "goos=$(mise exec -- go env GOOS)"
+            echo "goarch=$(mise exec -- go env GOARCH)"
+            echo "cgo=$(mise exec -- go env CGO_ENABLED)"
+            echo "cc=$(mise exec -- go env CC)"
+            echo "compiler=$(gcc --version | head -n 1)"
+          } > artifacts/linux-race-environment.txt
+
+      - name: Upload race evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-race-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

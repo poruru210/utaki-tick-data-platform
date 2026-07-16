@@ -88,6 +88,27 @@ func TestBuildRawDayManifestSelectsRangesAndZeroBatchSentinel(t *testing.T) {
 	if second.ManifestSHA256 != manifest.ManifestSHA256 {
 		t.Fatal("same verified WAL input did not produce a deterministic manifest")
 	}
+	coverage, err := archive.VerifyRawDaySegmentCoverage(manifest, object.Segment, object.Key, object.SHA256, uint64(object.Bytes), scope)
+	if err != nil || len(coverage.SelectedRanges) != 3 || coverage.AcceptedRecordCount != 2 || coverage.ErrorCount != 1 {
+		t.Fatalf("segment semantic coverage = %+v, err=%v", coverage, err)
+	}
+	tampered := manifest
+	tampered.Objects = append([]archive.RawObjectRange(nil), manifest.Objects[:2]...)
+	tampered.RawSetRoot, err = archive.RawSetRoot(tampered.Objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.VerifyRawDaySegmentCoverage(tampered, object.Segment, object.Key, object.SHA256, uint64(object.Bytes), scope); err == nil {
+		t.Fatal("segment semantic coverage accepted a missing selected range")
+	}
+	if report, err := archive.VerifyRawDaySnapshotSegments(manifest, []archive.RawObject{object}, scope); err != nil || report.AcceptedRecordCount != manifest.AcceptedRecordCount || report.ErrorCount != manifest.ErrorCount {
+		t.Fatalf("full remote semantic report = %+v, err=%v", report, err)
+	}
+	tamperedSummary := manifest
+	tamperedSummary.AcceptedRecordCount++
+	if _, err := archive.VerifyRawDaySnapshotSegments(tamperedSummary, []archive.RawObject{object}, scope); err == nil {
+		t.Fatal("full remote semantic verification accepted a forged aggregate count")
+	}
 }
 
 func TestBuildRawDayManifestRevisionChainAndScopeDescriptor(t *testing.T) {

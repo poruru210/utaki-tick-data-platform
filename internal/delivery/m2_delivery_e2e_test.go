@@ -54,6 +54,20 @@ func (b *m2E2EBackend) List(_ context.Context, prefix string) ([]r2.RemoteObject
 	return result, nil
 }
 
+func (b *m2E2EBackend) ListLimited(ctx context.Context, prefix string, maxObjects uint64) ([]r2.RemoteObject, error) {
+	if maxObjects == 0 {
+		return nil, r2.ErrResourceLimit
+	}
+	result, err := b.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(result)) > maxObjects {
+		return nil, r2.ErrResourceLimit
+	}
+	return result, nil
+}
+
 func (b *m2E2EBackend) Get(_ context.Context, key string) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -62,6 +76,20 @@ func (b *m2E2EBackend) Get(_ context.Context, key string) ([]byte, error) {
 		return nil, r2.ErrObjectNotFound
 	}
 	return append([]byte(nil), body...), nil
+}
+
+func (b *m2E2EBackend) GetLimited(ctx context.Context, key string, maxBytes uint64) ([]byte, error) {
+	if maxBytes == 0 {
+		return nil, r2.ErrResourceLimit
+	}
+	body, err := b.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) > maxBytes {
+		return nil, r2.ErrResourceLimit
+	}
+	return body, nil
 }
 
 func (b *m2E2EBackend) Open(ctx context.Context, key string) (io.ReadCloser, int64, error) {

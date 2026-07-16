@@ -49,12 +49,40 @@ func (b *memoryReadBackend) List(_ context.Context, prefix string) ([]r2.RemoteO
 	return result, nil
 }
 
+func (b *memoryReadBackend) ListLimited(ctx context.Context, prefix string, maxObjects uint64) ([]r2.RemoteObject, error) {
+	if maxObjects == 0 {
+		return nil, r2.ErrResourceLimit
+	}
+	result, err := b.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(result)) > maxObjects {
+		return nil, r2.ErrResourceLimit
+	}
+	return result, nil
+}
+
 func (b *memoryReadBackend) Get(_ context.Context, key string) ([]byte, error) {
 	body, ok := b.objects[key]
 	if !ok {
 		return nil, r2.ErrObjectNotFound
 	}
 	return append([]byte(nil), body...), nil
+}
+
+func (b *memoryReadBackend) GetLimited(ctx context.Context, key string, maxBytes uint64) ([]byte, error) {
+	if maxBytes == 0 {
+		return nil, r2.ErrResourceLimit
+	}
+	body, err := b.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) > maxBytes {
+		return nil, r2.ErrResourceLimit
+	}
+	return body, nil
 }
 
 func (b *memoryReadBackend) Open(_ context.Context, key string) (io.ReadCloser, int64, error) {
@@ -197,6 +225,19 @@ func testReaderConfig(cacheRoot string) ReaderConfig {
 		BucketEnv: "TICK_READER_TEST_BUCKET", AccessKeyEnv: "TICK_READER_TEST_ACCESS",
 		SecretKeyEnv: "TICK_READER_TEST_SECRET", Region: "auto", ImmutableRoot: "v1",
 		CacheRoot: cacheRoot, MaxMetadataBytes: 1 << 20, MaxRawObjectBytes: 1 << 30,
+	}
+}
+
+func TestArchiveReaderUsesBoundedRemoteListing(t *testing.T) {
+	fixture := newDeliveryFixture(t)
+	config := testReaderConfig(t.TempDir())
+	config.MaxRemoteObjects = 1
+	reader, err := NewArchiveReaderV1WithBackend(config, fixture.backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.ListDatasets(context.Background()); !errors.Is(err, r2.ErrResourceLimit) {
+		t.Fatalf("unbounded inventory result = %v, want ErrResourceLimit", err)
 	}
 }
 

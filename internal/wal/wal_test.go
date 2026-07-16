@@ -85,3 +85,41 @@ func TestWALStopsOnCommittedEntryCorruption(t *testing.T) {
 		t.Fatalf("expected integrity stop, got %v", err)
 	}
 }
+
+func TestWALOpensFromPruneAnchor(t *testing.T) {
+	root := t.TempDir()
+	fixture, err := fake.BatchFixture()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := wal.Open(root, "gateway-test-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := first.Append(fixture.Frame, 1710000000, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "sealed", "segment-00000000000000000001-00000000000000000001.wal")); err != nil {
+		t.Fatal(err)
+	}
+	anchor := &wal.PruneAnchor{EndSequence: 1, ChainRoot: entry.EntryHash}
+	reopened, err := wal.OpenWithAnchor(root, "gateway-test-01", anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if reopened.PrunedThrough() != 1 || reopened.Count() != 0 || reopened.ChainRoot() != entry.EntryHash {
+		t.Fatalf("anchor state = through=%d count=%d root=%x", reopened.PrunedThrough(), reopened.Count(), reopened.ChainRoot())
+	}
+	second, err := reopened.Append(fixture.Frame, 1710000001, 43)
+	if err != nil || second.Sequence != 2 || second.PreviousEntryHash != entry.EntryHash {
+		t.Fatalf("anchored append = %+v, err=%v", second, err)
+	}
+}

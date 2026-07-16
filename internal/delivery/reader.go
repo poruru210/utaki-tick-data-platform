@@ -57,7 +57,7 @@ type discoveredScope struct {
 
 func (r *archiveReaderV1) discoverScopes(ctx context.Context) ([]discoveredScope, error) {
 	prefix := strings.TrimRight(r.config.ImmutableRoot, "/") + "/"
-	objects, err := r.backend.List(ctx, prefix)
+	objects, err := r.backend.ListLimited(ctx, prefix, r.config.MaxRemoteObjects)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func seenScopeKey(scopes []discoveredScope, want string) (discoveredScope, bool)
 }
 
 func (r *archiveReaderV1) metadata(ctx context.Context, key string) ([]byte, error) {
-	body, err := r.backend.Get(ctx, key)
+	body, err := r.backend.GetLimited(ctx, key, r.config.MaxMetadataBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func (r *archiveReaderV1) loadSnapshots(ctx context.Context, discovered discover
 	if err != nil {
 		return nil, err
 	}
-	objects, err := r.backend.List(ctx, base+"/")
+	objects, err := r.backend.ListLimited(ctx, base+"/", r.config.MaxRemoteObjects)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +356,7 @@ func (r *archiveReaderV1) ResolveSnapshot(ctx context.Context, selector Snapshot
 		}
 	}
 	if len(matches) == 0 {
-		return ResolvedSnapshot{}, fmt.Errorf("%w: manifest selector did not match exactly one snapshot", archive.ErrIntegrity)
+		return ResolvedSnapshot{}, fmt.Errorf("%w: manifest selector did not match exactly one snapshot", ErrSelectorNotFound)
 	}
 	if len(matches) != 1 {
 		return ResolvedSnapshot{}, fmt.Errorf("%w: manifest selector matched multiple snapshots", archive.ErrIntegrity)

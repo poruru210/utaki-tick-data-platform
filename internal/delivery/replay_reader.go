@@ -70,7 +70,7 @@ func (r *archiveReaderV1) ResolveReplaySnapshot(ctx context.Context, selector Re
 		}
 	}
 	if len(matched) == 0 {
-		return ResolvedReplaySnapshot{}, fmt.Errorf("%w: replay selector did not match", archive.ErrIntegrity)
+		return ResolvedReplaySnapshot{}, fmt.Errorf("%w: replay selector did not match", ErrSelectorNotFound)
 	}
 	if len(matched) != 1 && (selector.Manifest != "" || selector.Revision != nil) {
 		return ResolvedReplaySnapshot{}, fmt.Errorf("%w: replay selector is ambiguous", archive.ErrIntegrity)
@@ -108,7 +108,7 @@ func (r *archiveReaderV1) loadReplaySnapshotRecords(ctx context.Context, filter 
 		if err != nil {
 			return nil, err
 		}
-		objects, err := r.backend.List(ctx, prefix+"/")
+		objects, err := r.backend.ListLimited(ctx, prefix+"/", r.config.MaxRemoteObjects)
 		if err != nil {
 			return nil, err
 		}

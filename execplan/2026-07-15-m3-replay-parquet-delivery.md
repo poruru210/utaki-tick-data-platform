@@ -49,7 +49,7 @@ Parquetの全byte一致は、同じconverter build、dependency lock、writer co
   focused Go、fixture、Python、check、vet、gofmt、diff checkを再実行して全て成功した。
 - [x] (2026-07-15、M3-2 key binding更新) part/replay manifest verifierのexpected manifest keyを必須化し、空keyで検証を迂回できないようにした。
   focused Goとrepository gate一式を再実行し、失敗なしを確認した。
-- [ ] (2026-07-15、M3-2レビュー修正で再オープン) 固定schema、bounded streaming part生成、part-manifest-v1、replay-day-manifest-v1 M3 form、strict verifierの初回実装証拠は、PartManifestのscope/raw provenanceとfinal row-chain closure不足が判明したため完了扱いに戻さない。
+- [x] (2026-07-15、後続M3-2Gで解消済みのM3-2レビュー再オープン記録) 固定schema、bounded streaming part生成、part-manifest-v1、replay-day-manifest-v1 M3 form、strict verifierの初回実装証拠は、PartManifestのscope/raw provenanceとfinal row-chain closure不足が判明したため当時は完了扱いに戻さなかった。
   focused Go `83 passed / 0 failed`、fixture `20 verified`、Python `18 passed / 0 failed`、`mise run check`、`go vet`、空の`gofmt -l`、`git diff --check`に成功した。
 - [x] (2026-07-15、M3-2レビュー修正着手) PartManifestへexact ReplayScope、raw-day manifest key+domain digest、ConversionTuple、`previous_row_chain_hash`を追加し、strict Go/Python decoder、golden fixture、part-setのscope一致とrow-chain predecessor検証を更新した。
 - [x] (2026-07-15、M3-2レビュー修正の現行local gate) Archiveがverified `PartArtifact`からscope-boundなPartManifestInputを構成し、replay rootを最終partの`LastRowChainHash`へ固定した。
@@ -59,7 +59,7 @@ Parquetの全byte一致は、同じconverter build、dependency lock、writer co
 - [x] (2026-07-15、advisor exception audit再監査待ち) Protocol文書の未リリースM3 V1修正明記、fixture index再生成、outer replay bindingのPython検証、任意nonzero replay rootのbuild/verify負例、実multi-part Parquet integration testを完了し、現行全gateを再実行した。
   旧83件ではなく現行85件のfocused Go、fixture 21件、Python 24件を受入証拠とする。
   advisor再監査が完了するまでM3-3を開始せず、下流のpublication、receipt、selector、delivery、R2 uploadを解禁しない。
-- [ ] (2026-07-15、advisor changes_required remediationの旧checkpoint) `part_bytes >= 1`、part identity/anchor hashのnonzero規則をProtocol文書とGo/Python regression testへ明記した。
+- [x] (2026-07-15、後続M3-2Gで置換済みのadvisor changes_required remediation旧checkpoint) `part_bytes >= 1`、part identity/anchor hashのnonzero規則をProtocol文書とGo/Python regression testへ明記した。
   その時点の`94 passed / 0 failed`、fixture `21 verified`、Python `31 passed / 0 failed`はM3-2G key-contract correctionで再検証対象となり、現行のM3-2完了証拠とは扱わない。
 - [x] (2026-07-15、M3-2G key-contract correction) 現行Goalが定めるdate-local chainに合わせ、旧generic derivative key、hour partition例、Go/Pythonのkey導出差分を修正した。
   focused Goは`internal/parquet 4`、`internal/archive 20`、`internal/protocol 42`、`internal/r2 33`の合計`99 passed / 0 failed / 0 skipped`、fixtureは`22 verified`、Pythonは`32 passed / 0 failed`である。
@@ -78,10 +78,10 @@ Parquetの全byte一致は、同じconverter build、dependency lock、writer co
   前回の`internal/r2 47`、focused Go合計`88`、fixture `22 verified`、Python `32 passed`は修正前の履歴として保持し、今回のgate完了証拠とは分離した。
 - [x] (2026-07-15、M3-3A review correction verification) `ObjectBackend.Open`とS3 streaming reader、claim再assert、receipt直前のraw/Parquet/part/replay全再検証、既存Parquet hash/size、part chain、candidate orphan、List descriptor重複検証を追加した。
   `internal/r2`は未キャッシュで`52 passed / 0 failed`、`mise run check`、`mise exec -- go vet ./...`、空の`mise exec -- gofmt -l cmd internal`、`git diff --check`が成功した。
-- [ ] (2026-07-15、M3-3A advisor BLOCK remediation) prepare-before-lockのTOCTOUを修正し、campaign/epoch lock取得後にのみremote prepare、graph、list、orphan検査を実行するようにした。
+- [x] (2026-07-15、後続R1からR7で置換済みのM3-3A advisor BLOCK remediation記録) prepare-before-lockのTOCTOUを修正し、campaign/epoch lock取得後にのみremote prepare、graph、list、orphan検査を実行するようにした。
   claimを初回作成用とreceipt直前の既存claim再assert用へ分離し、final raw/Parquet/part/replay検証後のPutIfAbsentとbyte-identical GETを追加した。
   `ReplayPublicationLimits`をjournal intentへcanonicalに含め、S3/fakeの`GetLimited`、`ListLimited`、streaming `Open`、bounded Parquet hashを追加したが、Race Detectorはlocal gcc不足で未実行のためM3-3Aは未完了とする。
-- [ ] (2026-07-15、M3-3A advisor BLOCK remediationで再オープン) prepare-before-lockのTOCTOU、receipt直前のclaim再assert不足、Parquet mismatchの全buffer読み込み、出版リソース上限未固定が追加blockerとして判明した。
+- [x] (2026-07-15、後続R1からR7で解消済みのM3-3A advisor BLOCK再オープン記録) prepare-before-lockのTOCTOU、receipt直前のclaim再assert不足、Parquet mismatchの全buffer読み込み、publicationリソース上限未固定が追加blockerとして判明した。
   remote graph/list/orphan検査をcampaign/epoch lock内へ移し、ReplayPublicationLimitsをjournal intentへ固定し、GetLimited/ListLimited/Openによる有界検証と競合テストを通過するまでM3-3Aを完了扱いにしない。
 - [x] (2026-07-15、M3-3A-R0設計リセット) 上記の旧stage-based実装とtest countをaccepted evidenceから外し、behavior/failure inventoryとしてquarantineした。
   新しい実装正本は`execplan/2026-07-15-m3-3a-publication-redesign.md`である。
@@ -134,7 +134,8 @@ Parquetの全byte一致は、同じconverter build、dependency lock、writer co
 - [x] (2026-07-16、whole-M3 final audit changes_required) G9のM2 publicationがproduction `r2.Publisher`ではなくdirect helperを使っていたため、M3全体の完了証拠をG9Eで再構築することにした。
 - [x] (2026-07-16、G9E completed) Production M2 publisher、M3 replay publisher、read-only replay deliveryを同じnetwork-free backendとcanonical identity graphで接続し、現行local gateを再実行した。
 - [x] (2026-07-16、whole-M3 final re-audit pass) Advisorのphase `final_m3_whole_reaudit`がverdict `pass`、required actionsなしとなり、M3全体をcompletedとした。
-- [ ] M3の実装完了後も、proof-gated pruning、handover、multi-broker/symbol、Worker、HTTP、active audit、24h soak、live broker、mergeは別作業として残す。
+- [x] (2026-07-16、M3 merge) Pull Request #4をmerge commit `cb72752a651c88c3027b409f6f205ac9236f28b8`としてmainへ反映した。
+- [x] (2026-07-16、M4 handoff) proof-gated pruning、handover、multi-broker/symbol、HTTP、24h soak、live brokerをM3の未完了項目ではなくM4へ明示的に委譲した。M4の正本は`execplan/2026-07-16-m4-production-operations-http-delivery.md`とする。
 
 ## Surprises & Discoveries
 
@@ -1443,3 +1444,7 @@ Known unresolvedはReal R2 optional skipとGitHub CI未確認であり、HTTP、
 Local RaceはGitHub CIの結果ではなく、旧52件または86件のM3-3A test countはwhole-M3 final evidenceへ流用していない。
 
 M3全体はcompletedであり、`delivery_status: completed`、`final_audit: pass`の完了条件を満たす。
+
+改訂記録（2026-07-16 M3-MERGE-M4-HANDOFF）: Pull Request #4のmerge commit `cb72752a651c88c3027b409f6f205ac9236f28b8`をM3のmain統合証拠として記録した。
+
+M3対象外だったproduction operationとHTTP delivery adapterは、`execplan/2026-07-16-m4-production-operations-http-delivery.md`へ委譲した。

@@ -62,6 +62,8 @@ hashの入力bytesは[hash-domains.md](hash-domains.md)に定義します。
 
 manifestのcanonical JSONは[manifests.md](manifests.md)に定義します。
 
+M4のhandover、retention、prune checkpoint、resource limit contractは[operations.md](operations.md)に定義します。
+
 ## 実装境界
 
 Go Gatewayはこの仕様をdecoder、validator、encoderへ実装します。

@@ -21,6 +21,7 @@ var (
 	ErrPublisherConflict = errors.New("publisher claim conflict")
 	ErrMetadataTooLarge  = errors.New("remote metadata exceeds configured limit")
 	ErrResourceLimit     = errors.New("remote resource exceeds configured limit")
+	ErrRemotePermission  = errors.New("remote permission denied")
 )
 
 type RemoteObject struct {
@@ -93,16 +94,54 @@ func (a *ReplayRemoteReadAdapter) OpenLimited(ctx context.Context, key string, m
 	return &boundedReplayReadCloser{Reader: io.LimitReader(body, int64(maxBytes)+1), Closer: body}, size, nil
 }
 
+// ReadBackendReplayAdapter narrows the read-only delivery capability to the
+// bounded observer capability used by retention and handover. It never adds a
+// write method or an unbounded inventory operation.
+type ReadBackendReplayAdapter struct {
+	backend ReadBackend
+}
+
+func NewReplayRemoteReadAdapterFromReadBackend(backend ReadBackend) (*ReadBackendReplayAdapter, error) {
+	if backend == nil {
+		return nil, fmt.Errorf("read-only backend is nil")
+	}
+	return &ReadBackendReplayAdapter{backend: backend}, nil
+}
+
+func (a *ReadBackendReplayAdapter) ListLimited(ctx context.Context, prefix string, maxObjects uint64) (ReplayRemoteObjectList, error) {
+	objects, err := a.backend.ListLimited(ctx, prefix, maxObjects)
+	if err != nil {
+		return ReplayRemoteObjectList{}, err
+	}
+	return ReplayRemoteObjectList{Objects: objects, Complete: true}, nil
+}
+
+func (a *ReadBackendReplayAdapter) OpenLimited(ctx context.Context, key string, maxBytes uint64) (io.ReadCloser, int64, error) {
+	if maxBytes == 0 || maxBytes >= uint64(^uint64(0)>>1) {
+		return nil, 0, fmt.Errorf("%w: invalid object byte limit", ErrResourceLimit)
+	}
+	body, size, err := a.backend.Open(ctx, key)
+	if err != nil {
+		return nil, 0, err
+	}
+	if body == nil {
+		return nil, 0, fmt.Errorf("remote object body is nil")
+	}
+	return &boundedReplayReadCloser{Reader: io.LimitReader(body, int64(maxBytes)+1), Closer: body}, size, nil
+}
+
 type boundedReplayReadCloser struct {
 	io.Reader
 	io.Closer
 }
 
 // ReadBackend is deliberately separate from ObjectBackend so an ArchiveReader
-// cannot depend on a remote write method at compile time.
+// cannot depend on a remote write method at compile time. Listing is bounded
+// at the capability boundary; callers must not receive an unbounded remote
+// inventory before applying their own response limits.
 type ReadBackend interface {
-	List(ctx context.Context, prefix string) ([]RemoteObject, error)
-	Get(ctx context.Context, key string) ([]byte, error)
+	ListLimited(ctx context.Context, prefix string, maxObjects uint64) ([]RemoteObject, error)
+	GetLimited(ctx context.Context, key string, maxBytes uint64) ([]byte, error)
 	Open(ctx context.Context, key string) (io.ReadCloser, int64, error)
 }
 
@@ -151,20 +190,27 @@ func NewS3ReadBackend(ctx context.Context, settings S3ReadBackendConfig) (*S3Rea
 	return &S3ReadBackend{client: client, bucket: settings.Bucket, maxMetadataBytes: settings.MaxMetadataBytes}, nil
 }
 
-func (b *S3ReadBackend) Get(ctx context.Context, key string) ([]byte, error) {
+func (b *S3ReadBackend) GetLimited(ctx context.Context, key string, maxBytes uint64) ([]byte, error) {
+	if maxBytes == 0 || maxBytes > uint64(^uint64(0)>>1) {
+		return nil, fmt.Errorf("%w: invalid metadata byte limit", ErrResourceLimit)
+	}
+	limit := int64(maxBytes)
+	if limit > b.maxMetadataBytes {
+		limit = b.maxMetadataBytes
+	}
 	output, err := b.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(b.bucket), Key: aws.String(key)})
 	if err != nil {
 		return nil, classifyRemoteError(err)
 	}
 	defer output.Body.Close()
-	if output.ContentLength != nil && *output.ContentLength > b.maxMetadataBytes {
+	if output.ContentLength != nil && *output.ContentLength > limit {
 		return nil, ErrMetadataTooLarge
 	}
-	body, err := io.ReadAll(io.LimitReader(output.Body, b.maxMetadataBytes+1))
+	body, err := io.ReadAll(io.LimitReader(output.Body, limit+1))
 	if err != nil {
-		return nil, fmt.Errorf("read remote metadata")
+		return nil, fmt.Errorf("read remote metadata: %w", err)
 	}
-	if int64(len(body)) > b.maxMetadataBytes {
+	if int64(len(body)) > limit {
 		return nil, ErrMetadataTooLarge
 	}
 	return body, nil
@@ -182,9 +228,12 @@ func (b *S3ReadBackend) Open(ctx context.Context, key string) (io.ReadCloser, in
 	return output.Body, size, nil
 }
 
-func (b *S3ReadBackend) List(ctx context.Context, prefix string) ([]RemoteObject, error) {
+func (b *S3ReadBackend) ListLimited(ctx context.Context, prefix string, maxObjects uint64) ([]RemoteObject, error) {
+	if maxObjects == 0 || maxObjects > uint64(^uint64(0)>>1) {
+		return nil, fmt.Errorf("%w: invalid object count limit", ErrResourceLimit)
+	}
 	paginator := s3.NewListObjectsV2Paginator(b.client, &s3.ListObjectsV2Input{Bucket: aws.String(b.bucket), Prefix: aws.String(prefix)})
-	var result []RemoteObject
+	result := make([]RemoteObject, 0, minInt64(maxObjects, 256))
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -193,6 +242,9 @@ func (b *S3ReadBackend) List(ctx context.Context, prefix string) ([]RemoteObject
 		for _, object := range page.Contents {
 			if object.Key == nil {
 				continue
+			}
+			if uint64(len(result)) >= maxObjects {
+				return nil, fmt.Errorf("%w: read inventory exceeds configured limit", ErrResourceLimit)
 			}
 			size := int64(-1)
 			if object.Size != nil {
@@ -216,13 +268,40 @@ type S3Backend struct {
 }
 
 func NewS3Backend(ctx context.Context, settings S3BackendConfig) (*S3Backend, error) {
+	return newS3Backend(ctx, settings, "", "")
+}
+
+// NewS3BackendWithEnv constructs the write-capable backend with credentials
+// selected explicitly by environment-variable name. It is used by isolated
+// handover verification so old and new writer credentials never share ambient
+// process credential state.
+func NewS3BackendWithEnv(ctx context.Context, settings S3BackendConfig, accessKeyEnv, secretKeyEnv string) (*S3Backend, error) {
+	if accessKeyEnv == "" || secretKeyEnv == "" {
+		return nil, fmt.Errorf("explicit S3 credential environment names are required")
+	}
+	return newS3Backend(ctx, settings, accessKeyEnv, secretKeyEnv)
+}
+
+func newS3Backend(ctx context.Context, settings S3BackendConfig, accessKeyEnv, secretKeyEnv string) (*S3Backend, error) {
 	if settings.Bucket == "" {
 		return nil, fmt.Errorf("S3 bucket is required")
 	}
 	if settings.Region == "" {
 		settings.Region = "auto"
 	}
-	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(settings.Region))
+	loadOptions := []func(*config.LoadOptions) error{config.WithRegion(settings.Region)}
+	if accessKeyEnv != "" || secretKeyEnv != "" {
+		if accessKeyEnv == "" || secretKeyEnv == "" {
+			return nil, fmt.Errorf("S3 credential environment names are incomplete")
+		}
+		accessKey, accessOK := os.LookupEnv(accessKeyEnv)
+		secretKey, secretOK := os.LookupEnv(secretKeyEnv)
+		if !accessOK || !secretOK || accessKey == "" || secretKey == "" {
+			return nil, fmt.Errorf("S3 credentials are unavailable")
+		}
+		loadOptions = append(loadOptions, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")))
+	}
+	awsConfig, err := config.LoadDefaultConfig(ctx, loadOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("load S3 configuration")
 	}
@@ -281,7 +360,7 @@ func (b *S3Backend) GetLimited(ctx context.Context, key string, maxBytes uint64)
 	}
 	body, err := io.ReadAll(io.LimitReader(output.Body, int64(maxBytes)+1))
 	if err != nil {
-		return nil, fmt.Errorf("read remote metadata")
+		return nil, fmt.Errorf("read remote metadata: %w", err)
 	}
 	if uint64(len(body)) > maxBytes {
 		return nil, fmt.Errorf("%w: metadata object is oversized", ErrResourceLimit)
@@ -367,16 +446,8 @@ func minInt64(value uint64, maximum int) int {
 }
 
 func classifyRemoteError(err error) error {
-	var apiError smithy.APIError
-	if errors.As(err, &apiError) {
-		switch apiError.ErrorCode() {
-		case "NoSuchKey", "NotFound":
-			return ErrObjectNotFound
-		case "PreconditionFailed", "ConditionalRequestConflict", "Conflict":
-			return ErrObjectExists
-		default:
-			return fmt.Errorf("remote object operation failed with code %s", apiError.ErrorCode())
-		}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("remote object operation canceled or timed out: %w", err)
 	}
 	var statusError interface{ HTTPStatusCode() int }
 	if errors.As(err, &statusError) {
@@ -385,6 +456,21 @@ func classifyRemoteError(err error) error {
 			return ErrObjectNotFound
 		case 409, 412:
 			return ErrObjectExists
+		case 401, 403:
+			return ErrRemotePermission
+		}
+	}
+	var apiError smithy.APIError
+	if errors.As(err, &apiError) {
+		switch apiError.ErrorCode() {
+		case "NoSuchKey", "NotFound":
+			return ErrObjectNotFound
+		case "PreconditionFailed", "ConditionalRequestConflict", "Conflict":
+			return ErrObjectExists
+		case "AccessDenied", "Unauthorized", "Forbidden", "InvalidAccessKeyId", "InvalidClientTokenId", "InvalidToken", "ExpiredToken", "MissingAuthenticationToken", "SignatureDoesNotMatch":
+			return ErrRemotePermission
+		default:
+			return fmt.Errorf("remote object operation failed with code %s", apiError.ErrorCode())
 		}
 	}
 	return fmt.Errorf("remote object operation failed")

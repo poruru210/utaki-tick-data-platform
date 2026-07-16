@@ -93,8 +93,12 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	endpoint := os.Getenv(realR2EndpointEnv)
+	if err := r2.ValidateHTTPSHostEndpoint(endpoint); err != nil {
+		t.Fatalf("real R2 endpoint is invalid: %v", err)
+	}
 	backend, err := r2.NewS3Backend(context.Background(), r2.S3BackendConfig{
-		Bucket: bucket, Endpoint: os.Getenv(realR2EndpointEnv), Region: "auto",
+		Bucket: bucket, Endpoint: endpoint, Region: "auto",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +118,7 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader, err := NewArchiveReaderV1(context.Background(), ReaderConfig{
-		Version: ReaderConfigVersion, Endpoint: os.Getenv(realR2EndpointEnv),
+		Version: ReaderConfigVersion, Endpoint: endpoint,
 		BucketEnv: realR2BucketEnv, AccessKeyEnv: realR2AccessEnv, SecretKeyEnv: realR2SecretEnv,
 		Region: "auto", ImmutableRoot: immutableRoot, CacheRoot: t.TempDir(),
 		MaxMetadataBytes: 1 << 20, MaxRawObjectBytes: 1 << 30,

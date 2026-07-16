@@ -11,6 +11,7 @@ import (
 var (
 	ErrUnsupportedReplay = errors.New("replay delivery is outside M2R-3")
 	ErrSelectorInvalid   = errors.New("snapshot selector is invalid")
+	ErrSelectorNotFound  = errors.New("snapshot selector was not found")
 )
 
 const (

@@ -414,6 +414,14 @@ Implementerのread-only R7 remediation auditは3件すべてをpassとし、remo
 
 ## M4の運用強化
 
+M4の詳細な実施計画は`execplan/2026-07-16-m4-production-operations-http-delivery.md`です。
+
+M4の開始baselineは、M3をmainへ統合したPull Request #4のmerge commit `cb72752a651c88c3027b409f6f205ac9236f28b8`です。
+
+M3はwhole-M3 final re-auditをpassし、mainへ統合済みです。
+
+M4-0では専用ExecPlanだけを固定し、M4実装はまだ開始していません。
+
 M4では、日次運用、pruning、handover、長時間稼働、障害注入を整備します。
 
 必要に応じて、HTTP adapterなどの後続利用者向け接続を追加します。

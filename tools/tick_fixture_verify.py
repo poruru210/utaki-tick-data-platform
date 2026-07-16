@@ -26,6 +26,8 @@ try:
         duplicate_identity_status,
         final_observation_canonical_json,
         gateway_batch_sha256,
+        handover_artifact_canonical_json,
+        handover_artifact_key,
         observation_hash,
         part_manifest_canonical_json,
         part_manifest_digest,
@@ -42,6 +44,7 @@ try:
         row_chain_step,
         source_payload_fingerprint,
         verify_final_observation,
+        verify_handover_artifact_binding,
         verify_publication_bundle,
         wal_entry_hash,
     )
@@ -60,6 +63,8 @@ except ModuleNotFoundError:
         duplicate_identity_status,
         final_observation_canonical_json,
         gateway_batch_sha256,
+        handover_artifact_canonical_json,
+        handover_artifact_key,
         observation_hash,
         part_manifest_canonical_json,
         part_manifest_digest,
@@ -76,6 +81,7 @@ except ModuleNotFoundError:
         row_chain_step,
         source_payload_fingerprint,
         verify_final_observation,
+        verify_handover_artifact_binding,
         verify_publication_bundle,
         wal_entry_hash,
     )
@@ -562,6 +568,65 @@ def _verify_publication_contract(fixture: dict[str, Any]) -> None:
             raise AssertionError(f"{fixture_id}/{case_id}: negative case was accepted")
 
 
+def _verify_handover_contract(fixture: dict[str, Any]) -> None:
+    fixture_id = fixture["fixture_id"]
+    artifact = fixture["artifact"]
+    canonical = handover_artifact_canonical_json(artifact)
+    if canonical.decode("utf-8") != fixture["canonical_json"]:
+        raise AssertionError(f"{fixture_id}: canonical bytes mismatch")
+    _, digest = verify_handover_artifact_binding(
+        canonical, fixture["immutable_prefix"], artifact["scope_key"], fixture["artifact_key"]
+    )
+    if digest.hex() != fixture["artifact_digest"]:
+        raise AssertionError(f"{fixture_id}: artifact digest mismatch")
+    artifact_key = handover_artifact_key(
+        fixture["immutable_prefix"], artifact["next_publisher_epoch"]
+    )
+    if artifact_key != fixture["artifact_key"]:
+        raise AssertionError(f"{fixture_id}: artifact key mismatch")
+    for case in fixture["negative_cases"]:
+        case_id = case["case_id"]
+        if case_id == "duplicate_key":
+            raw = canonical.replace(
+                b'"campaign_id":"fixture-campaign"',
+                b'"campaign_id":"fixture-campaign","campaign_id":"fixture-campaign"',
+                1,
+            )
+        elif case_id == "noncanonical_bytes":
+            raw = canonical.replace(b"{", b"{ ", 1)
+        else:
+            mutated = copy.deepcopy(artifact)
+            if case_id == "unknown_key":
+                mutated["unknown"] = 1
+            elif case_id == "same_epoch":
+                mutated["next_publisher_epoch"] = mutated["prior_publisher_epoch"]
+            elif case_id == "regression":
+                mutated["next_publisher_epoch"] = 1
+            elif case_id == "wrong_key":
+                mutated["expected_next_claim_key"] = mutated["expected_next_claim_key"].replace(
+                    f"epoch={artifact['next_publisher_epoch']}",
+                    f"epoch={artifact['prior_publisher_epoch']}",
+                )
+            elif case_id == "wrong_scope":
+                mutated["scope_key"] = "aa" * 32
+            elif case_id == "zero_digest":
+                mutated["operator_evidence_digest"] = "00" * 32
+            else:
+                raise AssertionError(f"{fixture_id}: unknown handover mutation {case_id!r}")
+            raw = canonical_json(mutated).encode("utf-8")
+        try:
+            verify_handover_artifact_binding(
+                raw, fixture["immutable_prefix"], artifact["scope_key"], fixture["artifact_key"]
+            )
+        except ProtocolError as exc:
+            if exc.code != case["expected_error"]:
+                raise AssertionError(
+                    f"{fixture_id}/{case_id}: expected {case['expected_error']}, got {exc.code}"
+                ) from exc
+        else:
+            raise AssertionError(f"{fixture_id}/{case_id}: negative case was accepted")
+
+
 def _publication_bundle_mutation(bundle: dict[str, Any], canonical: bytes, case_id: str) -> bytes:
     if case_id == "duplicate_key":
         return canonical.replace(b"{", b'{"bundle_version":"replay-publication-bundle-v1",', 1)
@@ -737,6 +802,8 @@ def verify_all() -> int:
             _verify_key_contract(fixture)
         elif item["kind"] == "publication_contract":
             _verify_publication_contract(fixture)
+        elif item["kind"] == "handover_contract":
+            _verify_handover_contract(fixture)
         else:
             raise AssertionError(f"{item['fixture_id']}: unknown fixture kind")
     print(f"verified {len(index['fixtures'])} Protocol V1 fixtures")

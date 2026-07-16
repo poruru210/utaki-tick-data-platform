@@ -14,6 +14,7 @@ import (
 
 	"tick-data-platform/internal/journal"
 	"tick-data-platform/internal/protocol"
+	"tick-data-platform/internal/retention"
 	"tick-data-platform/internal/wal"
 )
 
@@ -45,6 +46,7 @@ type Gateway struct {
 	hooks            Hooks
 	metricsMu        sync.Mutex
 	metrics          Metrics
+	disk             *DiskStateMachine
 }
 
 type Metrics struct {
@@ -57,19 +59,26 @@ type Metrics struct {
 }
 
 type StatusSnapshot struct {
-	GatewayInstanceID       string  `json:"gateway_instance_id"`
-	ListenAddress           string  `json:"listen_address"`
-	WALPath                 string  `json:"wal_path"`
-	WALEntries              int     `json:"wal_entries"`
-	WALBytes                int64   `json:"wal_bytes"`
-	JournalBatches          int     `json:"journal_batches"`
-	CommittedCursorMSC      int64   `json:"committed_cursor_msc"`
-	CommittedBoundaryDigest string  `json:"committed_boundary_digest"`
-	ChainRoot               string  `json:"chain_root"`
-	NextFromMSC             int64   `json:"next_from_msc"`
-	NextRequestedCount      uint32  `json:"next_requested_count"`
-	ActiveSession           bool    `json:"active_session"`
-	Metrics                 Metrics `json:"metrics"`
+	GatewayInstanceID       string              `json:"gateway_instance_id"`
+	ListenAddress           string              `json:"listen_address"`
+	WALPath                 string              `json:"wal_path"`
+	WALEntries              int                 `json:"wal_entries"`
+	WALBytes                int64               `json:"wal_bytes"`
+	JournalBatches          int                 `json:"journal_batches"`
+	CommittedCursorMSC      int64               `json:"committed_cursor_msc"`
+	CommittedBoundaryDigest string              `json:"committed_boundary_digest"`
+	ChainRoot               string              `json:"chain_root"`
+	NextFromMSC             int64               `json:"next_from_msc"`
+	NextRequestedCount      uint32              `json:"next_requested_count"`
+	ActiveSession           bool                `json:"active_session"`
+	DiskClass               retention.DiskClass `json:"disk_class"`
+	DiskFreeBytes           uint64              `json:"disk_free_bytes"`
+	DiskTotalBytes          uint64              `json:"disk_total_bytes"`
+	OldestRetainedSequence  uint64              `json:"oldest_retained_sequence"`
+	PrunableBytes           uint64              `json:"prunable_bytes"`
+	BlockedReason           string              `json:"blocked_reason"`
+	ReadyForACK             bool                `json:"ready_for_ack"`
+	Metrics                 Metrics             `json:"metrics"`
 }
 
 func Open(config Config) (*Gateway, error) {
@@ -77,13 +86,36 @@ func Open(config Config) (*Gateway, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	store, err := wal.Open(config.WALRoot, config.GatewayInstanceID)
+	if err := retention.RecoverPrune(config.WALRoot, 1<<20); err != nil {
+		return nil, err
+	}
+	var anchor *wal.PruneAnchor
+	checkpoint, checkpointErr := retention.LoadLatestCheckpoint(config.WALRoot)
+	if checkpointErr == nil {
+		if _, err := retention.VerifyRetainedWAL(config.WALRoot, &checkpoint, 1<<20); err != nil {
+			return nil, err
+		}
+		anchor = &wal.PruneAnchor{EndSequence: checkpoint.EndSequence, ChainRoot: checkpoint.RetainedChainRoot}
+	} else if !errors.Is(checkpointErr, retention.ErrCheckpointAbsent) {
+		return nil, checkpointErr
+	}
+	store, err := wal.OpenWithAnchor(config.WALRoot, config.GatewayInstanceID, anchor)
 	if err != nil {
+		return nil, err
+	}
+	if err := retention.PublishWallClock(config.WALRoot, uint64(time.Now().UnixMilli())); err != nil {
+		_ = store.Close()
 		return nil, err
 	}
 	journalStore, err := journal.Open(config.JournalPath, config.GatewayInstanceID, config.InitialFromMSC, config.InitialBatchCount)
 	if err != nil {
 		_ = store.Close()
+		return nil, err
+	}
+	disk, err := NewDiskStateMachine(config.WALRoot, DiskWatermarks{HighFreeBytes: config.DiskHighFreeBytes, CriticalFreeBytes: config.DiskCriticalFreeBytes, EmergencyFreeBytes: config.DiskEmergencyFreeBytes}, OSDiskUsageProvider{})
+	if err != nil {
+		_ = store.Close()
+		_ = journalStore.Close()
 		return nil, err
 	}
 	gateway := &Gateway{
@@ -92,6 +124,7 @@ func Open(config Config) (*Gateway, error) {
 		journal:     journalStore,
 		started:     time.Now(),
 		connections: make(map[net.Conn]struct{}),
+		disk:        disk,
 	}
 	if err := gateway.reconcileJournal(); err != nil {
 		_ = gateway.Close()
@@ -476,6 +509,17 @@ func (g *Gateway) acceptBatch(raw []byte, batch protocol.BatchFrameV1, hello pro
 		g.metricsMu.Unlock()
 		return ackFromBatch(stored, protocol.AckDuplicate), false, nil
 	}
+	if g.disk != nil && !g.disk.ReadyForACK() {
+		state := g.disk.State()
+		g.setLastError(fmt.Errorf("disk is not ready for durable ACK: %s", state.BlockedReason))
+		return protocol.AckV1{
+			ProducerSessionID:  batch.ProducerSessionID,
+			BatchSequence:      batch.BatchSequence,
+			GatewayBatchSHA256: incomingHash,
+			Status:             protocol.AckRetryableError,
+			NextRequestedCount: g.config.InitialBatchCount,
+		}, false, nil
+	}
 
 	state, err := g.journal.State()
 	if err != nil {
@@ -484,10 +528,16 @@ func (g *Gateway) acceptBatch(raw []byte, batch protocol.BatchFrameV1, hello pro
 	outcome := outcomeForBatch(state, batch, g.config)
 	entry, err := g.wal.Append(raw, time.Now().Unix(), uint64(time.Since(g.started).Microseconds()))
 	if err != nil {
+		if g.disk != nil {
+			g.disk.MarkPoisoned()
+		}
 		return protocol.AckV1{}, false, err
 	}
 	if hook := g.currentHooks().AfterWALSync; hook != nil {
 		if err := hook(); err != nil {
+			if g.disk != nil {
+				g.disk.MarkPoisoned()
+			}
 			g.setLastError(err)
 			return protocol.AckV1{}, false, err
 		}
@@ -501,6 +551,18 @@ func (g *Gateway) acceptBatch(raw []byte, batch protocol.BatchFrameV1, hello pro
 			g.setLastError(err)
 			return protocol.AckV1{}, false, err
 		}
+	}
+	if g.disk != nil && !g.disk.ReadyForACK() {
+		state := g.disk.State()
+		g.setLastError(fmt.Errorf("disk became unavailable before durable ACK: %s", state.BlockedReason))
+		return protocol.AckV1{
+			ProducerSessionID:     batch.ProducerSessionID,
+			BatchSequence:         batch.BatchSequence,
+			GatewayBatchSHA256:    entry.BatchHash,
+			GatewayIngestSequence: entry.Sequence,
+			Status:                protocol.AckRetryableError,
+			NextRequestedCount:    g.config.InitialBatchCount,
+		}, false, nil
 	}
 	g.metricsMu.Lock()
 	g.metrics.AcceptedBatches++
@@ -549,6 +611,19 @@ func (g *Gateway) reconcileJournal() error {
 	if err != nil {
 		return err
 	}
+	if prunedThrough := g.wal.PrunedThrough(); prunedThrough != 0 {
+		if count < len(entries) {
+			return fmt.Errorf("%w: journal is missing retained WAL entries after prune anchor", wal.ErrIntegrity)
+		}
+		matches, matchErr := g.journalMatchesRetainedWAL(entries, prunedThrough)
+		if matchErr != nil {
+			return matchErr
+		}
+		if !matches {
+			return fmt.Errorf("%w: journal does not match retained WAL after prune anchor", wal.ErrIntegrity)
+		}
+		return nil
+	}
 	if count > len(entries) {
 		return fmt.Errorf("%w: journal has %d batches but WAL has %d", wal.ErrIntegrity, count, len(entries))
 	}
@@ -579,6 +654,34 @@ func (g *Gateway) reconcileJournal() error {
 		}
 	}
 	return nil
+}
+
+func (g *Gateway) journalMatchesRetainedWAL(entries []wal.Entry, prunedThrough uint64) (bool, error) {
+	actual, err := g.journal.State()
+	if err != nil {
+		return false, err
+	}
+	if actual.GatewayInstanceID != g.config.GatewayInstanceID {
+		return false, nil
+	}
+	for _, entry := range entries {
+		batch, err := decodeWALEntry(entry)
+		if err != nil {
+			return false, err
+		}
+		stored, found, err := g.journal.Lookup(batch.ProducerSessionID, batch.BatchSequence)
+		if err != nil {
+			return false, err
+		}
+		if !found || stored.GatewayIngestSequence != entry.Sequence || stored.GatewayBatchSHA256 != entry.BatchHash || !bytes.Equal(stored.Frame, entry.Frame) {
+			return false, nil
+		}
+	}
+	if len(entries) == 0 {
+		return actual.LastIngestSequence == prunedThrough && actual.LastEntryHash == g.wal.ChainRoot(), nil
+	}
+	last := entries[len(entries)-1]
+	return actual.LastIngestSequence == last.Sequence && actual.LastEntryHash == last.EntryHash, nil
 }
 
 func (g *Gateway) journalMatchesWAL(entries []wal.Entry) (bool, error) {
@@ -669,6 +772,15 @@ func (g *Gateway) Status() (StatusSnapshot, error) {
 	g.metricsMu.Lock()
 	metrics := g.metrics
 	g.metricsMu.Unlock()
+	disk := DiskState{}
+	if g.disk != nil {
+		disk = g.disk.Refresh()
+	}
+	oldest := g.wal.PrunedThrough() + 1
+	segments := g.wal.SealedSegments()
+	if len(segments) > 0 {
+		oldest = segments[0].StartSequence
+	}
 	return StatusSnapshot{
 		GatewayInstanceID:       g.config.GatewayInstanceID,
 		ListenAddress:           g.config.ListenAddress,
@@ -682,6 +794,13 @@ func (g *Gateway) Status() (StatusSnapshot, error) {
 		NextFromMSC:             state.NextFromMSC,
 		NextRequestedCount:      state.NextRequestedCount,
 		ActiveSession:           active,
+		DiskClass:               disk.Class,
+		DiskFreeBytes:           disk.FreeBytes,
+		DiskTotalBytes:          disk.TotalBytes,
+		OldestRetainedSequence:  oldest,
+		PrunableBytes:           0,
+		BlockedReason:           disk.BlockedReason,
+		ReadyForACK:             disk.ACKAllowed,
 		Metrics:                 metrics,
 	}, nil
 }
