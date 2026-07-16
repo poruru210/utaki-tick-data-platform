@@ -37,7 +37,10 @@ func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 		fx.Populate(&store, &catalog),
 	)
 	application.RequireStart()
-	t.Cleanup(func() { application.RequireStop() })
+	t.Cleanup(func() {
+		application.RequireStop()
+		removeEventually(t, config.Publication.CatalogPath)
+	})
 
 	frame, err := protocol.EncodeMessage(protocol.BatchFrameV1{
 		RequestedFromMSC: time.Date(2024, 3, 9, 0, 0, 0, 0, time.UTC).UnixMilli(),
@@ -71,6 +74,22 @@ func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 	}
 	if backend.count() < 4 {
 		t.Fatalf("fake R2 object count = %d, want claim, descriptor, raw object, manifest", backend.count())
+	}
+}
+
+func removeEventually(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := os.Remove(path)
+		if err == nil || os.IsNotExist(err) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("remove %s after application stop: %v", path, err)
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
