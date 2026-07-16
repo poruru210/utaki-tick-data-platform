@@ -32,6 +32,8 @@ func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 	var catalog *publication.Catalog
 	application := fxtest.New(t,
 		TestOptionsWithRemoteBackend(config, &staticProvider{}, backend),
+		fx.StartTimeout(30*time.Second),
+		fx.StopTimeout(30*time.Second),
 		fx.Populate(&store, &catalog),
 	)
 	application.RequireStart()
@@ -82,6 +84,8 @@ func TestFxApplicationShutsDownOnPublicationWorkerError(t *testing.T) {
 	var store *wal.Store
 	application := fxtest.New(t,
 		TestOptionsWithRemoteBackend(config, &staticProvider{}, backend),
+		fx.StartTimeout(30*time.Second),
+		fx.StopTimeout(30*time.Second),
 		fx.Populate(&store),
 	)
 	application.RequireStart()

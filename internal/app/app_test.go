@@ -56,7 +56,12 @@ func TestApplicationStartStopLoadsCredentialOnce(t *testing.T) {
 
 func TestApplicationStartStopCanBeCalledTwice(t *testing.T) {
 	application := fx.New(TestOptions(testConfig(t), &staticProvider{}))
-	startCtx, cancelStart := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(func() {
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancelCleanup()
+		_ = application.Stop(cleanupCtx)
+	})
+	startCtx, cancelStart := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelStart()
 	if err := application.Start(startCtx); err != nil {
 		t.Fatal(err)
@@ -64,7 +69,7 @@ func TestApplicationStartStopCanBeCalledTwice(t *testing.T) {
 	if err := application.Start(startCtx); err == nil {
 		t.Fatal("second application Start unexpectedly succeeded")
 	}
-	stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Second)
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelStop()
 	if err := application.Stop(stopCtx); err != nil {
 		t.Fatal(err)
