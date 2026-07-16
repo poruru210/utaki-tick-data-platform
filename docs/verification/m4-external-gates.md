@@ -10,6 +10,9 @@ real_r2_handover: not_run
 read_only_credential_verification: not_run
 mt5_24h_soak: not_run
 local_race: pass
+ci_verification: pass
+ci_verification_commit: 1ebecf724fb588eaeff556e664f6bb92e331eae2
+ci_verification_pr: 5
 ```
 
 ## Current evidence
@@ -21,6 +24,7 @@ local_race: pass
 - 2026-07-16のWAL branch anchor、scope-bound retention proof、filesystem child-directory hardening後も、権限付き`mise run check`、Go全package、Python 35件、fixture、ruff、gofmt、diff、vetを再実行してpassした。
 - 10x load recordはfull requested durationをpacedで実行し、`pass: true`を記録した。
 - local Linux-equivalent raceはloopback許可付きで`CGO_ENABLED=1`、GCC 15.2.0を使って全対象packageを実行し、exit code 0、failなし、`DATA RACE`なしでpassした。raw JSON digestは`b427d385ea1eb39bfb2c4f3ec488c954b626c3731bdc55f6b7ac966793641c94`で、M4-9で外部retentionを再確認する。
+- PR #5のcommit `1ebecf724fb588eaeff556e664f6bb92e331eae2`では、pushイベントとpull_requestイベントのRepository check、Linux Race、Windows Raceが6実行すべてsuccessだった。push runは[Repository check](https://github.com/poruru210/utaki-tick-data-platform/actions/runs/29464847156)、[Linux Race](https://github.com/poruru210/utaki-tick-data-platform/actions/runs/29464847151)、[Windows Race](https://github.com/poruru210/utaki-tick-data-platform/actions/runs/29464847154)、PR runは[Repository check](https://github.com/poruru210/utaki-tick-data-platform/actions/runs/29464861491)、[Linux Race](https://github.com/poruru210/utaki-tick-data-platform/actions/runs/29464861398)、[Windows Race](https://github.com/poruru210/utaki-tick-data-platform/actions/runs/29464861412)である。Race JSON、compiler/toolchain metadataのcaptureとartifact uploadもsuccessだった。workflow artifactの保存期限は14日であり、raw evidenceの長期保存は未完了である。
 - `go test -tags real_r2_smoke ./internal/delivery -run TestOptionalRealR2Smoke -count=1 -v`
   はexplicit opt-inと実R2 credentialsがないためskipした。
 - `internal/r2/real_m4_smoke_test.go`にphase分離したreal-R2 handover harnessを追加し、
