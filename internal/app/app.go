@@ -14,6 +14,7 @@ import (
 	"tick-data-platform/internal/credentials"
 	"tick-data-platform/internal/ingest"
 	"tick-data-platform/internal/journal"
+	"tick-data-platform/internal/operations"
 	"tick-data-platform/internal/publication"
 	"tick-data-platform/internal/r2"
 	"tick-data-platform/internal/retention"
@@ -55,7 +56,7 @@ func BaseOptions() fx.Option {
 }
 
 func CoreOptions() fx.Option {
-	return fx.Options(ConfigModule, StorageModule, PublicationModule, RuntimeModule)
+	return fx.Options(ConfigModule, StorageModule, PublicationModule, fx.Provide(newStatusService), RuntimeModule)
 }
 
 var ConfigModule = fx.Module(
@@ -130,6 +131,8 @@ func newDiskState(configValue appconfig.Config) (*ingest.DiskStateMachine, error
 	return ingest.NewDiskStateMachine(gateway.WALRoot, ingest.DiskWatermarks{
 		HighFreeBytes: gateway.DiskHighFreeBytes, CriticalFreeBytes: gateway.DiskCriticalFreeBytes,
 		EmergencyFreeBytes: gateway.DiskEmergencyFreeBytes,
+		MaxPendingSegments: configValue.Publication.MaxPendingSegments,
+		MaxPendingBytes:    configValue.Publication.MaxPendingBytes,
 	}, ingest.OSDiskUsageProvider{})
 }
 
@@ -137,11 +140,25 @@ func newGateway(configValue appconfig.Config, store *wal.Store, journalStore *jo
 	return ingest.NewGateway(toIngestConfig(configValue), store, journalStore, disk)
 }
 
-func newPublicationCatalog(configValue appconfig.Config) (*publication.Catalog, error) {
-	return publication.NewCatalogWithClock(configValue.Publication.CatalogPath, time.Now)
+type publicationRuntimeConfig struct {
+	fx.In
+	Clock         publication.Clock         `optional:"true"`
+	TickerFactory publication.TickerFactory `optional:"true"`
 }
 
-func newLocalPipeline(configValue appconfig.Config, store *wal.Store, catalog *publication.Catalog, manifestGate publication.ManifestPublicationGate) (*publication.LocalPipeline, error) {
+func newPublicationCatalog(configValue appconfig.Config, runtime publicationRuntimeConfig) (*publication.Catalog, error) {
+	clock := runtime.Clock
+	if clock == nil {
+		clock = time.Now
+	}
+	return publication.NewCatalogWithClock(configValue.Publication.CatalogPath, clock)
+}
+
+func newLocalPipeline(configValue appconfig.Config, store *wal.Store, catalog *publication.Catalog, disk *ingest.DiskStateMachine, manifestGate publication.ManifestPublicationGate, runtime publicationRuntimeConfig) (*publication.LocalPipeline, error) {
+	clock := runtime.Clock
+	if clock == nil {
+		clock = time.Now
+	}
 	return publication.NewLocalPipeline(publication.LocalPipelineConfig{
 		WAL:           store,
 		Catalog:       catalog,
@@ -151,8 +168,11 @@ func newLocalPipeline(configValue appconfig.Config, store *wal.Store, catalog *p
 		SealMaxBytes:  configValue.Publication.SealMaxBytes,
 		SealInterval:  time.Duration(configValue.Publication.SealIntervalMS) * time.Millisecond,
 		ScanInterval:  time.Duration(configValue.Publication.ScanIntervalMS) * time.Millisecond,
-		Clock:         time.Now,
+		Clock:         clock,
+		TickerFactory: runtime.TickerFactory,
 		ManifestGate:  manifestGate,
+		PendingSink:   disk,
+		Priority:      disk,
 	})
 }
 
@@ -188,7 +208,7 @@ func newPublisher(configValue appconfig.Config, layout r2.Layout, backend r2.Wri
 	return r2.NewPublisherWithClock(layout, backend, journal, filepath.Join(configValue.Publication.ReceiptRoot, "publication.lock"), time.Now)
 }
 
-func newUploader(configValue appconfig.Config, catalog *publication.Catalog, publisher *r2.Publisher, remoteJournal *r2.PublicationJournal) (*publication.Uploader, error) {
+func newUploader(configValue appconfig.Config, catalog *publication.Catalog, publisher *r2.Publisher, remoteJournal *r2.PublicationJournal, disk *ingest.DiskStateMachine) (*publication.Uploader, error) {
 	return publication.NewUploader(publication.UploaderConfig{
 		Catalog:       catalog,
 		Publisher:     publisher,
@@ -198,7 +218,110 @@ func newUploader(configValue appconfig.Config, catalog *publication.Catalog, pub
 		RetryMin:      time.Duration(configValue.Publication.RetryMinMS) * time.Millisecond,
 		RetryMax:      time.Duration(configValue.Publication.RetryMaxMS) * time.Millisecond,
 		Clock:         time.Now,
+		PendingSink:   disk,
+		Priority:      disk,
 	})
+}
+
+type gatewayStatusReader struct{ gateway *ingest.Gateway }
+
+func (r gatewayStatusReader) IngestStatus(ctx context.Context) (operations.IngestStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return operations.IngestStatus{}, err
+	}
+	snapshot, err := r.gateway.Status()
+	if err != nil {
+		return operations.IngestStatus{}, err
+	}
+	return operations.IngestStatus{
+		ReadyForACK:     snapshot.ReadyForACK,
+		ActiveSession:   snapshot.ActiveSession,
+		AcceptedBatches: snapshot.Metrics.AcceptedBatches,
+		Connections:     snapshot.Metrics.Connections,
+	}, nil
+}
+
+type publicationStatusReader struct {
+	catalog       *publication.Catalog
+	uploader      *publication.Uploader
+	remoteJournal *r2.PublicationJournal
+}
+
+func (r publicationStatusReader) PublicationStatus(ctx context.Context) (operations.PublicationStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return operations.PublicationStatus{}, err
+	}
+	stats, err := r.catalog.PendingStats(ctx)
+	if err != nil {
+		return operations.PublicationStatus{}, err
+	}
+	verifiedAt, found, err := r.remoteJournal.LastRemoteVerifiedAt(ctx)
+	if err != nil {
+		return operations.PublicationStatus{}, err
+	}
+	result := operations.PublicationStatus{
+		PendingSegments:  stats.PendingSegments,
+		PendingBytes:     stats.PendingBytes,
+		PendingManifests: stats.PendingManifests,
+		RetryCount:       stats.RetryCount,
+		LastErrorClass:   r.uploader.LastErrorClass(),
+		RemoteAvailable:  true,
+	}
+	if !stats.OldestPendingAt.IsZero() {
+		result.OldestPendingAtUnixMS = uint64(stats.OldestPendingAt.UnixMilli())
+	}
+	if found {
+		result.LastSuccessfulVerificationUnixMS = uint64(verifiedAt.UnixMilli())
+	}
+	if result.LastErrorClass == operations.ErrorClassRemoteTransient || result.LastErrorClass == operations.ErrorClassRemoteTimeout || result.LastErrorClass == operations.ErrorClassPermission {
+		result.RemoteAvailable = false
+	}
+	return result, nil
+}
+
+type diskStatusReader struct {
+	disk    *ingest.DiskStateMachine
+	catalog *publication.Catalog
+}
+
+func (r diskStatusReader) DiskStatus(ctx context.Context) (operations.DiskStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return operations.DiskStatus{}, err
+	}
+	if r.catalog != nil {
+		stats, err := r.catalog.PendingStats(ctx)
+		if err != nil {
+			return operations.DiskStatus{}, err
+		}
+		r.disk.SetPendingPublication(stats.PendingSegments, stats.PendingBytes)
+	}
+	state := r.disk.Refresh()
+	return operations.DiskStatus{
+		Class:           string(state.Class),
+		FreeBytes:       state.FreeBytes,
+		TotalBytes:      state.TotalBytes,
+		Ready:           state.Ready,
+		ACKAllowed:      state.ACKAllowed,
+		BlockedReason:   state.BlockedReason,
+		PendingSegments: state.PendingSegments,
+		PendingBytes:    state.PendingBytes,
+		WorkerPriority:  state.WorkerPriority,
+	}, nil
+}
+
+func newStatusService(gateway *ingest.Gateway, catalog *publication.Catalog, uploader *publication.Uploader, remoteJournal *r2.PublicationJournal, disk *ingest.DiskStateMachine) (*operations.StatusService, error) {
+	return operations.NewStatusService(
+		gatewayStatusReader{gateway: gateway},
+		publicationStatusReader{catalog: catalog, uploader: uploader, remoteJournal: remoteJournal},
+		diskStatusReader{disk: disk, catalog: catalog},
+	)
+}
+
+// NewLocalStatusService builds the versioned status view for one-shot local
+// commands. It deliberately has no R2 network or credential dependency; the
+// remote journal is only the local durable verification ledger.
+func NewLocalStatusService(gateway *ingest.Gateway, catalog *publication.Catalog, remoteJournal *r2.PublicationJournal, disk *ingest.DiskStateMachine) (*operations.StatusService, error) {
+	return newStatusService(gateway, catalog, nil, remoteJournal, disk)
 }
 
 func toIngestConfig(configValue appconfig.Config) ingest.Config {
@@ -227,7 +350,7 @@ func toArchiveScope(configValue appconfig.Config) archive.ScopeConfig {
 	}
 }
 
-func registerLifecycle(lifecycle fx.Lifecycle, shutdown fx.Shutdowner, recovery *retention.WALRecovery, store *wal.Store, journalStore *journal.Store, catalog *publication.Catalog, remoteJournal *r2.PublicationJournal, backend *r2.CredentialBackend, pipeline *publication.LocalPipeline, uploader *publication.Uploader, gateway *ingest.Gateway) {
+func registerLifecycle(lifecycle fx.Lifecycle, shutdown fx.Shutdowner, recovery *retention.WALRecovery, store *wal.Store, journalStore *journal.Store, catalog *publication.Catalog, remoteJournal *r2.PublicationJournal, backend *r2.CredentialBackend, pipeline *publication.LocalPipeline, uploader *publication.Uploader, gateway *ingest.Gateway, _ *operations.StatusService) {
 	lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error { return recovery.Start(ctx) },
 		OnStop:  func(ctx context.Context) error { return recovery.Stop(ctx) },

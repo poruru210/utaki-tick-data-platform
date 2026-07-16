@@ -15,6 +15,7 @@ import (
 
 	appconfig "tick-data-platform/internal/config"
 	"tick-data-platform/internal/credentials"
+	"tick-data-platform/internal/operations"
 )
 
 func TestProductionGraphValidates(t *testing.T) {
@@ -52,6 +53,24 @@ func TestApplicationStartStopLoadsCredentialOnce(t *testing.T) {
 	if got := atomic.LoadInt64(&provider.calls); got != 1 {
 		t.Fatalf("provider calls after stop = %d", got)
 	}
+}
+
+func TestApplicationStatusServiceIsWiredToProductionGraph(t *testing.T) {
+	provider := &staticProvider{}
+	var service *operations.StatusService
+	application := fxtest.New(t, fx.Options(
+		TestOptions(testConfig(t), provider),
+		fx.Invoke(func(status *operations.StatusService) { service = status }),
+	))
+	application.RequireStart()
+	status, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.StatusVersion != operations.ApplicationStatusVersion || status.Overall != operations.OverallHealthy || status.Publication.PendingBytes != 0 {
+		t.Fatalf("application status = %+v", status)
+	}
+	application.RequireStop()
 }
 
 func TestApplicationStartStopCanBeCalledTwice(t *testing.T) {
@@ -124,12 +143,29 @@ func TestOnStopErrorIsReturned(t *testing.T) {
 }
 
 type staticProvider struct {
-	calls int64
+	calls     int64
+	accessKey string
+	secret    string
 }
 
 func (p *staticProvider) Load(context.Context) (credentials.Credentials, error) {
 	atomic.AddInt64(&p.calls, 1)
-	return credentials.Credentials{AccessKeyID: "app-test-access", SecretAccessKey: "app-test-secret"}, nil
+	accessKey := p.accessKey
+	if accessKey == "" {
+		accessKey = "app-test-access"
+	}
+	secret := p.secret
+	if secret == "" {
+		secret = "app-test-secret"
+	}
+	return credentials.Credentials{AccessKeyID: accessKey, SecretAccessKey: secret}, nil
+}
+
+func (p *staticProvider) secretValue() string {
+	if p.secret == "" {
+		return "app-test-secret"
+	}
+	return p.secret
 }
 
 func testConfig(t *testing.T) appconfig.Config {

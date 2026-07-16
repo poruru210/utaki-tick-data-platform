@@ -49,3 +49,35 @@ func TestDiskStateMachineFailsClosedOnUsageError(t *testing.T) {
 		t.Fatalf("unavailable state = %+v", state)
 	}
 }
+
+func TestDiskStateMachineAppliesPendingPublicationPressure(t *testing.T) {
+	provider := &fakeDiskUsage{usage: DiskUsage{FreeBytes: 900, TotalBytes: 1000}}
+	machine, err := NewDiskStateMachine("/trusted", DiskWatermarks{
+		HighFreeBytes: 500, CriticalFreeBytes: 250, EmergencyFreeBytes: 100,
+		MaxPendingSegments: 2, MaxPendingBytes: 100,
+	}, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstWakeup := machine.PriorityWakeups()
+	secondWakeup := machine.PriorityWakeups()
+	machine.SetPendingPublication(1, 99)
+	if state := machine.State(); !state.ACKAllowed || state.WorkerPriority {
+		t.Fatalf("below backlog limit state = %+v", state)
+	}
+	machine.SetPendingPublication(2, 99)
+	for name, wakeup := range map[string]<-chan struct{}{"first": firstWakeup, "second": secondWakeup} {
+		select {
+		case <-wakeup:
+		default:
+			t.Fatalf("%s priority subscriber was not notified", name)
+		}
+	}
+	if state := machine.State(); state.ACKAllowed || state.Ready || state.BlockedReason != "publication_backlog_limit" || !state.WorkerPriority {
+		t.Fatalf("segment backlog limit state = %+v", state)
+	}
+	machine.SetPendingPublication(0, 0)
+	if state := machine.State(); !state.ACKAllowed || state.BlockedReason != "" {
+		t.Fatalf("cleared backlog state = %+v", state)
+	}
+}

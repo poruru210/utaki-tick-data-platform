@@ -13,6 +13,9 @@ import (
 	"tick-data-platform/internal/app"
 	appconfig "tick-data-platform/internal/config"
 	"tick-data-platform/internal/ingest"
+	"tick-data-platform/internal/operations"
+	"tick-data-platform/internal/publication"
+	"tick-data-platform/internal/r2"
 )
 
 func main() {
@@ -33,10 +36,11 @@ func main() {
 		run(configValue)
 		return
 	}
-	config, err := ingest.LoadConfig(configPath)
+	configValue, err := appconfig.Load(configPath)
 	if err != nil {
 		fatalf("load config: %v", err)
 	}
+	config := ingest.ConfigFromGatewayConfig(configValue.Gateway())
 	switch command {
 	case "init":
 		gateway, err := ingest.Open(config)
@@ -47,7 +51,15 @@ func main() {
 			fatalf("close initialized gateway: %v", err)
 		}
 		fmt.Printf("initialized gateway WAL=%s journal=%s\n", config.WALRoot, config.JournalPath)
-	case "status", "reconcile", "verify-local":
+	case "status":
+		status, err := readLocalStatus(configValue)
+		if err != nil {
+			fatalf("read application status: %v", err)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
+			fatalf("write status: %v", err)
+		}
+	case "reconcile", "verify-local":
 		gateway, err := ingest.Open(config)
 		if err != nil {
 			fatalf("open gateway: %v", err)
@@ -64,7 +76,7 @@ func main() {
 			fatalf("write status: %v", err)
 		}
 	case "prune-local":
-		if err := pruneLocal(config, os.Args[2:]); err != nil {
+		if err := pruneLocal(configValue, os.Args[2:]); err != nil {
 			fatalf("prune-local: %v", err)
 		}
 	default:
@@ -72,8 +84,70 @@ func main() {
 	}
 }
 
-func pruneLocal(config ingest.Config, args []string) error {
-	return runPruneLocal(config, args)
+func readLocalStatus(configValue appconfig.Config) (operations.ApplicationStatus, error) {
+	if configValue.Publication.CatalogPath == "" || configValue.Publication.RemoteJournalPath == "" {
+		return operations.ApplicationStatus{}, fmt.Errorf("status requires publication catalog_path and remote_journal_path")
+	}
+	config := ingest.ConfigFromGatewayConfig(configValue.Gateway())
+	gateway, err := ingest.Open(config)
+	if err != nil {
+		return operations.ApplicationStatus{}, fmt.Errorf("open gateway: %w", err)
+	}
+	catalog, err := publication.NewCatalog(configValue.Publication.CatalogPath)
+	if err != nil {
+		_ = gateway.Close()
+		return operations.ApplicationStatus{}, err
+	}
+	if err := catalog.Start(context.Background()); err != nil {
+		_ = gateway.Close()
+		return operations.ApplicationStatus{}, err
+	}
+	remoteJournal, err := r2.OpenPublicationJournal(configValue.Publication.RemoteJournalPath)
+	if err != nil {
+		_ = catalog.Stop(context.Background())
+		_ = gateway.Close()
+		return operations.ApplicationStatus{}, err
+	}
+	disk, err := ingest.NewDiskStateMachine(config.WALRoot, ingest.DiskWatermarks{
+		HighFreeBytes: config.DiskHighFreeBytes, CriticalFreeBytes: config.DiskCriticalFreeBytes,
+		EmergencyFreeBytes: config.DiskEmergencyFreeBytes,
+		MaxPendingSegments: configValue.Publication.MaxPendingSegments,
+		MaxPendingBytes:    configValue.Publication.MaxPendingBytes,
+	}, ingest.OSDiskUsageProvider{})
+	if err != nil {
+		_ = remoteJournal.Close()
+		_ = catalog.Stop(context.Background())
+		_ = gateway.Close()
+		return operations.ApplicationStatus{}, err
+	}
+	service, err := app.NewLocalStatusService(gateway, catalog, remoteJournal, disk)
+	if err != nil {
+		_ = remoteJournal.Close()
+		_ = catalog.Stop(context.Background())
+		_ = gateway.Close()
+		return operations.ApplicationStatus{}, err
+	}
+	status, statusErr := service.Snapshot(context.Background())
+	remoteCloseErr := remoteJournal.Close()
+	catalogCloseErr := catalog.Stop(context.Background())
+	gatewayCloseErr := gateway.Close()
+	if statusErr != nil {
+		return operations.ApplicationStatus{}, statusErr
+	}
+	if remoteCloseErr != nil {
+		return operations.ApplicationStatus{}, fmt.Errorf("close remote journal: %w", remoteCloseErr)
+	}
+	if catalogCloseErr != nil {
+		return operations.ApplicationStatus{}, fmt.Errorf("close publication catalog: %w", catalogCloseErr)
+	}
+	if gatewayCloseErr != nil {
+		return operations.ApplicationStatus{}, fmt.Errorf("close gateway: %w", gatewayCloseErr)
+	}
+	return status, nil
+}
+
+func pruneLocal(configValue appconfig.Config, args []string) error {
+	return runPruneLocal(configValue, args)
 }
 
 func hasFlag(args []string, name string) bool {

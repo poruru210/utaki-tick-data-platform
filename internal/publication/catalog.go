@@ -4,6 +4,7 @@
 package publication
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -25,9 +26,11 @@ import (
 var ErrCatalogNotReady = errors.New("publication catalog is not ready")
 
 const (
-	SegmentStatePromoted   = "promoted"
-	ManifestStateSpooled   = "manifest_spooled"
-	ManifestStateRetryWait = "retry_wait"
+	SegmentStatePromoted    = "promoted"
+	SegmentStatePublished   = "published"
+	SegmentStateLocalPruned = "local_pruned"
+	ManifestStateSpooled    = "manifest_spooled"
+	ManifestStateRetryWait  = "retry_wait"
 	// ManifestStatePublished is only a local worker-completion marker. Remote
 	// verification authority remains r2.PublicationJournal.StageReceiptSaved.
 	ManifestStatePublished = "published"
@@ -66,6 +69,17 @@ type ManifestRecord struct {
 	NextRetryAt time.Time
 	ErrorClass  string
 	UpdatedAt   time.Time
+}
+
+// PendingPublicationStats is derived from the durable Catalog on every read.
+// It is deliberately a measurement, not a second queue: a restart can rebuild
+// the same value from SQLite without relying on an in-memory notification.
+type PendingPublicationStats struct {
+	PendingSegments  uint64
+	PendingBytes     uint64
+	PendingManifests uint64
+	RetryCount       uint64
+	OldestPendingAt  time.Time
 }
 
 type Catalog struct {
@@ -203,10 +217,11 @@ func (c *Catalog) UpsertSegment(ctx context.Context, record SegmentRecord) error
 		 sealed_path=excluded.sealed_path, raw_key=excluded.raw_key, raw_path=excluded.raw_path,
 		 sha256=excluded.sha256, bytes=excluded.bytes, start_sequence=excluded.start_sequence,
 		 end_sequence=excluded.end_sequence, affected_dates_json=excluded.affected_dates_json,
-		 state=excluded.state, attempts=excluded.attempts, next_retry_unix_ms=excluded.next_retry_unix_ms,
+		state=CASE WHEN publication_segments.state IN (?, ?) THEN publication_segments.state ELSE excluded.state END,
+		 attempts=excluded.attempts, next_retry_unix_ms=excluded.next_retry_unix_ms,
 		 error_class=excluded.error_class, updated_unix_ms=excluded.updated_unix_ms`,
 		record.Identity, record.SealedPath, record.RawKey, record.RawPath, record.SHA256[:], bytesValue,
-		startValue, endValue, string(dateBytes), record.State, attempts, nextRetry, record.ErrorClass, updated,
+		startValue, endValue, string(dateBytes), record.State, attempts, nextRetry, record.ErrorClass, updated, SegmentStatePublished, SegmentStateLocalPruned,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert publication segment: %w", err)
@@ -254,6 +269,57 @@ func (c *Catalog) ListSegments(ctx context.Context) ([]SegmentRecord, error) {
 		return nil, fmt.Errorf("iterate publication segments: %w", err)
 	}
 	return result, nil
+}
+
+// PendingStats returns the amount of local publication work that has not yet
+// reached the local published marker. Segment bytes and manifest bytes are
+// both included because either can keep the local spool growing. A segment is
+// marked published only after a manifest containing it has completed remote
+// publication; this keeps a newly discovered segment visible to backpressure
+// until it is part of a verified publication.
+func (c *Catalog) PendingStats(ctx context.Context) (PendingPublicationStats, error) {
+	if err := ctx.Err(); err != nil {
+		return PendingPublicationStats{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	db, err := c.dbLocked()
+	if err != nil {
+		return PendingPublicationStats{}, err
+	}
+	var (
+		segmentCount, segmentBytes, segmentRetries, segmentOldest     int64
+		manifestCount, manifestBytes, manifestRetries, manifestOldest int64
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(bytes), 0), COALESCE(SUM(attempts), 0), COALESCE(MIN(updated_unix_ms), 0)
+		FROM publication_segments WHERE state NOT IN (?, ?)`, SegmentStatePublished, SegmentStateLocalPruned).
+		Scan(&segmentCount, &segmentBytes, &segmentRetries, &segmentOldest); err != nil {
+		return PendingPublicationStats{}, fmt.Errorf("measure pending publication segments: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(bytes), 0), COALESCE(SUM(attempts), 0), COALESCE(MIN(updated_unix_ms), 0)
+		FROM publication_manifests WHERE state <> ?`, ManifestStatePublished).
+		Scan(&manifestCount, &manifestBytes, &manifestRetries, &manifestOldest); err != nil {
+		return PendingPublicationStats{}, fmt.Errorf("measure pending publication manifests: %w", err)
+	}
+	if segmentCount < 0 || segmentBytes < 0 || segmentRetries < 0 || segmentOldest < 0 ||
+		manifestCount < 0 || manifestBytes < 0 || manifestRetries < 0 || manifestOldest < 0 {
+		return PendingPublicationStats{}, fmt.Errorf("pending publication measurement is invalid")
+	}
+	segmentBytesValue := uint64(segmentBytes)
+	manifestBytesValue := uint64(manifestBytes)
+	if ^uint64(0)-segmentBytesValue < manifestBytesValue {
+		return PendingPublicationStats{}, fmt.Errorf("pending publication bytes overflow")
+	}
+	oldest := oldestUnixMilli(segmentOldest, manifestOldest)
+	return PendingPublicationStats{
+		PendingSegments:  uint64(segmentCount),
+		PendingBytes:     segmentBytesValue + manifestBytesValue,
+		PendingManifests: uint64(manifestCount),
+		RetryCount:       uint64(segmentRetries) + uint64(manifestRetries),
+		OldestPendingAt:  fromUnixMilli(oldest),
+	}, nil
 }
 
 func (c *Catalog) UpsertManifest(ctx context.Context, record ManifestRecord) error {
@@ -480,6 +546,130 @@ func (c *Catalog) MarkManifestState(ctx context.Context, date string, revision u
 	return nil
 }
 
+// MarkManifestPublished advances the local completion marker and marks every
+// raw segment covered by the successfully published manifest. Both updates
+// share one SQLite transaction so a crash cannot make the backlog measurement
+// claim a segment is complete while its manifest remains pending.
+func (c *Catalog) MarkManifestPublished(ctx context.Context, manifest archive.RawDayManifest, updatedAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateUTCDate(manifest.Date); err != nil || manifest.Revision == 0 {
+		return fmt.Errorf("publication manifest identity is invalid")
+	}
+	revisionValue, err := sqliteUint64(manifest.Revision)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	db, err := c.dbLocked()
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin publication completion transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE publication_manifests
+		SET state=?, next_retry_unix_ms=0, error_class='', updated_unix_ms=?
+		WHERE date=? AND revision=?`, ManifestStatePublished, unixMilli(updatedAt), manifest.Date, revisionValue)
+	if err != nil {
+		return fmt.Errorf("mark publication manifest published: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return fmt.Errorf("publication manifest state target was not found")
+	}
+	seen := make(map[string]struct{}, len(manifest.ChainObjects))
+	for _, object := range manifest.ChainObjects {
+		if object.Key == "" {
+			return fmt.Errorf("publication manifest contains an empty raw object key")
+		}
+		if _, exists := seen[object.Key]; exists {
+			continue
+		}
+		seen[object.Key] = struct{}{}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE publication_segments SET state=?, updated_unix_ms=?
+			WHERE raw_key=? AND state NOT IN (?, ?)`, SegmentStatePublished, unixMilli(updatedAt), object.Key, SegmentStatePublished, SegmentStateLocalPruned); err != nil {
+			return fmt.Errorf("mark publication segment published: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit publication completion: %w", err)
+	}
+	return nil
+}
+
+// MarkSegmentLocalPruned is the local lifecycle authority for a raw outbox
+// segment. The caller must already have obtained the remote_verified fact from
+// the R2 journal; this method only accepts the exact Catalog identity after the
+// executor has removed the matching local path.
+func (c *Catalog) MarkSegmentLocalPruned(ctx context.Context, rawKey, localPath string, sha [32]byte, size uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if rawKey == "" || localPath == "" || sha == ([32]byte{}) || size == 0 {
+		return fmt.Errorf("%w: local prune identity is incomplete", archive.ErrIntegrity)
+	}
+	bytesValue, err := sqliteUint64(size)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	db, err := c.dbLocked()
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin local prune transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var (
+		identity, storedPath, state string
+		storedSHA                   []byte
+		storedBytes                 int64
+	)
+	err = tx.QueryRowContext(ctx, `
+		SELECT identity, raw_path, sha256, bytes, state
+		FROM publication_segments
+		WHERE raw_key=? AND raw_path=? AND sha256=? AND bytes=?
+		ORDER BY updated_unix_ms DESC LIMIT 1`, rawKey, localPath, sha[:], bytesValue).
+		Scan(&identity, &storedPath, &storedSHA, &storedBytes, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: local prune segment identity is not catalogued", archive.ErrIntegrity)
+	}
+	if err != nil {
+		return fmt.Errorf("lookup local prune segment: %w", err)
+	}
+	if storedPath != localPath || storedBytes < 0 || uint64(storedBytes) != size || len(storedSHA) != 32 || !bytes.Equal(storedSHA, sha[:]) {
+		return fmt.Errorf("%w: local prune segment identity differs", archive.ErrIntegrity)
+	}
+	if state == SegmentStateLocalPruned {
+		return nil
+	}
+	if state != SegmentStatePublished {
+		return fmt.Errorf("%w: local prune segment is not remotely published", archive.ErrIntegrity)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE publication_segments SET state=?, updated_unix_ms=?
+		WHERE identity=? AND state=?`, SegmentStateLocalPruned, c.clock().UTC().UnixMilli(), identity, SegmentStatePublished)
+	if err != nil {
+		return fmt.Errorf("mark local segment pruned: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return fmt.Errorf("%w: local prune segment state changed concurrently", archive.ErrIntegrity)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit local segment prune: %w", err)
+	}
+	return nil
+}
+
 func (c *Catalog) MarkManifestRetry(ctx context.Context, date string, revision uint64, errorClass string, nextRetryAt, updatedAt time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -668,4 +858,15 @@ func fromUnixMilli(value int64) time.Time {
 		return time.Time{}
 	}
 	return time.UnixMilli(value).UTC()
+}
+
+func oldestUnixMilli(values ...int64) int64 {
+	var oldest int64
+	for _, value := range values {
+		if value == 0 || (oldest != 0 && value >= oldest) {
+			continue
+		}
+		oldest = value
+	}
+	return oldest
 }

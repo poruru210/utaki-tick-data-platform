@@ -28,6 +28,7 @@ type fakeBackend struct {
 	listCount                int
 	listStarted              chan struct{}
 	filePuts                 []string
+	fileMutations            map[string]int
 	fileVerifies             []string
 	failVerify               bool
 	failManifest             bool
@@ -39,7 +40,7 @@ type fakeBackend struct {
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{objects: make(map[string][]byte)}
+	return &fakeBackend{objects: make(map[string][]byte), fileMutations: make(map[string]int)}
 }
 
 func (b *fakeBackend) PutIfAbsent(_ context.Context, key string, body []byte) error {
@@ -195,7 +196,14 @@ func (b *fakeBackend) PutFileIfAbsent(_ context.Context, key, path string, expec
 		return RemoteObjectCommit{}, ErrImmutableCollision
 	}
 	b.objects[key] = append([]byte(nil), body...)
+	b.fileMutations[key]++
 	return RemoteObjectCommit{ETag: "fake-etag-" + key}, nil
+}
+
+func (b *fakeBackend) mutationCount(key string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.fileMutations[key]
 }
 
 func (b *fakeBackend) VerifyFile(_ context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectVerification, error) {
@@ -283,6 +291,19 @@ func TestPublisherFirstAndIdempotentRetry(t *testing.T) {
 	fixture.backend.mu.Unlock()
 	if len(puts) != 1 || puts[0] != claimKey {
 		t.Fatalf("conditional backend writes = %v, want publisher claim only %q", puts, claimKey)
+	}
+	rawKey, err := fixture.layout.RawObjectKey(fixture.manifest.ChainObjects[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptorKey, err = fixture.layout.ScopeDescriptorKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{rawKey, descriptorKey} {
+		if got := fixture.backend.mutationCount(key); got != 1 {
+			t.Fatalf("duplicate publication mutated %q %d times, want once", key, got)
+		}
 	}
 	states, err := fixture.journal.ObjectStateRecords(key)
 	if err != nil {

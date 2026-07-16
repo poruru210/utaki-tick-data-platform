@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"net"
@@ -12,8 +13,10 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/ingest"
 	"tick-data-platform/internal/protocol"
+	"tick-data-platform/internal/publication"
 	"tick-data-platform/producers/fake"
 )
 
@@ -55,6 +58,94 @@ func TestGatewayAcceptsDurableBatchAndIdempotentRetry(t *testing.T) {
 	if gateway.WAL().Count() != 1 {
 		t.Fatalf("conflict must not append WAL entry, got %d", gateway.WAL().Count())
 	}
+}
+
+func TestGatewayStopsNewACKWhenPublicationBacklogReachesLimit(t *testing.T) {
+	config := testConfig(t)
+	config.MaxPendingSegments = 1
+	config.MaxPendingBytes = 1
+	gateway, client, stop := startGateway(t, config)
+	defer stop()
+
+	gateway.SetPendingPublication(1, 1)
+	status, err := gateway.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ReadyForACK || status.BlockedReason != "publication_backlog_limit" {
+		t.Fatalf("gateway status under publication pressure = %+v", status)
+	}
+	ack, err := client.SendBatch(testBatch(1, 1000, 1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.Status != protocol.AckRetryableError || gateway.WAL().Count() != 0 {
+		t.Fatalf("new batch was accepted under backlog pressure: ack=%+v wal=%d", ack, gateway.WAL().Count())
+	}
+}
+
+func TestCatalogBacklogReachesGatewayThroughLocalPipeline(t *testing.T) {
+	config := testConfig(t)
+	config.MaxPendingSegments = 1
+	config.MaxPendingBytes = 1
+	gateway, client, stop := startGateway(t, config)
+	defer stop()
+
+	catalog, err := publication.NewCatalog(filepath.Join(filepath.Dir(config.WALRoot), "publication", "catalog.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Stop(context.Background())
+	manifestSHA := sha256.Sum256([]byte("pending-manifest"))
+	if err := catalog.UpsertManifest(context.Background(), publication.ManifestRecord{
+		Date: "2024-03-09", Revision: 1, Path: filepath.Join(filepath.Dir(config.WALRoot), "manifest.json"),
+		SHA256: manifestSHA, Bytes: 1, UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pipeline, err := publication.NewLocalPipeline(publication.LocalPipelineConfig{
+		WAL: gateway.WAL(), Catalog: catalog,
+		RawOutboxRoot: filepath.Join(filepath.Dir(config.WALRoot), "raw-outbox"),
+		ManifestRoot:  filepath.Join(filepath.Dir(config.WALRoot), "manifests"),
+		Scope: archive.ScopeConfig{
+			DatasetID: "dataset-test", CampaignID: "campaign-test", ProviderID: "provider-test", StableFeedID: "feed-test",
+			ExactSourceSymbol: "EURUSD", BrokerServerFingerprint: "broker-test", GatewayBuildIdentity: "gateway-test",
+			ProducerBuildIdentity: "producer-test", DayDefinitionID: "utc-day-v1", SettlePolicy: "manual-v1",
+			PublisherID: "publisher-test", PublisherEpoch: 1,
+			ProtocolLimits: archive.ProtocolLimits{MaxFrameBytes: protocol.MaxFrameBytes, MaxRecords: protocol.MaxRecords},
+		},
+		SealMaxBytes: 1 << 30, SealInterval: time.Hour, ScanInterval: time.Hour, Clock: time.Now,
+		PendingSink: gatewayPendingSink{gateway: gateway},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, err := gateway.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ReadyForACK || status.BlockedReason != "publication_backlog_limit" {
+		t.Fatalf("Catalog backlog did not reach Gateway policy: %+v", status)
+	}
+	ack, err := client.SendBatch(testBatch(1, 1000, 1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.Status != protocol.AckRetryableError || gateway.WAL().Count() != 0 {
+		t.Fatalf("Gateway accepted batch despite Catalog backlog: ack=%+v wal=%d", ack, gateway.WAL().Count())
+	}
+}
+
+type gatewayPendingSink struct{ gateway *ingest.Gateway }
+
+func (s gatewayPendingSink) SetPendingPublication(segments, bytes uint64) {
+	s.gateway.SetPendingPublication(segments, bytes)
 }
 
 func TestGatewayRejectsExpiredConnectionAfterSessionReplacement(t *testing.T) {

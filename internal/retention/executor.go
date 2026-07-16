@@ -119,7 +119,7 @@ func (e *PruneExecutor) Execute(ctx context.Context, plan PrunePlan, candidates 
 		if err := contextErr(ctx); err != nil {
 			return report, err
 		}
-		candidate, err := e.validateAction(action, byID)
+		candidate, err := e.validateAction(plan, action, byID)
 		if err != nil {
 			return report, err
 		}
@@ -140,7 +140,7 @@ func (e *PruneExecutor) Execute(ctx context.Context, plan PrunePlan, candidates 
 			report.Completed = append(report.Completed, action.ArtifactID)
 			continue
 		}
-		candidate, err := e.validateAction(action, byID)
+		candidate, err := e.validateAction(plan, action, byID)
 		if err != nil {
 			return report, err
 		}
@@ -164,13 +164,16 @@ func contextErr(ctx context.Context) error {
 	}
 }
 
-func (e *PruneExecutor) validateAction(action PruneAction, byID map[string]CandidateFact) (CandidateFact, error) {
+func (e *PruneExecutor) validateAction(plan PrunePlan, action PruneAction, byID map[string]CandidateFact) (CandidateFact, error) {
 	candidate, ok := byID[action.ArtifactID]
 	if !ok {
 		return CandidateFact{}, fmt.Errorf("%w: plan action has no candidate fact", ErrPruneIntegrity)
 	}
 	if candidate.RecoveryRequired || !candidate.FreshRemote || !candidate.CoverageVerified || candidate.Proof == nil {
 		return CandidateFact{}, fmt.Errorf("%w: candidate is no longer deletion eligible", ErrPruneIntegrity)
+	}
+	if plan.RequireRemoteVerified && !candidate.RemoteVerified {
+		return CandidateFact{}, fmt.Errorf("%w: remote_verified state is missing", ErrPruneIntegrity)
 	}
 	canonicalAction, err := makePruneAction(candidate)
 	if err != nil || canonicalAction != action {

@@ -25,6 +25,8 @@ type Config struct {
 	DiskHighFreeBytes      uint64
 	DiskCriticalFreeBytes  uint64
 	DiskEmergencyFreeBytes uint64
+	MaxPendingSegments     uint64
+	MaxPendingBytes        uint64
 
 	ProducerInstanceID      string
 	ProducerBuildID         string
@@ -125,7 +127,10 @@ func (c Config) Validate() error {
 	if c.SessionLeaseTimeout <= 0 || c.HeartbeatIdleTimeout <= 0 {
 		return fmt.Errorf("timeouts must be positive")
 	}
-	if err := (DiskWatermarks{HighFreeBytes: c.DiskHighFreeBytes, CriticalFreeBytes: c.DiskCriticalFreeBytes, EmergencyFreeBytes: c.DiskEmergencyFreeBytes}).Validate(); err != nil {
+	if err := (DiskWatermarks{
+		HighFreeBytes: c.DiskHighFreeBytes, CriticalFreeBytes: c.DiskCriticalFreeBytes, EmergencyFreeBytes: c.DiskEmergencyFreeBytes,
+		MaxPendingSegments: c.MaxPendingSegments, MaxPendingBytes: c.MaxPendingBytes,
+	}).Validate(); err != nil {
 		return err
 	}
 	return nil

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -33,8 +34,10 @@ const (
 	ObjectStateUploading       = "uploading"
 	ObjectStateRemoteCommitted = "remote_committed"
 	ObjectStateRemoteVerified  = "remote_verified"
-	ObjectStateLocalPruned     = "local_pruned"
-	UploadMethodS3PutObjectV1  = "aws-sdk-go-v2-s3-putobject-if-none-match-getobject-sha256-v1"
+	// ObjectStateLocalPruned remains readable for legacy journal rows. New
+	// runtime local-pruned authority belongs to publication.Catalog.
+	ObjectStateLocalPruned    = "local_pruned"
+	UploadMethodS3PutObjectV1 = "aws-sdk-go-v2-s3-putobject-if-none-match-getobject-sha256-v1"
 )
 
 type PublicationObject struct {
@@ -548,6 +551,78 @@ func (j *PublicationJournal) ObjectStateRecords(identity string) ([]PublicationO
 		return nil, fmt.Errorf("iterate publication object states")
 	}
 	return records, nil
+}
+
+// FindRemoteVerifiedObject is the deletion-side read boundary. It returns an
+// exact durable remote verification for one immutable object identity without
+// exposing the journal's broader coordination state to retention planning.
+func (j *PublicationJournal) FindRemoteVerifiedObject(remoteKey string, sha [32]byte, size uint64) (PublicationObjectStateRecord, bool, error) {
+	return j.findRemoteVerifiedObject(remoteKey, "", sha, size)
+}
+
+// FindRemoteVerifiedObjectAtPath additionally binds the verification to the
+// exact local raw-outbox path that retention is about to remove.
+func (j *PublicationJournal) FindRemoteVerifiedObjectAtPath(remoteKey, localPath string, sha [32]byte, size uint64) (PublicationObjectStateRecord, bool, error) {
+	if localPath == "" {
+		return PublicationObjectStateRecord{}, false, fmt.Errorf("%w: local verification path is empty", archive.ErrIntegrity)
+	}
+	return j.findRemoteVerifiedObject(remoteKey, localPath, sha, size)
+}
+
+func (j *PublicationJournal) findRemoteVerifiedObject(remoteKey, localPath string, sha [32]byte, size uint64) (PublicationObjectStateRecord, bool, error) {
+	if remoteKey == "" || sha == ([32]byte{}) || size == 0 {
+		return PublicationObjectStateRecord{}, false, fmt.Errorf("%w: remote verification lookup identity is incomplete", archive.ErrIntegrity)
+	}
+	sizeValue, err := sqliteUint64(size)
+	if err != nil {
+		return PublicationObjectStateRecord{}, false, err
+	}
+	var record PublicationObjectStateRecord
+	var sizeRow, verifiedAt int64
+	var shaBytes, md5Bytes []byte
+	query := `SELECT identity, object_key, local_path, size, sha256, md5, upload_method, remote_etag, remote_verified_at_unix_ms
+		FROM publication_object_states
+		WHERE object_key=? AND size=? AND sha256=? AND state=?`
+	args := []any{remoteKey, sizeValue, sha[:], ObjectStateRemoteVerified}
+	if localPath != "" {
+		query += ` AND local_path=?`
+		args = append(args, localPath)
+	}
+	query += ` ORDER BY ordinal DESC LIMIT 1`
+	err = j.db.QueryRow(query, args...).Scan(&record.Identity, &record.ObjectKey, &record.LocalPath, &sizeRow, &shaBytes, &md5Bytes, &record.UploadMethod, &record.RemoteETag, &verifiedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PublicationObjectStateRecord{}, false, nil
+	}
+	if err != nil {
+		return PublicationObjectStateRecord{}, false, fmt.Errorf("lookup remote_verified object: %w", err)
+	}
+	if sizeRow < 0 || uint64(sizeRow) != size || len(shaBytes) != 32 || len(md5Bytes) != 16 || verifiedAt == 0 {
+		return PublicationObjectStateRecord{}, false, fmt.Errorf("%w: remote_verified object row is malformed", archive.ErrIntegrity)
+	}
+	record.Size = uint64(sizeRow)
+	copy(record.SHA256[:], shaBytes)
+	copy(record.MD5[:], md5Bytes)
+	record.RemoteVerifiedAt = time.UnixMilli(verifiedAt).UTC()
+	record.State = ObjectStateRemoteVerified
+	return record, true, nil
+}
+
+// LastRemoteVerifiedAt returns the latest durable full-byte verification time
+// without exposing remote object contents or credentials to the status layer.
+func (j *PublicationJournal) LastRemoteVerifiedAt(ctx context.Context) (time.Time, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, false, err
+	}
+	var value sql.NullInt64
+	if err := j.db.QueryRowContext(ctx, `
+		SELECT MAX(remote_verified_at_unix_ms)
+		FROM publication_object_states WHERE state=?`, ObjectStateRemoteVerified).Scan(&value); err != nil {
+		return time.Time{}, false, fmt.Errorf("read last remote verification: %w", err)
+	}
+	if !value.Valid || value.Int64 <= 0 {
+		return time.Time{}, false, nil
+	}
+	return time.UnixMilli(value.Int64).UTC(), true, nil
 }
 
 func (j *PublicationJournal) lookup(identity string) (JournalRecord, bool, error) {

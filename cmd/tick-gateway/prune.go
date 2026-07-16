@@ -7,19 +7,34 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"tick-data-platform/internal/archive"
+	appconfig "tick-data-platform/internal/config"
 	"tick-data-platform/internal/credentials"
 	"tick-data-platform/internal/ingest"
 	"tick-data-platform/internal/operations"
 	"tick-data-platform/internal/protocol"
+	"tick-data-platform/internal/publication"
 	"tick-data-platform/internal/r2"
 	"tick-data-platform/internal/retention"
 )
 
-func runPruneLocal(config ingest.Config, args []string) error {
+func runPruneLocal(configValue appconfig.Config, args []string) error {
+	return runPruneLocalWithObserver(configValue, args, nil)
+}
+
+// runPruneLocalWithObserver keeps the command's complete inventory, binding,
+// planning, and execution path intact while allowing a bounded fake observer
+// in command-level tests. Production always passes nil and constructs the
+// credential-bound read-only observer below.
+func runPruneLocalWithObserver(configValue appconfig.Config, args []string, observerOverride retention.ReadOnlyRemoteObserver) error {
+	if err := configValue.ValidateForRun(); err != nil {
+		return err
+	}
+	config := ingest.ConfigFromGatewayConfig(configValue.Gateway())
 	dryRun := hasFlag(args, "--dry-run")
 	execute := hasFlag(args, "--execute")
 	if dryRun == execute {
@@ -74,28 +89,45 @@ func runPruneLocal(config ingest.Config, args []string) error {
 	if err != nil {
 		return err
 	}
+	remoteJournal, err := r2.OpenPublicationJournal(configValue.Publication.RemoteJournalPath)
+	if err != nil {
+		return fmt.Errorf("open publication journal: %w", err)
+	}
+	defer remoteJournal.Close()
+	catalog, err := publication.NewCatalog(configValue.Publication.CatalogPath)
+	if err != nil {
+		return fmt.Errorf("open publication catalog: %w", err)
+	}
+	if err := catalog.Start(context.Background()); err != nil {
+		_ = remoteJournal.Close()
+		return fmt.Errorf("start publication catalog: %w", err)
+	}
+	defer catalog.Stop(context.Background())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(limits.RequestTimeoutMS)*time.Millisecond)
 	defer cancel()
-	provider, err := credentials.NewFileProvider(remoteConfig.CredentialFileConfig())
-	if err != nil {
-		return err
-	}
-	backend, err := r2.NewS3ReadBackendWithProvider(ctx, r2.S3ReadBackendConfig{
-		Bucket: remoteConfig.Bucket, Endpoint: remoteConfig.Endpoint, Region: remoteConfig.Region,
-		MaxMetadataBytes: int64(limits.MaxProofBytes),
-	}, provider)
-	if err != nil {
-		return err
-	}
-	observerBackend, err := r2.NewReplayRemoteReadAdapterFromReadBackend(backend)
-	if err != nil {
-		return err
-	}
-	observer, err := retention.NewRawRetentionObserver(observerBackend, layout, remoteConfig.Date, func() uint64 {
-		return clock.ObservedWallTimeUnixMS
-	}, remoteConfig.GraceMS)
-	if err != nil {
-		return err
+	var observer retention.ReadOnlyRemoteObserver = observerOverride
+	if observer == nil {
+		provider, err := credentials.NewFileProvider(remoteConfig.CredentialFileConfig())
+		if err != nil {
+			return err
+		}
+		backend, err := r2.NewS3ReadBackendWithProvider(ctx, r2.S3ReadBackendConfig{
+			Bucket: remoteConfig.Bucket, Endpoint: remoteConfig.Endpoint, Region: remoteConfig.Region,
+			MaxMetadataBytes: int64(limits.MaxProofBytes),
+		}, provider)
+		if err != nil {
+			return err
+		}
+		observerBackend, err := r2.NewReplayRemoteReadAdapterFromReadBackend(backend)
+		if err != nil {
+			return err
+		}
+		observer, err = retention.NewRawRetentionObserver(observerBackend, layout, remoteConfig.Date, func() uint64 {
+			return clock.ObservedWallTimeUnixMS
+		}, remoteConfig.GraceMS)
+		if err != nil {
+			return err
+		}
 	}
 	var recovered []retention.CandidateFact
 	if config.RawOutboxRoot != "" {
@@ -134,6 +166,9 @@ func runPruneLocal(config ingest.Config, args []string) error {
 		return fmt.Errorf("retention candidates exceed configured limit")
 	}
 	candidates = append(candidates, recovered...)
+	if err := bindPruneRemoteVerification(candidates, config, layout, remoteJournal); err != nil {
+		return err
+	}
 	disk, err := ingest.NewDiskStateMachine(config.WALRoot, ingest.DiskWatermarks{
 		HighFreeBytes: config.DiskHighFreeBytes, CriticalFreeBytes: config.DiskCriticalFreeBytes,
 		EmergencyFreeBytes: config.DiskEmergencyFreeBytes,
@@ -147,7 +182,7 @@ func runPruneLocal(config ingest.Config, args []string) error {
 		DurableWallTimeUnixMS: clock.ObservedWallTimeUnixMS, WALExpectedStart: expectedStart,
 		GraceMS: remoteConfig.GraceMS, MaxCandidates: limits.MaxPruneCandidates,
 		ProofLimits: retention.ProofLimits{MaxProofObjects: limits.MaxProofObjects, MaxProofBytes: limits.MaxProofBytes, MaxManifestNodes: limits.MaxManifestNodes},
-		Disk:        diskState.Class,
+		Disk:        diskState.Class, RequireRemoteVerified: true,
 	})
 	if err != nil {
 		return err
@@ -173,7 +208,11 @@ func runPruneLocal(config ingest.Config, args []string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := executor.Execute(ctx, plan, candidates); err != nil {
+		report, err := executor.Execute(ctx, plan, candidates)
+		if err != nil {
+			return err
+		}
+		if err := recordPruneLocalCompletions(ctx, config, report, candidates, catalog); err != nil {
 			return err
 		}
 	}
@@ -182,8 +221,68 @@ func runPruneLocal(config ingest.Config, args []string) error {
 		"plan_current_wall_time_unix_ms": current,
 		"dry_run":                        dryRun, "executed": execute,
 		"disk_class": string(diskState.Class), "durable_wall_time_unix_ms": clock.ObservedWallTimeUnixMS,
+		"remote_verified_required": true,
 	}
 	return json.NewEncoder(os.Stdout).Encode(output)
+}
+
+type pruneRemoteVerificationReader interface {
+	FindRemoteVerifiedObject(string, [32]byte, uint64) (r2.PublicationObjectStateRecord, bool, error)
+	FindRemoteVerifiedObjectAtPath(string, string, [32]byte, uint64) (r2.PublicationObjectStateRecord, bool, error)
+}
+
+func bindPruneRemoteVerification(candidates []retention.CandidateFact, config ingest.Config, layout r2.Layout, journal pruneRemoteVerificationReader) error {
+	if journal == nil {
+		return fmt.Errorf("prune remote verification reader is nil")
+	}
+	for index := range candidates {
+		remoteKey, err := layout.RemoteKey(archive.RawWALObjectKey(candidates[index].Artifact.ContentSHA256))
+		if err != nil {
+			return err
+		}
+		if candidates[index].Artifact.Kind == retention.ArtifactRawOutbox {
+			localPath := filepath.Join(config.RawOutboxRoot, filepath.FromSlash(candidates[index].Artifact.TrustedPath))
+			_, candidates[index].RemoteVerified, err = journal.FindRemoteVerifiedObjectAtPath(remoteKey, localPath, candidates[index].Artifact.ContentSHA256, candidates[index].Artifact.Bytes)
+		} else {
+			_, candidates[index].RemoteVerified, err = journal.FindRemoteVerifiedObject(remoteKey, candidates[index].Artifact.ContentSHA256, candidates[index].Artifact.Bytes)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type pruneLocalPrunedRecorder interface {
+	MarkSegmentLocalPruned(context.Context, string, string, [32]byte, uint64) error
+}
+
+func recordPruneLocalCompletions(ctx context.Context, config ingest.Config, report retention.PruneExecutionReport, candidates []retention.CandidateFact, catalog pruneLocalPrunedRecorder) error {
+	if catalog == nil {
+		return fmt.Errorf("prune local completion recorder is nil")
+	}
+	byID := make(map[string]retention.CandidateFact, len(candidates))
+	for _, candidate := range candidates {
+		id, err := candidate.Artifact.StableID()
+		if err != nil {
+			return err
+		}
+		byID[id] = candidate
+	}
+	for _, id := range report.Completed {
+		candidate, found := byID[id]
+		if !found {
+			return fmt.Errorf("prune completion candidate %q is missing", id)
+		}
+		if candidate.Artifact.Kind != retention.ArtifactRawOutbox {
+			continue
+		}
+		localPath := filepath.Join(config.RawOutboxRoot, filepath.FromSlash(candidate.Artifact.TrustedPath))
+		if err := catalog.MarkSegmentLocalPruned(ctx, candidate.Artifact.TrustedPath, localPath, candidate.Artifact.ContentSHA256, candidate.Artifact.Bytes); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func parsePlanDigest(value string) ([32]byte, error) {

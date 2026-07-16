@@ -117,7 +117,10 @@ func Open(config Config) (*Gateway, error) {
 		_ = recovery.Stop(context.Background())
 		return nil, err
 	}
-	disk, err := NewDiskStateMachine(config.WALRoot, DiskWatermarks{HighFreeBytes: config.DiskHighFreeBytes, CriticalFreeBytes: config.DiskCriticalFreeBytes, EmergencyFreeBytes: config.DiskEmergencyFreeBytes}, OSDiskUsageProvider{})
+	disk, err := NewDiskStateMachine(config.WALRoot, DiskWatermarks{
+		HighFreeBytes: config.DiskHighFreeBytes, CriticalFreeBytes: config.DiskCriticalFreeBytes, EmergencyFreeBytes: config.DiskEmergencyFreeBytes,
+		MaxPendingSegments: config.MaxPendingSegments, MaxPendingBytes: config.MaxPendingBytes,
+	}, OSDiskUsageProvider{})
 	if err != nil {
 		_ = store.Close()
 		_ = journalStore.Close()
@@ -176,6 +179,15 @@ func (g *Gateway) Config() Config { return g.config }
 func (g *Gateway) WAL() *wal.Store { return g.wal }
 
 func (g *Gateway) Journal() *journal.Store { return g.journal }
+
+// SetPendingPublication is a narrow integration seam for the local
+// publication coordinator and its network-free tests. The Gateway only
+// receives the measurement; DiskStateMachine remains the policy owner.
+func (g *Gateway) SetPendingPublication(segments, bytes uint64) {
+	if g != nil && g.disk != nil {
+		g.disk.SetPendingPublication(segments, bytes)
+	}
+}
 
 func (g *Gateway) SetHooks(hooks Hooks) {
 	g.hooksMu.Lock()

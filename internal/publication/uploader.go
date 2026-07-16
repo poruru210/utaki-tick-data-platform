@@ -22,6 +22,13 @@ type RemoteIntentSource interface {
 	ListUnfinished(context.Context) ([]r2.UnfinishedPublication, error)
 }
 
+// PendingPublicationSink receives the same durable backlog measurement used by
+// the operator status view. The sink is intentionally one-way so the uploader
+// cannot change ingest policy or inspect Gateway internals.
+type PendingPublicationSink interface {
+	SetPendingPublication(segments, bytes uint64)
+}
+
 type UploaderConfig struct {
 	Catalog       *Catalog
 	Publisher     RemotePublisher
@@ -31,6 +38,8 @@ type UploaderConfig struct {
 	RetryMin      time.Duration
 	RetryMax      time.Duration
 	Clock         Clock
+	PendingSink   PendingPublicationSink
+	Priority      PublicationPriorityReader
 }
 
 // Uploader publishes only canonical manifests already recorded by the local
@@ -45,15 +54,18 @@ type Uploader struct {
 	retryMin      time.Duration
 	retryMax      time.Duration
 	clock         Clock
+	pendingSink   PendingPublicationSink
+	priority      PublicationPriorityReader
 
-	processMu sync.Mutex
-	mu        sync.Mutex
-	started   bool
-	starting  bool
-	cancel    context.CancelFunc
-	done      chan struct{}
-	errors    chan error
-	lastError error
+	processMu      sync.Mutex
+	mu             sync.Mutex
+	started        bool
+	starting       bool
+	cancel         context.CancelFunc
+	done           chan struct{}
+	errors         chan error
+	lastError      error
+	lastErrorClass string
 }
 
 func NewUploader(config UploaderConfig) (*Uploader, error) {
@@ -75,6 +87,8 @@ func NewUploader(config UploaderConfig) (*Uploader, error) {
 		retryMin:      config.RetryMin,
 		retryMax:      config.RetryMax,
 		clock:         config.Clock,
+		pendingSink:   config.PendingSink,
+		priority:      config.Priority,
 		errors:        make(chan error, 1),
 	}, nil
 }
@@ -152,6 +166,26 @@ func (u *Uploader) LastError() error {
 	return u.lastError
 }
 
+// LastErrorClass exposes only the bounded operational classification. Raw
+// SDK errors remain private to the worker and cannot enter status output.
+func (u *Uploader) LastErrorClass() string {
+	if u == nil {
+		return ""
+	}
+	u.mu.Lock()
+	class := u.lastErrorClass
+	err := u.lastError
+	u.mu.Unlock()
+	if class != "" {
+		return class
+	}
+	if err == nil {
+		return ""
+	}
+	classified, _ := classifyPublicationError(err)
+	return classified
+}
+
 // PublishDue is exported for deterministic fake-backend tests. At most one
 // transient failure is scheduled per call; the next tick observes durable
 // backoff instead of retrying in a tight loop.
@@ -185,15 +219,17 @@ func (u *Uploader) PublishDue(ctx context.Context) error {
 		}
 		class, retry := classifyPublicationError(err)
 		if !retry {
+			u.recordFailure(err, class)
 			return fmt.Errorf("publication %s: %w", class, err)
 		}
 		next := u.clock().UTC().Add(retryDelay(record.Attempts+1, u.retryMin, u.retryMax))
 		if err := u.catalog.MarkManifestRetry(ctx, record.Date, record.Revision, class, next, u.clock().UTC()); err != nil {
 			return err
 		}
+		u.recordRetry(class)
 		return nil
 	}
-	return nil
+	return u.refreshPending(ctx)
 }
 
 func (u *Uploader) publishUnfinished(ctx context.Context) error {
@@ -235,15 +271,17 @@ func (u *Uploader) publishUnfinished(ctx context.Context) error {
 		}
 		class, retry := classifyPublicationError(err)
 		if !retry {
+			u.recordFailure(err, class)
 			return fmt.Errorf("publication %s: %w", class, err)
 		}
 		next := now.Add(retryDelay(record.Attempts+1, u.retryMin, u.retryMax))
 		if err := u.catalog.MarkManifestRetry(ctx, input.Manifest.Date, input.Manifest.Revision, class, next, now); err != nil {
 			return err
 		}
+		u.recordRetry(class)
 		return nil
 	}
-	return nil
+	return u.refreshPending(ctx)
 }
 
 func (u *Uploader) ensureManifestRecord(ctx context.Context, input r2.PublicationInput) error {
@@ -260,7 +298,26 @@ func (u *Uploader) ensureManifestRecord(ctx context.Context, input r2.Publicatio
 }
 
 func (u *Uploader) markPublished(ctx context.Context, manifest archive.RawDayManifest) error {
-	return u.catalog.MarkManifestState(ctx, manifest.Date, manifest.Revision, ManifestStatePublished, u.clock().UTC())
+	if err := u.catalog.MarkManifestPublished(ctx, manifest, u.clock().UTC()); err != nil {
+		return err
+	}
+	u.mu.Lock()
+	u.lastError = nil
+	u.lastErrorClass = ""
+	u.mu.Unlock()
+	return nil
+}
+
+func (u *Uploader) refreshPending(ctx context.Context) error {
+	if u.pendingSink == nil {
+		return nil
+	}
+	stats, err := u.catalog.PendingStats(ctx)
+	if err != nil {
+		return err
+	}
+	u.pendingSink.SetPendingPublication(stats.PendingSegments, stats.PendingBytes)
+	return nil
 }
 
 func (u *Uploader) run(ctx context.Context) {
@@ -278,6 +335,10 @@ func (u *Uploader) run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(u.scanInterval)
 	defer ticker.Stop()
+	priorityWakeups := (<-chan struct{})(nil)
+	if u.priority != nil {
+		priorityWakeups = u.priority.PriorityWakeups()
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -287,18 +348,38 @@ func (u *Uploader) run(ctx context.Context) {
 				u.reportError(err)
 				return
 			}
+		case <-priorityWakeups:
+			if u.priority == nil || !u.priority.PublicationWorkerPriority() {
+				continue
+			}
+			if err := u.PublishDue(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				u.reportError(err)
+				return
+			}
 		}
 	}
 }
 
 func (u *Uploader) reportError(err error) {
-	u.mu.Lock()
-	u.lastError = err
-	u.mu.Unlock()
+	class, _ := classifyPublicationError(err)
+	u.recordFailure(err, class)
 	select {
 	case u.errors <- err:
 	default:
 	}
+}
+
+func (u *Uploader) recordRetry(class string) {
+	u.mu.Lock()
+	u.lastErrorClass = class
+	u.mu.Unlock()
+}
+
+func (u *Uploader) recordFailure(err error, class string) {
+	u.mu.Lock()
+	u.lastError = err
+	u.lastErrorClass = class
+	u.mu.Unlock()
 }
 
 func (u *Uploader) inputFor(ctx context.Context, record ManifestRecord) (r2.PublicationInput, error) {
@@ -334,11 +415,13 @@ func (u *Uploader) inputFor(ctx context.Context, record ManifestRecord) (r2.Publ
 
 func classifyPublicationError(err error) (string, bool) {
 	switch {
-	case errors.Is(err, archive.ErrIntegrity), errors.Is(err, r2.ErrImmutableCollision), errors.Is(err, r2.ErrPublisherConflict), errors.Is(err, r2.ErrRemoteCheckMismatch):
-		return "integrity", false
+	case errors.Is(err, r2.ErrImmutableCollision), errors.Is(err, r2.ErrPublisherConflict):
+		return "collision", false
+	case errors.Is(err, r2.ErrRemoteCheckMismatch):
+		return "remote_integrity", false
 	case errors.Is(err, r2.ErrRemotePermission):
 		return "permission", false
-	case errors.Is(err, r2.ErrLocalObjectChanged), errors.Is(err, r2.ErrResourceLimit):
+	case errors.Is(err, archive.ErrIntegrity), errors.Is(err, r2.ErrLocalObjectChanged), errors.Is(err, r2.ErrResourceLimit):
 		return "local_integrity", false
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return "remote_timeout", true

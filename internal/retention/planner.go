@@ -64,6 +64,7 @@ type CandidateFact struct {
 	Proof            *RetentionProof
 	FreshRemote      bool
 	CoverageVerified bool
+	RemoteVerified   bool
 	RecoveryRequired bool
 }
 
@@ -77,6 +78,7 @@ type PlannerInput struct {
 	MaxCandidates         uint64
 	ProofLimits           ProofLimits
 	Disk                  DiskClass
+	RequireRemoteVerified bool
 }
 
 type PruneAction struct {
@@ -103,12 +105,13 @@ type PrunePlan struct {
 	ActiveRecoveryFloor   uint64
 	WALExpectedStart      uint64
 	GraceMS               uint64
+	RequireRemoteVerified bool
 	Actions               []PruneAction
 	Blocked               []BlockedCandidate
 	PlanDigest            [32]byte
 }
 
-const PrunePlanVersion = "prune-plan-v1"
+const PrunePlanVersion = "prune-plan-v2"
 
 func validDiskClass(value DiskClass) bool {
 	switch value {
@@ -146,6 +149,7 @@ func (p PrunePlan) Value() map[string]any {
 		"durable_wall_time_unix_ms": p.DurableWallTimeUnixMS,
 		"grace_ms":                  p.GraceMS,
 		"plan_version":              p.PlanVersion,
+		"require_remote_verified":   p.RequireRemoteVerified,
 		"wal_expected_start":        p.WALExpectedStart,
 	}
 }
@@ -194,6 +198,9 @@ func candidateEligibility(candidate CandidateFact, input PlannerInput) (string, 
 	}
 	if !candidate.CoverageVerified {
 		return "manifest_coverage_missing", false
+	}
+	if input.RequireRemoteVerified && !candidate.RemoteVerified {
+		return "remote_verified_missing", false
 	}
 	if candidate.Proof == nil {
 		return "retention_proof_missing", false
@@ -257,7 +264,7 @@ func BuildPrunePlan(input PlannerInput) (PrunePlan, error) {
 	plan := PrunePlan{
 		PlanVersion: PrunePlanVersion, Disk: input.Disk, CurrentWallTimeUnixMS: input.CurrentWallTimeUnixMS,
 		DurableWallTimeUnixMS: input.DurableWallTimeUnixMS, ActiveRecoveryFloor: input.ActiveRecoveryFloor,
-		WALExpectedStart: input.WALExpectedStart, GraceMS: input.GraceMS,
+		WALExpectedStart: input.WALExpectedStart, GraceMS: input.GraceMS, RequireRemoteVerified: input.RequireRemoteVerified,
 	}
 	byID := make(map[string]CandidateFact, len(input.Candidates))
 	byPath := make(map[string]string, len(input.Candidates))

@@ -94,6 +94,28 @@ func TestBuildPrunePlanBlocksProofAndClockFailures(t *testing.T) {
 	}
 }
 
+func TestBuildPrunePlanRequiresDurableRemoteVerificationWhenRequested(t *testing.T) {
+	candidate := plannerCandidate(1, 1, "sealed/remote-required.wal", '1')
+	input := plannerInput(candidate)
+	input.RequireRemoteVerified = true
+	plan, err := BuildPrunePlan(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Actions) != 0 || len(plan.Blocked) != 1 || plan.Blocked[0].Reason != "remote_verified_missing" {
+		t.Fatalf("missing remote verification plan = %+v", plan)
+	}
+	candidate.RemoteVerified = true
+	input.Candidates = []CandidateFact{candidate}
+	plan, err = BuildPrunePlan(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Actions) != 1 || len(plan.Blocked) != 0 || !plan.RequireRemoteVerified {
+		t.Fatalf("verified plan = %+v", plan)
+	}
+}
+
 func TestBuildPrunePlanRejectsGapAndDuplicatePath(t *testing.T) {
 	first := plannerCandidate(1, 1, "sealed/one.wal", '1')
 	gap := plannerCandidate(3, 3, "sealed/three.wal", '3')

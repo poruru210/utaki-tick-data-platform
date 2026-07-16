@@ -19,6 +19,13 @@ type Ticker interface {
 
 type TickerFactory func(time.Duration) Ticker
 
+// PublicationPriorityReader is a read-only pressure decision. A worker may
+// wake sooner, but it must still obey durable retry and verification rules.
+type PublicationPriorityReader interface {
+	PublicationWorkerPriority() bool
+	PriorityWakeups() <-chan struct{}
+}
+
 type realTicker struct{ ticker *time.Ticker }
 
 func (t *realTicker) C() <-chan time.Time { return t.ticker.C }
@@ -43,6 +50,8 @@ type LocalPipelineConfig struct {
 	Clock         Clock
 	TickerFactory TickerFactory
 	ManifestGate  ManifestPublicationGate
+	PendingSink   PendingPublicationSink
+	Priority      PublicationPriorityReader
 }
 
 // LocalPipeline seals active WAL, promotes verified segments, and spools
@@ -58,6 +67,8 @@ type LocalPipeline struct {
 	scanInterval  time.Duration
 	clock         Clock
 	tickerFactory TickerFactory
+	pendingSink   PendingPublicationSink
+	priority      PublicationPriorityReader
 
 	processMu sync.Mutex
 	mu        sync.RWMutex
@@ -98,6 +109,8 @@ func NewLocalPipeline(config LocalPipelineConfig) (*LocalPipeline, error) {
 		scanInterval:  config.ScanInterval,
 		clock:         config.Clock,
 		tickerFactory: tickerFactory,
+		pendingSink:   config.PendingSink,
+		priority:      config.Priority,
 		errors:        make(chan error, 1),
 	}, nil
 }
@@ -146,7 +159,7 @@ func (p *LocalPipeline) Stop(ctx context.Context) error {
 	if !started {
 		return nil
 	}
-	finalErr := p.ProcessOnce(ctx)
+	finalErr := p.processOnce(ctx, true)
 	p.mu.Lock()
 	cancel := p.cancel
 	done := p.done
@@ -174,6 +187,10 @@ func (p *LocalPipeline) Stop(ctx context.Context) error {
 // ProcessOnce is exported for network-free integration tests and startup
 // reconciliation. The caller must have started the supplied WAL and Catalog.
 func (p *LocalPipeline) ProcessOnce(ctx context.Context) error {
+	return p.processOnce(ctx, false)
+}
+
+func (p *LocalPipeline) processOnce(ctx context.Context, forceSeal bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -185,13 +202,28 @@ func (p *LocalPipeline) ProcessOnce(ctx context.Context) error {
 	if err := p.planner.Reconcile(ctx); err != nil {
 		return err
 	}
-	if err := p.maybeSeal(); err != nil {
+	if err := p.maybeSeal(forceSeal); err != nil {
 		return err
 	}
 	if err := p.promoteSealed(ctx); err != nil {
 		return err
 	}
-	return p.spoolAffectedManifests(ctx)
+	if err := p.spoolAffectedManifests(ctx); err != nil {
+		return err
+	}
+	return p.refreshPending(ctx)
+}
+
+func (p *LocalPipeline) refreshPending(ctx context.Context) error {
+	if p.pendingSink == nil {
+		return nil
+	}
+	stats, err := p.catalog.PendingStats(ctx)
+	if err != nil {
+		return err
+	}
+	p.pendingSink.SetPendingPublication(stats.PendingSegments, stats.PendingBytes)
+	return nil
 }
 
 func (p *LocalPipeline) Errors() <-chan error {
@@ -224,6 +256,10 @@ func (p *LocalPipeline) run(ctx context.Context) {
 		return
 	}
 	defer ticker.Stop()
+	priorityWakeups := (<-chan struct{})(nil)
+	if p.priority != nil {
+		priorityWakeups = p.priority.PriorityWakeups()
+	}
 	defer func() {
 		p.mu.Lock()
 		done := p.done
@@ -247,11 +283,25 @@ func (p *LocalPipeline) run(ctx context.Context) {
 				}
 				return
 			}
+		case <-priorityWakeups:
+			if p.priority == nil || !p.priority.PublicationWorkerPriority() {
+				continue
+			}
+			if err := p.ProcessOnce(ctx); err != nil {
+				p.mu.Lock()
+				p.lastError = err
+				p.mu.Unlock()
+				select {
+				case p.errors <- err:
+				default:
+				}
+				return
+			}
 		}
 	}
 }
 
-func (p *LocalPipeline) maybeSeal() error {
+func (p *LocalPipeline) maybeSeal(force bool) error {
 	path := p.wal.Path()
 	info, err := os.Stat(path)
 	if err != nil {
@@ -264,7 +314,7 @@ func (p *LocalPipeline) maybeSeal() error {
 			p.lastSeal = now
 		}
 	}
-	if uint64(info.Size()) < p.sealMaxBytes && now.Sub(p.lastSeal) < p.sealInterval {
+	if !force && uint64(info.Size()) < p.sealMaxBytes && now.Sub(p.lastSeal) < p.sealInterval {
 		return nil
 	}
 	_, err = p.wal.Seal()
@@ -280,6 +330,16 @@ func (p *LocalPipeline) maybeSeal() error {
 }
 
 func (p *LocalPipeline) promoteSealed(ctx context.Context) error {
+	records, err := p.catalog.ListSegments(ctx)
+	if err != nil {
+		return err
+	}
+	localPruned := make(map[[32]byte]struct{})
+	for _, record := range records {
+		if record.State == SegmentStateLocalPruned {
+			localPruned[record.SHA256] = struct{}{}
+		}
+	}
 	segments := p.wal.SealedSegments()
 	for _, segment := range segments {
 		if err := ctx.Err(); err != nil {
@@ -287,6 +347,9 @@ func (p *LocalPipeline) promoteSealed(ctx context.Context) error {
 		}
 		if segment.Path == "" {
 			return fmt.Errorf("sealed WAL segment has no path")
+		}
+		if _, alreadyPruned := localPruned[segment.ObjectSHA256]; alreadyPruned {
+			continue
 		}
 		raw, err := archive.PromoteSealedSegment(p.rawOutboxRoot, segment.Path)
 		if err != nil {
@@ -324,6 +387,9 @@ func (p *LocalPipeline) spoolAffectedManifests(ctx context.Context) error {
 	objects := make([]archive.RawObject, 0, len(records))
 	dates := make(map[string]struct{})
 	for _, record := range records {
+		if record.State == SegmentStateLocalPruned {
+			continue
+		}
 		segment, err := wal.VerifySealedSegment(record.RawPath)
 		if err != nil {
 			return fmt.Errorf("verify catalogued raw object: %w", err)

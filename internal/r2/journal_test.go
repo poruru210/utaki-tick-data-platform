@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"tick-data-platform/internal/archive"
 )
@@ -74,6 +75,55 @@ func TestPublicationJournalListsUnfinishedIntentForRecovery(t *testing.T) {
 	}
 	if len(unfinished) != 0 {
 		t.Fatalf("terminal intent remained unfinished: %+v", unfinished)
+	}
+}
+
+func TestPublicationJournalRemoteVerificationLookupRequiresExactIdentity(t *testing.T) {
+	journal, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	intent := testPublicationIntent(t)
+	if _, err := journal.CreateOrGetIntent(intent); err != nil {
+		t.Fatal(err)
+	}
+	sha := sha256.Sum256([]byte("raw"))
+	object := PublicationObject{LocalPath: "raw/object", SHA256: sha, MD5: [16]byte{1}, Bytes: 3, RemoteKey: "raw/object"}
+	verifiedAt := time.Date(2024, 3, 9, 12, 0, 0, 0, time.UTC)
+	if err := journal.RecordObjectState(intent.ManifestKey, object, ObjectStateRemoteVerified, "etag", verifiedAt); err != nil {
+		t.Fatal(err)
+	}
+	verified, found, err := journal.FindRemoteVerifiedObject(object.RemoteKey, sha, object.Bytes)
+	if err != nil || !found || verified.State != ObjectStateRemoteVerified || !verified.RemoteVerifiedAt.Equal(verifiedAt) {
+		t.Fatalf("verified lookup = %+v found=%v err=%v", verified, found, err)
+	}
+	if _, found, err := journal.FindRemoteVerifiedObjectAtPath(object.RemoteKey, "raw/other", sha, object.Bytes); err != nil || found {
+		t.Fatalf("wrong local path lookup = found=%v err=%v", found, err)
+	}
+	if _, found, err := journal.FindRemoteVerifiedObjectAtPath(object.RemoteKey, object.LocalPath, sha, object.Bytes); err != nil || !found {
+		t.Fatalf("exact local path lookup = found=%v err=%v", found, err)
+	}
+	states, err := journal.ObjectStateRecords(intent.ManifestKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].State != ObjectStateRemoteVerified {
+		t.Fatalf("object states = %+v", states)
+	}
+
+	missing, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "missing.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer missing.Close()
+	missingIntent := testPublicationIntent(t)
+	missingIntent.ManifestKey = "missing-manifest"
+	if _, err := missing.CreateOrGetIntent(missingIntent); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := missing.FindRemoteVerifiedObject(object.RemoteKey, sha, object.Bytes); err != nil || found {
+		t.Fatalf("missing verification lookup = found=%v err=%v", found, err)
 	}
 }
 

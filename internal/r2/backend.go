@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"time"
 
@@ -299,6 +300,10 @@ type S3BackendConfig struct {
 	Bucket   string
 	Endpoint string
 	Region   string
+	// HTTPClient is optional and is intended for an explicitly configured
+	// transport such as a corporate proxy. Production callers normally leave
+	// it nil so the AWS SDK's default client is used.
+	HTTPClient *http.Client
 }
 
 type S3Backend struct {
@@ -379,6 +384,9 @@ func newS3BackendWithCredentials(ctx context.Context, settings S3BackendConfig, 
 }
 
 func newS3BackendFromConfig(awsConfig aws.Config, settings S3BackendConfig) *S3Backend {
+	if settings.HTTPClient != nil {
+		awsConfig.HTTPClient = settings.HTTPClient
+	}
 	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
 		options.UsePathStyle = true
 		if settings.Endpoint != "" {
