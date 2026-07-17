@@ -12,7 +12,7 @@ import (
 
 var ErrPublicationLock = errors.New("publication lock is held")
 
-type CampaignLock struct {
+type PublicationLock struct {
 	file *flock.Flock
 	path string
 }
@@ -25,10 +25,10 @@ func PublicationLockPath(root string, scope archive.ScopeConfig) (string, error)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, fmt.Sprintf("campaign-%s-epoch-%d.lock", scopeKey, scope.PublisherEpoch)), nil
+	return filepath.Join(root, fmt.Sprintf("scope-%s-epoch-%d.lock", scopeKey, scope.PublisherEpoch)), nil
 }
 
-func AcquirePublicationLock(path string) (*CampaignLock, error) {
+func AcquirePublicationLock(path string) (*PublicationLock, error) {
 	if path == "" {
 		return nil, fmt.Errorf("publication lock path is empty")
 	}
@@ -43,21 +43,21 @@ func AcquirePublicationLock(path string) (*CampaignLock, error) {
 	if !locked {
 		return nil, ErrPublicationLock
 	}
-	return &CampaignLock{file: file, path: path}, nil
+	return &PublicationLock{file: file, path: path}, nil
 }
 
-func (l *CampaignLock) Path() string {
+func (l *PublicationLock) Path() string {
 	if l == nil {
 		return ""
 	}
 	return l.path
 }
 
-func (l *CampaignLock) Held() bool {
+func (l *PublicationLock) Held() bool {
 	return l != nil && l.file != nil
 }
 
-func (l *CampaignLock) Close() error {
+func (l *PublicationLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil
 	}

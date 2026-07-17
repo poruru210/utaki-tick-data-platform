@@ -21,8 +21,8 @@ type replaySnapshotRecord struct {
 }
 
 func (r *archiveReaderV1) ListReplaySnapshots(ctx context.Context, scope ReplayDayScope) ([]ReplaySnapshotDescriptor, error) {
-	if scope.DatasetID == "" || scope.CampaignID == "" || scope.Date == "" || scope.ReplayContractID == "" || scope.ConversionID == "" {
-		return nil, fmt.Errorf("%w: dataset, campaign, date, stream, and conversion are required", ErrSelectorInvalid)
+	if scope.DatasetID == "" || scope.ProviderID == "" || scope.ExactSourceSymbol == "" || scope.Date == "" || scope.ReplayContractID == "" || scope.ConversionID == "" {
+		return nil, fmt.Errorf("%w: dataset, provider, exact source symbol, date, stream, and conversion are required", ErrSelectorInvalid)
 	}
 	records, err := r.loadReplaySnapshotRecords(ctx, scope)
 	if err != nil {
@@ -39,7 +39,7 @@ func (r *archiveReaderV1) ListReplaySnapshots(ctx context.Context, scope ReplayD
 }
 
 func (r *archiveReaderV1) ResolveReplaySnapshot(ctx context.Context, selector ReplaySnapshotSelector) (ResolvedReplaySnapshot, error) {
-	if selector.Manifest == "" && selector.Revision == nil && (selector.DatasetID == "" || selector.CampaignID == "" || selector.Date == "" || selector.ReplayContractID == "" || selector.ConversionID == "") {
+	if selector.Manifest == "" && selector.Revision == nil && (selector.DatasetID == "" || selector.ProviderID == "" || selector.ExactSourceSymbol == "" || selector.Date == "" || selector.ReplayContractID == "" || selector.ConversionID == "") {
 		return ResolvedReplaySnapshot{}, fmt.Errorf("%w: replay scope or immutable manifest selector is required", ErrSelectorInvalid)
 	}
 	if selector.Revision != nil && (*selector.Revision == 0 || selector.Manifest != "") {
@@ -70,7 +70,7 @@ func (r *archiveReaderV1) ResolveReplaySnapshot(ctx context.Context, selector Re
 		}
 	}
 	if len(matched) == 0 {
-		return ResolvedReplaySnapshot{}, fmt.Errorf("%w: replay selector did not match", archive.ErrIntegrity)
+		return ResolvedReplaySnapshot{}, fmt.Errorf("%w: replay selector did not match", ErrSelectorNotFound)
 	}
 	if len(matched) != 1 && (selector.Manifest != "" || selector.Revision != nil) {
 		return ResolvedReplaySnapshot{}, fmt.Errorf("%w: replay selector is ambiguous", archive.ErrIntegrity)
@@ -96,11 +96,12 @@ func (r *archiveReaderV1) loadReplaySnapshotRecords(ctx context.Context, filter 
 	seenKeys := make(map[string]struct{})
 	for _, discovered := range scopes {
 		if filter.DatasetID != "" && discovered.Scope.DatasetID != filter.DatasetID ||
-			filter.CampaignID != "" && discovered.Scope.CampaignID != filter.CampaignID ||
+			filter.ProviderID != "" && discovered.Scope.ProviderID != filter.ProviderID ||
+			filter.ExactSourceSymbol != "" && discovered.Scope.ExactSourceSymbol != filter.ExactSourceSymbol ||
 			filter.DayDefinitionID != "" && discovered.Scope.DayDefinitionID != filter.DayDefinitionID {
 			continue
 		}
-		layout, err := r2.NewLayout(r.config.ImmutableRoot, "", discovered.Scope)
+		layout, err := r2.NewLayout(r.config.ImmutableRoot, discovered.Scope)
 		if err != nil {
 			return nil, fmt.Errorf("%w: replay scope layout is invalid", archive.ErrIntegrity)
 		}
@@ -108,7 +109,7 @@ func (r *archiveReaderV1) loadReplaySnapshotRecords(ctx context.Context, filter 
 		if err != nil {
 			return nil, err
 		}
-		objects, err := r.backend.List(ctx, prefix+"/")
+		objects, err := r.backend.ListLimited(ctx, prefix+"/", r.config.MaxRemoteObjects)
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +145,7 @@ func (r *archiveReaderV1) loadReplaySnapshotRecords(ctx context.Context, filter 
 			if err != nil || wantKey != object.Key {
 				return nil, fmt.Errorf("%w: replay manifest full key is invalid", archive.ErrIntegrity)
 			}
-			if manifest.DatasetID != discovered.Scope.DatasetID || manifest.CampaignID != discovered.Scope.CampaignID || manifest.DayDefinitionID != discovered.Scope.DayDefinitionID {
+			if manifest.DatasetID != discovered.Scope.DatasetID || manifest.DayDefinitionID != discovered.Scope.DayDefinitionID {
 				return nil, fmt.Errorf("%w: replay manifest scope differs from descriptor", archive.ErrIntegrity)
 			}
 			if filter.Date != "" && manifest.Date != filter.Date || filter.ReplayContractID != "" && manifest.ReplayContractID != filter.ReplayContractID || filter.ConversionID != "" && manifest.ConversionID != filter.ConversionID {
@@ -154,7 +155,7 @@ func (r *archiveReaderV1) loadReplaySnapshotRecords(ctx context.Context, filter 
 				return nil, err
 			}
 			manifest.ManifestSHA256 = digest
-			descriptor := replaySnapshotDescriptor(manifest, object.Key)
+			descriptor := replaySnapshotDescriptor(discovered.Scope, manifest, object.Key)
 			records = append(records, replaySnapshotRecord{descriptor: descriptor, scope: discovered.Scope, manifest: manifest, body: append([]byte(nil), body...)})
 		}
 	}
@@ -195,7 +196,7 @@ func (r *archiveReaderV1) verifyReplayRawBinding(ctx context.Context, layout r2.
 		return err
 	}
 	raw, err := archive.VerifyRawDayManifest(body)
-	if err != nil || raw.ManifestSHA256 != manifest.RawDayManifestSHA256 || raw.DatasetID != manifest.DatasetID || raw.CampaignID != manifest.CampaignID || raw.DayDefinitionID != manifest.DayDefinitionID || raw.Date != manifest.Date {
+	if err != nil || raw.ManifestSHA256 != manifest.RawDayManifestSHA256 || raw.DatasetID != manifest.DatasetID || raw.DayDefinitionID != manifest.DayDefinitionID || raw.Date != manifest.Date {
 		return fmt.Errorf("%w: replay raw binding mismatch", archive.ErrIntegrity)
 	}
 	wantKey, err := layout.ManifestKey(raw)
@@ -218,15 +219,16 @@ func requireSingleReplayIdentity(records []replaySnapshotRecord) error {
 	return nil
 }
 
-func replaySnapshotDescriptor(manifest protocol.ReplayDayManifest, key string) ReplaySnapshotDescriptor {
+func replaySnapshotDescriptor(scope archive.ScopeConfig, manifest protocol.ReplayDayManifest, key string) ReplaySnapshotDescriptor {
 	var predecessor *[32]byte
 	if manifest.PreviousManifestSHA256 != nil {
 		value := *manifest.PreviousManifestSHA256
 		predecessor = &value
 	}
 	return ReplaySnapshotDescriptor{
-		DatasetID: manifest.DatasetID, CampaignID: manifest.CampaignID, DayDefinitionID: manifest.DayDefinitionID,
-		Date: manifest.Date, ReplayContractID: manifest.ReplayContractID, ConversionID: manifest.ConversionID,
+		DatasetID: manifest.DatasetID, ProviderID: scope.ProviderID, ExactSourceSymbol: scope.ExactSourceSymbol,
+		DayDefinitionID: manifest.DayDefinitionID,
+		Date:            manifest.Date, ReplayContractID: manifest.ReplayContractID, ConversionID: manifest.ConversionID,
 		Revision: manifest.Revision, ManifestKey: key, ManifestSHA256: manifest.ManifestSHA256,
 		PreviousManifestSHA256: predecessor, RawDayManifestKey: manifest.RawDayManifestKey, RawDayManifestSHA256: manifest.RawDayManifestSHA256,
 		PartSetRoot: manifest.PartSetRoot, CanonicalStreamRowChainRoot: manifest.CanonicalStreamRowChainRoot, PartCount: uint64(len(manifest.PartManifestKeys)),

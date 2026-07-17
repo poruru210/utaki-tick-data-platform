@@ -3,9 +3,11 @@ package r2
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"tick-data-platform/internal/archive"
 )
@@ -20,10 +22,10 @@ type PublicationInput struct {
 
 type Publisher struct {
 	layout   Layout
-	backend  ObjectBackend
-	rclone   *RcloneRunner
+	backend  WriteBackend
 	journal  *PublicationJournal
 	lockPath string
+	clock    func() time.Time
 	hooks    publicationHooks
 }
 
@@ -31,9 +33,14 @@ type publicationHooks struct {
 	afterStage func(string) error
 }
 
-func NewPublisher(layout Layout, backend ObjectBackend, rclone *RcloneRunner, journal *PublicationJournal, lockPath string) (*Publisher, error) {
-	if backend == nil || rclone == nil || journal == nil {
+// NewPublisher constructs the publisher with an explicit clock.
+// Production code supplies time.Now; tests supply a deterministic clock.
+func NewPublisher(layout Layout, backend WriteBackend, journal *PublicationJournal, lockPath string, clock func() time.Time) (*Publisher, error) {
+	if backend == nil || journal == nil {
 		return nil, fmt.Errorf("publisher dependencies are incomplete")
+	}
+	if clock == nil {
+		return nil, fmt.Errorf("publisher clock is required")
 	}
 	if lockPath == "" {
 		var err error
@@ -42,7 +49,7 @@ func NewPublisher(layout Layout, backend ObjectBackend, rclone *RcloneRunner, jo
 			return nil, err
 		}
 	}
-	return &Publisher{layout: layout, backend: backend, rclone: rclone, journal: journal, lockPath: lockPath}, nil
+	return &Publisher{layout: layout, backend: backend, journal: journal, lockPath: lockPath, clock: clock}, nil
 }
 
 func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (VerificationReceipt, error) {
@@ -60,13 +67,16 @@ func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (Verifi
 	if err != nil {
 		return VerificationReceipt{}, err
 	}
+	if err := p.recordSealedLocalObjects(intent); err != nil {
+		return VerificationReceipt{}, err
+	}
 
 	claimBytes, err := intent.Claim.CanonicalJSON()
 	if err != nil {
 		return VerificationReceipt{}, err
 	}
 	if err := p.putPublisherClaim(ctx, intent.ClaimKey, claimBytes); err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("put publisher claim: %w", err)
 	}
 	if err := p.advanceStage(intent.ManifestKey, StageClaimed); err != nil {
 		return VerificationReceipt{}, err
@@ -75,62 +85,60 @@ func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (Verifi
 	if err := archive.VerifyRawDaySnapshot(intent.Manifest, objectPathMap(intent.Objects), intent.Scope); err != nil {
 		return VerificationReceipt{}, err
 	}
-	if err := p.copyPathWithResume(ctx, intent.ScopeDescriptorPath, intent.ScopeDescriptorRcloneKey); err != nil {
-		return VerificationReceipt{}, err
+	if err := p.copyPathWithResume(ctx, intent.ScopeDescriptorPath, intent.ScopeDescriptorKey, intent.ScopeDescriptorSHA256, intent.ScopeDescriptorBytes); err != nil {
+		return VerificationReceipt{}, fmt.Errorf("publish scope descriptor: %w", err)
 	}
 
 	stage := record.Stage
 	if publicationStageRank(stage) < publicationStageRank(StageObjectsCopied) {
 		for _, object := range intent.Objects {
-			if err := p.copyWithResume(ctx, object); err != nil {
-				return VerificationReceipt{}, err
+			if err := p.copyWithResume(ctx, intent.ManifestKey, object); err != nil {
+				return VerificationReceipt{}, fmt.Errorf("publish raw object %q: %w", object.Key, err)
 			}
 		}
 		if err := p.advanceStage(intent.ManifestKey, StageObjectsCopied); err != nil {
 			return VerificationReceipt{}, err
 		}
-	} else if err := p.recheckOrRepairObjects(ctx, intent.Objects); err != nil {
-		return VerificationReceipt{}, err
+	} else if err := p.recheckOrRepairObjects(ctx, intent.ManifestKey, intent.Objects); err != nil {
+		return VerificationReceipt{}, fmt.Errorf("recheck or repair raw objects: %w", err)
 	}
-	if err := p.checkObjects(ctx, intent.Objects); err != nil {
-		return VerificationReceipt{}, err
+	if err := p.checkObjects(ctx, intent.ManifestKey, intent.Objects); err != nil {
+		return VerificationReceipt{}, fmt.Errorf("verify raw objects: %w", err)
 	}
 	if err := p.advanceStage(intent.ManifestKey, StageObjectsVerified); err != nil {
 		return VerificationReceipt{}, err
 	}
 
-	if err := p.checkObjects(ctx, intent.Objects); err != nil {
-		return VerificationReceipt{}, err
+	if err := p.checkObjects(ctx, intent.ManifestKey, intent.Objects); err != nil {
+		return VerificationReceipt{}, fmt.Errorf("verify raw objects before manifest: %w", err)
 	}
-	if err := p.rclone.CheckDownload(ctx, intent.ScopeDescriptorPath, intent.ScopeDescriptorRcloneKey); err != nil {
-		return VerificationReceipt{}, err
+	if _, err := p.backend.VerifyFile(ctx, intent.ScopeDescriptorKey, intent.ScopeDescriptorPath, intent.ScopeDescriptorSHA256, intent.ScopeDescriptorBytes); err != nil {
+		return VerificationReceipt{}, fmt.Errorf("verify scope descriptor: %w", err)
 	}
 	existing, err := LoadManifestRecords(ctx, p.backend, p.layout, intent.Manifest.Date)
 	if err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("load existing manifest records: %w", err)
 	}
 	same, err := ValidateRevisionGraph(intent.Manifest, intent.ManifestBytes, existing)
 	if err != nil {
 		return VerificationReceipt{}, err
 	}
-	manifestRcloneKey, err := p.layout.RcloneManifestKey(intent.Manifest)
-	if err != nil {
-		return VerificationReceipt{}, err
-	}
+	manifestContentSHA256 := sha256.Sum256(intent.ManifestBytes)
+	manifestBytes := uint64(len(intent.ManifestBytes))
 	if same {
-		if err := p.rclone.CheckDownload(ctx, intent.ManifestPath, manifestRcloneKey); err != nil {
-			return VerificationReceipt{}, err
+		if _, err := p.backend.VerifyFile(ctx, intent.ManifestKey, intent.ManifestPath, manifestContentSHA256, manifestBytes); err != nil {
+			return VerificationReceipt{}, fmt.Errorf("verify existing manifest: %w", err)
 		}
 	} else {
-		if err := p.copyManifestWithResume(ctx, intent.ManifestPath, manifestRcloneKey, intent.ManifestKey, intent.ManifestBytes); err != nil {
-			return VerificationReceipt{}, err
+		if err := p.copyManifestWithResume(ctx, intent.ManifestPath, intent.ManifestKey, manifestContentSHA256, manifestBytes, intent.ManifestBytes); err != nil {
+			return VerificationReceipt{}, fmt.Errorf("publish manifest: %w", err)
 		}
 	}
 	if err := p.advanceStage(intent.ManifestKey, StageManifestCopied); err != nil {
 		return VerificationReceipt{}, err
 	}
-	if err := p.rclone.CheckDownload(ctx, intent.ManifestPath, manifestRcloneKey); err != nil {
-		return VerificationReceipt{}, err
+	if _, err := p.backend.VerifyFile(ctx, intent.ManifestKey, intent.ManifestPath, manifestContentSHA256, manifestBytes); err != nil {
+		return VerificationReceipt{}, fmt.Errorf("verify manifest: %w", err)
 	}
 	if err := p.advanceStage(intent.ManifestKey, StageManifestVerified); err != nil {
 		return VerificationReceipt{}, err
@@ -143,10 +151,6 @@ func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (Verifi
 		ManifestKey:          intent.ManifestKey,
 		ManifestSHA256:       intent.Manifest.ManifestSHA256,
 		RawObjects:           intent.Objects,
-		RcloneVersion:        RcloneVersion,
-		RcloneGOOS:           p.rclone.Tool().GOOS,
-		RcloneGOARCH:         p.rclone.Tool().GOARCH,
-		RcloneBinarySHA256:   p.rclone.Tool().BinarySHA256,
 		VerificationComplete: true,
 	}
 	if err := SaveVerificationReceipt(intent.ReceiptPath, receipt); err != nil {
@@ -231,10 +235,7 @@ func (p *Publisher) prepareIntent(input PublicationInput) (PublicationIntent, er
 	if err != nil {
 		return PublicationIntent{}, err
 	}
-	descriptorRcloneKey, err := p.layout.RcloneKey("scope-descriptor-v1.json")
-	if err != nil {
-		return PublicationIntent{}, err
-	}
+	descriptorHash := sha256.Sum256(configBytes)
 	descriptorPath := filepath.Join(filepath.Dir(p.journal.Path()), ".scope-descriptor-"+archive.IdentityPathKey(string(configBytes))+".json")
 	if err := saveNoClobberBytes(descriptorPath, configBytes, ".scope-descriptor-*.tmp"); err != nil {
 		return PublicationIntent{}, err
@@ -242,37 +243,41 @@ func (p *Publisher) prepareIntent(input PublicationInput) (PublicationIntent, er
 	objects := make([]PublicationObject, len(decoded.ChainObjects))
 	for i, object := range decoded.ChainObjects {
 		localPath := input.ObjectPaths[object.Key]
-		rcloneKey, err := p.layout.RcloneRawObjectKey(object)
-		if err != nil {
-			return PublicationIntent{}, err
-		}
 		remoteKey, err := p.layout.RemoteKey(object.Key)
 		if err != nil {
 			return PublicationIntent{}, err
+		}
+		localFile, md5Digest, err := openVerifiedLocalFile(localPath, object.SHA256, object.Bytes)
+		if err != nil {
+			return PublicationIntent{}, err
+		}
+		if err := localFile.Close(); err != nil {
+			return PublicationIntent{}, fmt.Errorf("%w: close local object: %v", ErrLocalObjectChanged, err)
 		}
 		objects[i] = PublicationObject{
 			Key:       object.Key,
 			LocalPath: localPath,
 			SHA256:    object.SHA256,
+			MD5:       md5Digest,
 			Bytes:     object.Bytes,
 			RemoteKey: remoteKey,
-			RcloneKey: rcloneKey,
 		}
 	}
 	return PublicationIntent{
-		Scope:                    p.layout.Scope,
-		Claim:                    claim,
-		ClaimKey:                 claimKey,
-		ClaimHash:                claimHash,
-		ScopeDescriptorKey:       descriptorKey,
-		ScopeDescriptorRcloneKey: descriptorRcloneKey,
-		ScopeDescriptorPath:      descriptorPath,
-		ManifestKey:              manifestKey,
-		Manifest:                 decoded,
-		ManifestBytes:            append([]byte(nil), input.ManifestBytes...),
-		ManifestPath:             manifestPath,
-		Objects:                  objects,
-		ReceiptPath:              receiptPath,
+		Scope:                 p.layout.Scope,
+		Claim:                 claim,
+		ClaimKey:              claimKey,
+		ClaimHash:             claimHash,
+		ScopeDescriptorKey:    descriptorKey,
+		ScopeDescriptorPath:   descriptorPath,
+		ScopeDescriptorSHA256: descriptorHash,
+		ScopeDescriptorBytes:  uint64(len(configBytes)),
+		ManifestKey:           manifestKey,
+		Manifest:              decoded,
+		ManifestBytes:         append([]byte(nil), input.ManifestBytes...),
+		ManifestPath:          manifestPath,
+		Objects:               objects,
+		ReceiptPath:           receiptPath,
 	}, nil
 }
 
@@ -305,47 +310,72 @@ func (p *Publisher) verifyBackendBytes(ctx context.Context, key string, want []b
 	return nil
 }
 
-func (p *Publisher) copyWithResume(ctx context.Context, object PublicationObject) error {
-	return p.copyPathWithResume(ctx, object.LocalPath, object.RcloneKey)
-}
-
-func (p *Publisher) copyPathWithResume(ctx context.Context, localPath, rcloneKey string) error {
-	if err := p.rclone.CopyToImmutable(ctx, localPath, rcloneKey); err != nil {
-		if checkErr := p.rclone.CheckDownload(ctx, localPath, rcloneKey); checkErr != nil {
-			return err
-		}
-	}
-	return p.rclone.CheckDownload(ctx, localPath, rcloneKey)
-}
-
-func (p *Publisher) recheckOrRepairObjects(ctx context.Context, objects []PublicationObject) error {
-	for _, object := range objects {
-		if err := p.rclone.CheckDownload(ctx, object.LocalPath, object.RcloneKey); err != nil {
-			if copyErr := p.rclone.CopyToImmutable(ctx, object.LocalPath, object.RcloneKey); copyErr != nil {
-				return copyErr
-			}
-			if checkErr := p.rclone.CheckDownload(ctx, object.LocalPath, object.RcloneKey); checkErr != nil {
-				return checkErr
-			}
-		}
-	}
-	return nil
-}
-
-func (p *Publisher) checkObjects(ctx context.Context, objects []PublicationObject) error {
-	for _, object := range objects {
-		if err := p.rclone.CheckDownload(ctx, object.LocalPath, object.RcloneKey); err != nil {
+func (p *Publisher) recordSealedLocalObjects(intent PublicationIntent) error {
+	for _, object := range intent.Objects {
+		if err := p.journal.RecordObjectState(intent.ManifestKey, object, ObjectStateSealedLocal, "", time.Time{}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p *Publisher) copyManifestWithResume(ctx context.Context, localPath, rcloneKey, remoteKey string, body []byte) error {
-	if err := p.rclone.CopyToImmutable(ctx, localPath, rcloneKey); err != nil {
-		if checkErr := p.rclone.CheckDownload(ctx, localPath, rcloneKey); checkErr == nil {
-			return p.verifyBackendBytes(ctx, remoteKey, body)
+func (p *Publisher) copyWithResume(ctx context.Context, identity string, object PublicationObject) error {
+	if err := p.journal.RecordObjectState(identity, object, ObjectStateUploading, "", time.Time{}); err != nil {
+		return err
+	}
+	commit, err := p.backend.PutFileIfAbsent(ctx, object.RemoteKey, object.LocalPath, object.SHA256, object.Bytes)
+	if err != nil {
+		return err
+	}
+	if err := p.journal.RecordObjectState(identity, object, ObjectStateRemoteCommitted, commit.ETag, time.Time{}); err != nil {
+		return err
+	}
+	verification, err := p.backend.VerifyFile(ctx, object.RemoteKey, object.LocalPath, object.SHA256, object.Bytes)
+	if err != nil {
+		return err
+	}
+	return p.journal.RecordObjectState(identity, object, ObjectStateRemoteVerified, verification.ETag, p.clock().UTC())
+}
+
+func (p *Publisher) copyPathWithResume(ctx context.Context, localPath, remoteKey string, digest [32]byte, bytes uint64) error {
+	if _, err := p.backend.PutFileIfAbsent(ctx, remoteKey, localPath, digest, bytes); err != nil {
+		return err
+	}
+	_, err := p.backend.VerifyFile(ctx, remoteKey, localPath, digest, bytes)
+	return err
+}
+
+func (p *Publisher) recheckOrRepairObjects(ctx context.Context, identity string, objects []PublicationObject) error {
+	for _, object := range objects {
+		verification, err := p.backend.VerifyFile(ctx, object.RemoteKey, object.LocalPath, object.SHA256, object.Bytes)
+		if err == nil {
+			if err := p.journal.RecordObjectState(identity, object, ObjectStateRemoteVerified, verification.ETag, p.clock().UTC()); err != nil {
+				return err
+			}
+			continue
 		}
+		if err := p.copyWithResume(ctx, identity, object); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Publisher) checkObjects(ctx context.Context, identity string, objects []PublicationObject) error {
+	for _, object := range objects {
+		verification, err := p.backend.VerifyFile(ctx, object.RemoteKey, object.LocalPath, object.SHA256, object.Bytes)
+		if err != nil {
+			return err
+		}
+		if err := p.journal.RecordObjectState(identity, object, ObjectStateRemoteVerified, verification.ETag, p.clock().UTC()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Publisher) copyManifestWithResume(ctx context.Context, localPath, remoteKey string, digest [32]byte, bytes uint64, body []byte) error {
+	if _, err := p.backend.PutFileIfAbsent(ctx, remoteKey, localPath, digest, bytes); err != nil {
 		return err
 	}
 	return p.verifyBackendBytes(ctx, remoteKey, body)
@@ -364,7 +394,7 @@ func manifestMatchesScope(manifest archive.RawDayManifest, scope archive.ScopeCo
 	if err != nil {
 		return err
 	}
-	if manifest.DatasetID != scope.DatasetID || manifest.CampaignID != scope.CampaignID ||
+	if manifest.DatasetID != scope.DatasetID ||
 		manifest.DayDefinitionID != scope.DayDefinitionID || manifest.PublisherID != scope.PublisherID ||
 		manifest.PublisherEpoch != scope.PublisherEpoch || manifest.SettlePolicy != scope.SettlePolicy ||
 		manifest.ConfigHash != configHash {

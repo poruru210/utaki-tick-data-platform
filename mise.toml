@@ -17,6 +17,10 @@ run = "uv sync --dev"
 description = "Run the Go package tests"
 run = "go test ./..."
 
+[tasks.test-r2-smoke-compile]
+description = "Compile the real R2 smoke test build tag without running it"
+run = "go test -tags r2_smoke ./internal/delivery -run TestDoesNotExist"
+
 [tasks.test-python]
 description = "Run the independent Python contract and invariant tests"
 run = "uv run pytest tests/unit tests/stateful"
@@ -43,4 +47,4 @@ run = [
 
 [tasks.check]
 description = "Run the local repository checks through mise-managed tools"
-depends = ["test-go", "test-python", "fixture", "format-check"]
+depends = ["test-go", "test-r2-smoke-compile", "test-python", "fixture", "format-check"]

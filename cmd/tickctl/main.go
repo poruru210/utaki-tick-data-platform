@@ -53,8 +53,8 @@ func runWithReader(args []string, reader delivery.ArchiveReaderV1, output, error
 	switch args[0] {
 	case "datasets":
 		return runDatasets(args[1:], reader, output, errorsOut)
-	case "campaigns":
-		return runCampaigns(args[1:], reader, output, errorsOut)
+	case "scopes":
+		return runScopes(args[1:], reader, output, errorsOut)
 	case "snapshots":
 		if len(args) < 2 {
 			fmt.Fprintln(errorsOut, "snapshots requires raw or replay")
@@ -82,18 +82,19 @@ func runSnapshotsReplay(args []string, reader delivery.ArchiveReaderV1, output, 
 	flags.SetOutput(io.Discard)
 	flags.String("config", "", "reader configuration")
 	dataset := flags.String("dataset", "", "dataset identity")
-	campaign := flags.String("campaign", "", "campaign identity")
+	source := flags.String("source", "", "source identity")
+	symbol := flags.String("symbol", "", "exact source symbol")
 	date := flags.String("date", "", "UTC date")
 	stream := flags.String("stream", "", "replay contract identity")
 	conversion := flags.String("conversion", "", "conversion identity")
 	dayDefinition := flags.String("day-definition", "", "day definition identity")
 	revision := flags.Uint64("revision", 0, "exact replay revision")
 	manifest := flags.String("manifest", "", "immutable replay manifest key or digest")
-	if err := flags.Parse(args); err != nil || *dataset == "" || *campaign == "" || *date == "" || *stream == "" || *conversion == "" || *revision != 0 && *manifest != "" {
-		fmt.Fprintln(errorsOut, "--dataset, --campaign, --date, --stream, and --conversion are required; --revision and --manifest are mutually exclusive")
+	if err := flags.Parse(args); err != nil || *dataset == "" || *source == "" || *symbol == "" || *date == "" || *stream == "" || *conversion == "" || *revision != 0 && *manifest != "" {
+		fmt.Fprintln(errorsOut, "--dataset, --source, --symbol, --date, --stream, and --conversion are required; --revision and --manifest are mutually exclusive")
 		return 2
 	}
-	scope := delivery.ReplayDayScope{DatasetID: *dataset, CampaignID: *campaign, DayDefinitionID: *dayDefinition, Date: *date, ReplayContractID: *stream, ConversionID: *conversion}
+	scope := delivery.ReplayDayScope{DatasetID: *dataset, ProviderID: *source, ExactSourceSymbol: *symbol, DayDefinitionID: *dayDefinition, Date: *date, ReplayContractID: *stream, ConversionID: *conversion}
 	var items []delivery.ReplaySnapshotDescriptor
 	if *revision != 0 || *manifest != "" {
 		selector := delivery.ReplaySnapshotSelector{ReplayDayScope: scope, Manifest: *manifest}
@@ -118,7 +119,7 @@ func runSnapshotsReplay(args []string, reader delivery.ArchiveReaderV1, output, 
 		if item.PreviousManifestSHA256 != nil {
 			previous = hex.EncodeToString(item.PreviousManifestSHA256[:])
 		}
-		result[index] = replaySnapshotOutput{DatasetID: item.DatasetID, CampaignID: item.CampaignID, DayDefinitionID: item.DayDefinitionID, Date: item.Date, ReplayContractID: item.ReplayContractID, ConversionID: item.ConversionID, Revision: item.Revision, ManifestKey: item.ManifestKey, ManifestSHA256: hex.EncodeToString(item.ManifestSHA256[:]), PreviousManifestSHA256: previous, RawDayManifestKey: item.RawDayManifestKey, RawDayManifestSHA256: hex.EncodeToString(item.RawDayManifestSHA256[:]), PartSetRoot: hex.EncodeToString(item.PartSetRoot[:]), CanonicalStreamRowChainRoot: hex.EncodeToString(item.CanonicalStreamRowChainRoot[:]), PartCount: item.PartCount}
+		result[index] = replaySnapshotOutput{DatasetID: item.DatasetID, Source: item.ProviderID, Symbol: item.ExactSourceSymbol, DayDefinitionID: item.DayDefinitionID, Date: item.Date, ReplayContractID: item.ReplayContractID, ConversionID: item.ConversionID, Revision: item.Revision, ManifestKey: item.ManifestKey, ManifestSHA256: hex.EncodeToString(item.ManifestSHA256[:]), PreviousManifestSHA256: previous, RawDayManifestKey: item.RawDayManifestKey, RawDayManifestSHA256: hex.EncodeToString(item.RawDayManifestSHA256[:]), PartSetRoot: hex.EncodeToString(item.PartSetRoot[:]), CanonicalStreamRowChainRoot: hex.EncodeToString(item.CanonicalStreamRowChainRoot[:]), PartCount: item.PartCount}
 	}
 	return writeJSON(result, output, errorsOut)
 }
@@ -142,8 +143,8 @@ func runDatasets(args []string, reader delivery.ArchiveReaderV1, output, errorsO
 	return writeJSON(result, output, errorsOut)
 }
 
-func runCampaigns(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
-	flags := flag.NewFlagSet("campaigns", flag.ContinueOnError)
+func runScopes(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
+	flags := flag.NewFlagSet("scopes", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.String("config", "", "reader configuration")
 	dataset := flags.String("dataset", "", "dataset identity")
@@ -151,16 +152,16 @@ func runCampaigns(args []string, reader delivery.ArchiveReaderV1, output, errors
 		fmt.Fprintln(errorsOut, "--dataset is required")
 		return 2
 	}
-	items, err := reader.ListCampaigns(context.Background(), *dataset)
+	items, err := reader.ListScopes(context.Background(), *dataset)
 	if err != nil {
 		return reportError(err, errorsOut)
 	}
-	result := make([]campaignOutput, 0, len(items))
+	result := make([]scopeOutput, 0, len(items))
 	for _, item := range items {
-		result = append(result, campaignOutput{
-			DatasetID: item.DatasetID, CampaignID: item.CampaignID,
-			ProviderID: item.ProviderID, StableFeedID: item.StableFeedID,
-			ExactSourceSymbol: item.ExactSourceSymbol, BrokerServerFingerprint: item.BrokerServerFingerprint,
+		result = append(result, scopeOutput{
+			DatasetID: item.DatasetID, Source: item.ProviderID,
+			StableFeedID: item.StableFeedID,
+			Symbol:       item.ExactSourceSymbol, BrokerServerFingerprint: item.BrokerServerFingerprint,
 			DayDefinitionID: item.DayDefinitionID, PublisherID: item.PublisherID,
 			PublisherEpoch: item.PublisherEpoch, ConfigHash: hex.EncodeToString(item.ConfigHash[:]),
 		})
@@ -173,20 +174,21 @@ func runSnapshotsRaw(args []string, reader delivery.ArchiveReaderV1, output, err
 	flags.SetOutput(io.Discard)
 	flags.String("config", "", "reader configuration")
 	dataset := flags.String("dataset", "", "dataset identity")
-	campaign := flags.String("campaign", "", "campaign identity")
+	source := flags.String("source", "", "source identity")
+	symbol := flags.String("symbol", "", "exact source symbol")
 	date := flags.String("date", "", "UTC date")
-	if err := flags.Parse(args); err != nil || *dataset == "" || *campaign == "" || *date == "" {
-		fmt.Fprintln(errorsOut, "--dataset, --campaign, and --date are required")
+	if err := flags.Parse(args); err != nil || *dataset == "" || *source == "" || *symbol == "" || *date == "" {
+		fmt.Fprintln(errorsOut, "--dataset, --source, --symbol, and --date are required")
 		return 2
 	}
-	items, err := reader.ListRawSnapshots(context.Background(), delivery.RawDayScope{DatasetID: *dataset, CampaignID: *campaign, Date: *date})
+	items, err := reader.ListRawSnapshots(context.Background(), delivery.RawDayScope{DatasetID: *dataset, ProviderID: *source, ExactSourceSymbol: *symbol, Date: *date})
 	if err != nil {
 		return reportError(err, errorsOut)
 	}
 	result := make([]snapshotOutput, 0, len(items))
 	for _, item := range items {
 		result = append(result, snapshotOutput{
-			DatasetID: item.DatasetID, CampaignID: item.CampaignID, DayDefinitionID: item.DayDefinitionID,
+			DatasetID: item.DatasetID, Source: item.ProviderID, Symbol: item.ExactSourceSymbol, DayDefinitionID: item.DayDefinitionID,
 			Date: item.Date, Revision: item.Revision, PublisherID: item.PublisherID,
 			PublisherEpoch: item.PublisherEpoch, ManifestKey: item.ManifestKey,
 			ManifestSHA256:  hex.EncodeToString(item.ManifestSHA256[:]),
@@ -257,12 +259,11 @@ type datasetOutput struct {
 	DatasetID string `json:"dataset_id"`
 }
 
-type campaignOutput struct {
+type scopeOutput struct {
 	DatasetID               string `json:"dataset_id"`
-	CampaignID              string `json:"campaign_id"`
-	ProviderID              string `json:"provider_id"`
+	Source                  string `json:"source"`
 	StableFeedID            string `json:"stable_feed_id"`
-	ExactSourceSymbol       string `json:"exact_source_symbol"`
+	Symbol                  string `json:"symbol"`
 	BrokerServerFingerprint string `json:"broker_server_fingerprint"`
 	DayDefinitionID         string `json:"day_definition_id"`
 	PublisherID             string `json:"publisher_id"`
@@ -272,7 +273,8 @@ type campaignOutput struct {
 
 type snapshotOutput struct {
 	DatasetID           string `json:"dataset_id"`
-	CampaignID          string `json:"campaign_id"`
+	Source              string `json:"source"`
+	Symbol              string `json:"symbol"`
 	DayDefinitionID     string `json:"day_definition_id"`
 	Date                string `json:"date"`
 	Revision            uint64 `json:"revision"`
@@ -296,7 +298,8 @@ type fetchOutput struct {
 
 type replaySnapshotOutput struct {
 	DatasetID                   string `json:"dataset_id"`
-	CampaignID                  string `json:"campaign_id"`
+	Source                      string `json:"source"`
+	Symbol                      string `json:"symbol"`
 	DayDefinitionID             string `json:"day_definition_id"`
 	Date                        string `json:"date"`
 	ReplayContractID            string `json:"replay_contract_id"`

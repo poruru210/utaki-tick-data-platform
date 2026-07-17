@@ -1,3 +1,4 @@
+api_config_version = "tick-api-v1"
 listen_address = "127.0.0.1:17002"
 reader_config = "./local/tick-reader.toml"
 cache_control = "no-store"

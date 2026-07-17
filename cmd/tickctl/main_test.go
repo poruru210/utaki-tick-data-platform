@@ -15,11 +15,11 @@ type tickctlReaderStub struct{}
 func (tickctlReaderStub) ListDatasets(context.Context) ([]delivery.DatasetDescriptor, error) {
 	return []delivery.DatasetDescriptor{{DatasetID: "dataset-1"}}, nil
 }
-func (tickctlReaderStub) ListCampaigns(context.Context, string) ([]delivery.CampaignDescriptor, error) {
-	return []delivery.CampaignDescriptor{{DatasetID: "dataset-1", CampaignID: "campaign-1"}}, nil
+func (tickctlReaderStub) ListScopes(context.Context, string) ([]delivery.ScopeDescriptor, error) {
+	return []delivery.ScopeDescriptor{{DatasetID: "dataset-1", ProviderID: "source-1", ExactSourceSymbol: "EURUSD"}}, nil
 }
 func (tickctlReaderStub) ListRawSnapshots(context.Context, delivery.RawDayScope) ([]delivery.SnapshotDescriptor, error) {
-	return []delivery.SnapshotDescriptor{{DatasetID: "dataset-1", CampaignID: "campaign-1", Date: "2024-03-09", ManifestKey: "v1/manifest.json"}}, nil
+	return []delivery.SnapshotDescriptor{{DatasetID: "dataset-1", ProviderID: "source-1", ExactSourceSymbol: "EURUSD", Date: "2024-03-09", ManifestKey: "v1/manifest.json"}}, nil
 }
 func (tickctlReaderStub) ResolveSnapshot(context.Context, delivery.SnapshotSelector) (delivery.ResolvedSnapshot, error) {
 	return delivery.ResolvedSnapshot{}, nil
@@ -33,11 +33,11 @@ func (tickctlReaderStub) Fetch(context.Context, delivery.FetchPlan, string) (del
 func (tickctlReaderStub) VerifyDay(context.Context, delivery.SnapshotSelector) (delivery.DayVerificationReport, error) {
 	return delivery.DayVerificationReport{}, errors.New("unused")
 }
-func (tickctlReaderStub) VerifyCampaign(context.Context, string, string, string) (delivery.CampaignVerificationReport, error) {
-	return delivery.CampaignVerificationReport{}, errors.New("unused")
+func (tickctlReaderStub) VerifyScope(context.Context, delivery.RawScopeSelector, string) (delivery.ScopeVerificationReport, error) {
+	return delivery.ScopeVerificationReport{}, errors.New("unused")
 }
 func (tickctlReaderStub) ListReplaySnapshots(context.Context, delivery.ReplayDayScope) ([]delivery.ReplaySnapshotDescriptor, error) {
-	return []delivery.ReplaySnapshotDescriptor{{DatasetID: "dataset-1", CampaignID: "campaign-1", Date: "2024-03-09", ReplayContractID: "stream-1", ConversionID: "conversion-1", Revision: 1, ManifestKey: "v1/replay-day-1.json"}}, nil
+	return []delivery.ReplaySnapshotDescriptor{{DatasetID: "dataset-1", ProviderID: "source-1", ExactSourceSymbol: "EURUSD", Date: "2024-03-09", ReplayContractID: "stream-1", ConversionID: "conversion-1", Revision: 1, ManifestKey: "v1/replay-day-1.json"}}, nil
 }
 func (tickctlReaderStub) ResolveReplaySnapshot(context.Context, delivery.ReplaySnapshotSelector) (delivery.ResolvedReplaySnapshot, error) {
 	return delivery.ResolvedReplaySnapshot{Descriptor: delivery.ReplaySnapshotDescriptor{ManifestKey: "v1/replay-day-1.json"}}, nil
@@ -56,9 +56,9 @@ func TestTickctlCommandsEmitStableJSON(t *testing.T) {
 	reader := tickctlReaderStub{}
 	commands := [][]string{
 		{"datasets"},
-		{"campaigns", "--dataset", "dataset-1"},
-		{"snapshots", "raw", "--dataset", "dataset-1", "--campaign", "campaign-1", "--date", "2024-03-09"},
-		{"snapshots", "replay", "--dataset", "dataset-1", "--campaign", "campaign-1", "--date", "2024-03-09", "--stream", "stream-1", "--conversion", "conversion-1"},
+		{"scopes", "--dataset", "dataset-1"},
+		{"snapshots", "raw", "--dataset", "dataset-1", "--source", "source-1", "--symbol", "EURUSD", "--date", "2024-03-09"},
+		{"snapshots", "replay", "--dataset", "dataset-1", "--source", "source-1", "--symbol", "EURUSD", "--date", "2024-03-09", "--stream", "stream-1", "--conversion", "conversion-1"},
 	}
 	for _, command := range commands {
 		var output, errorsOut bytes.Buffer
@@ -74,7 +74,7 @@ func TestTickctlCommandsEmitStableJSON(t *testing.T) {
 func TestTickctlReplayFlagsAndFetchJSON(t *testing.T) {
 	reader := tickctlReaderStub{}
 	var output, errorsOut bytes.Buffer
-	if code := runWithReader([]string{"snapshots", "replay", "--dataset", "d", "--campaign", "c", "--date", "2024-03-09", "--stream", "s", "--conversion", "x", "--revision", "1", "--manifest", "m"}, reader, &output, &errorsOut); code != 2 || output.Len() != 0 {
+	if code := runWithReader([]string{"snapshots", "replay", "--dataset", "d", "--source", "s1", "--symbol", "EURUSD", "--date", "2024-03-09", "--stream", "s", "--conversion", "x", "--revision", "1", "--manifest", "m"}, reader, &output, &errorsOut); code != 2 || output.Len() != 0 {
 		t.Fatalf("invalid replay flags exit=%d output=%q errors=%q", code, output.String(), errorsOut.String())
 	}
 	output.Reset()

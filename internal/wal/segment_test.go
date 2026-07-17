@@ -2,6 +2,7 @@ package wal_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"tick-data-platform/internal/protocol"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/internal/wal"
 	"tick-data-platform/producers/fake"
 )
@@ -56,7 +58,7 @@ func TestWALSealsRotatesAndRecoversAcrossSegments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,15 +80,15 @@ func TestWALSealsRotatesAndRecoversAcrossSegments(t *testing.T) {
 	if second.Sequence != 2 || second.PreviousEntryHash != first.EntryHash {
 		t.Fatalf("second segment did not continue the chain: %+v", second)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
-	reopened, err := wal.Open(root, "gateway-test-01")
+	reopened, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.Stop(context.Background())
 	if reopened.Count() != 2 {
 		t.Fatalf("reopened WAL count = %d, want 2", reopened.Count())
 	}
@@ -106,7 +108,7 @@ func TestWALRecoversPartialTrailerAsActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +116,7 @@ func TestWALRecoversPartialTrailerAsActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := store.Path()
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.Stat(path)
@@ -133,11 +135,11 @@ func TestWALRecoversPartialTrailerAsActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := wal.Open(root, "gateway-test-01")
+	reopened, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.Stop(context.Background())
 	after, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +172,7 @@ func TestWALDoesNotTreatEntryPayloadMagicAsSealedTrailer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +180,7 @@ func TestWALDoesNotTreatEntryPayloadMagicAsSealedTrailer(t *testing.T) {
 		t.Fatal(err)
 	}
 	activePath := store.Path()
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	activeBytes, err := os.ReadFile(activePath)
@@ -189,11 +191,11 @@ func TestWALDoesNotTreatEntryPayloadMagicAsSealedTrailer(t *testing.T) {
 		t.Fatal("test frame does not place TWTR 96 bytes before active WAL end")
 	}
 
-	reopened, err := wal.Open(root, "gateway-test-01")
+	reopened, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatalf("valid active WAL was mistaken for a sealed segment: %v", err)
 	}
-	defer reopened.Close()
+	defer reopened.Stop(context.Background())
 	if reopened.Count() != 1 || len(reopened.SealedSegments()) != 0 {
 		t.Fatalf(
 			"valid active WAL recovery count=%d sealed=%d",
@@ -209,7 +211,7 @@ func TestWALCompletesRotationWhenSealedTrailerRemainsActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +222,7 @@ func TestWALCompletesRotationWhenSealedTrailerRemainsActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	activePath := filepath.Join(root, "active.wal")
@@ -231,11 +233,11 @@ func TestWALCompletesRotationWhenSealedTrailerRemainsActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := wal.Open(root, "gateway-test-01")
+	reopened, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.Stop(context.Background())
 	segments := reopened.SealedSegments()
 	if len(segments) != 1 || segments[0].ObjectSHA256 != sealed.ObjectSHA256 {
 		t.Fatalf("rotation recovery did not restore sealed inventory: %+v", segments)
@@ -258,7 +260,7 @@ func TestWALRecoversLinkCompletedBeforeActiveRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +271,7 @@ func TestWALRecoversLinkCompletedBeforeActiveRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	activePath := filepath.Join(root, "active.wal")
@@ -280,11 +282,11 @@ func TestWALRecoversLinkCompletedBeforeActiveRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := wal.Open(root, "gateway-test-01")
+	reopened, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.Stop(context.Background())
 	if reopened.Count() != 1 || len(reopened.SealedSegments()) != 1 {
 		t.Fatalf(
 			"duplicate-link recovery inventory count=%d sealed=%d",
@@ -307,7 +309,7 @@ func TestWALRecreatesIncompleteNextActiveHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +320,7 @@ func TestWALRecreatesIncompleteNextActiveHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	activePath := filepath.Join(root, "active.wal")
@@ -330,11 +332,11 @@ func TestWALRecreatesIncompleteNextActiveHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := wal.Open(root, "gateway-test-01")
+	reopened, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.Stop(context.Background())
 	next, err := reopened.Append(fixture.Frame, 1710000001, 43)
 	if err != nil {
 		t.Fatal(err)
@@ -346,17 +348,17 @@ func TestWALRecreatesIncompleteNextActiveHeader(t *testing.T) {
 
 func TestWALDoesNotRepairInvalidShortActiveHeader(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "active.wal"), []byte("BROKEN"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := wal.Open(root, "gateway-test-01"); err == nil || !errors.Is(err, wal.ErrIntegrity) {
+	if _, err := testsupport.NewStartedWAL(root, "gateway-test-01"); err == nil || !errors.Is(err, wal.ErrIntegrity) {
 		t.Fatalf("expected invalid short header integrity stop, got %v", err)
 	}
 }
@@ -367,7 +369,7 @@ func TestVerifySealedSegmentStopsOnTrailerMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +380,7 @@ func TestVerifySealedSegmentStopsOnTrailerMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.OpenFile(sealed.Path, os.O_RDWR, 0)
@@ -393,13 +395,17 @@ func TestVerifySealedSegmentStopsOnTrailerMutation(t *testing.T) {
 		_ = file.Close()
 		t.Fatal(err)
 	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := wal.VerifySealedSegment(sealed.Path); err == nil || !errors.Is(err, wal.ErrIntegrity) {
 		t.Fatalf("expected trailer integrity error, got %v", err)
 	}
-	if _, err := wal.Open(root, "gateway-test-01"); err == nil || !errors.Is(err, wal.ErrIntegrity) {
+	if _, err := testsupport.NewStartedWAL(root, "gateway-test-01"); err == nil || !errors.Is(err, wal.ErrIntegrity) {
 		t.Fatalf("expected startup integrity stop, got %v", err)
 	}
 }
@@ -410,16 +416,16 @@ func TestWALSealDoesNotOverwriteDifferentSegmentAtSameRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	if _, err := store.Append(fixture.Frame, 1710000000, 42); err != nil {
 		t.Fatal(err)
 	}
 
-	other, err := wal.Open(t.TempDir(), "gateway-test-01")
+	other, err := testsupport.NewStartedWAL(t.TempDir(), "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +436,7 @@ func TestWALSealDoesNotOverwriteDifferentSegmentAtSameRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := other.Close(); err != nil {
+	if err := other.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	differentBytes, err := os.ReadFile(otherSegment.Path)
@@ -459,11 +465,11 @@ func TestWALSealDoesNotOverwriteDifferentSegmentAtSameRange(t *testing.T) {
 }
 
 func TestWALDoesNotSealEmptyActiveSegment(t *testing.T) {
-	store, err := wal.Open(t.TempDir(), "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(t.TempDir(), "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	if _, err := store.Seal(); !errors.Is(err, wal.ErrEmptySegment) {
 		t.Fatalf("Seal error = %v, want ErrEmptySegment", err)
 	}

@@ -2,6 +2,7 @@
 package journal
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"math"
@@ -53,35 +54,64 @@ type Store struct {
 	gatewayID      string
 	initialFromMSC int64
 	initialCount   uint32
+	started        bool
 }
 
-func Open(path, gatewayID string, initialFromMSC int64, initialCount uint32) (*Store, error) {
+// NewStore validates the journal identity without opening files or SQLite.
+// Start performs recovery and durable initialization.
+func NewStore(path, gatewayID string, initialFromMSC int64, initialCount uint32) (*Store, error) {
 	if path == "" {
 		return nil, fmt.Errorf("journal path is empty")
 	}
-	if parent := filepath.Dir(path); parent != "." {
-		if err := os.MkdirAll(parent, 0o700); err != nil {
-			return nil, fmt.Errorf("create journal directory: %w", err)
-		}
-	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("open SQLite journal: %w", err)
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	store := &Store{
-		db:             db,
+	return &Store{
 		path:           path,
 		gatewayID:      gatewayID,
 		initialFromMSC: initialFromMSC,
 		initialCount:   initialCount,
+	}, nil
+}
+
+func (s *Store) Start(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	if err := store.initialize(); err != nil {
+	if s == nil {
+		return fmt.Errorf("journal store is nil")
+	}
+	if s.started || s.db != nil {
+		return fmt.Errorf("journal is already started")
+	}
+	if parent := filepath.Dir(s.path); parent != "." {
+		if err := os.MkdirAll(parent, 0o700); err != nil {
+			return fmt.Errorf("create journal directory: %w", err)
+		}
+	}
+	db, err := sql.Open("sqlite", s.path)
+	if err != nil {
+		return fmt.Errorf("open SQLite journal: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	s.db = db
+	if err := s.initialize(); err != nil {
 		_ = db.Close()
-		return nil, err
+		s.db = nil
+		return err
 	}
-	return store, nil
+	s.started = true
+	return nil
+}
+
+func (s *Store) Stop(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil || s.db == nil {
+		return nil
+	}
+	err := s.db.Close()
+	s.db = nil
+	return err
 }
 
 func (s *Store) Path() string { return s.path }
@@ -357,15 +387,6 @@ func (s *Store) Reset() error {
 		return fmt.Errorf("commit journal reset: %w", err)
 	}
 	return nil
-}
-
-func (s *Store) Close() error {
-	if s.db == nil {
-		return nil
-	}
-	err := s.db.Close()
-	s.db = nil
-	return err
 }
 
 func sqliteInt(value uint64) (int64, error) {

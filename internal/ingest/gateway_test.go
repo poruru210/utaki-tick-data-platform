@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"net"
@@ -12,8 +13,11 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"tick-data-platform/internal/app"
+	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/ingest"
 	"tick-data-platform/internal/protocol"
+	"tick-data-platform/internal/publication"
 	"tick-data-platform/producers/fake"
 )
 
@@ -55,6 +59,94 @@ func TestGatewayAcceptsDurableBatchAndIdempotentRetry(t *testing.T) {
 	if gateway.WAL().Count() != 1 {
 		t.Fatalf("conflict must not append WAL entry, got %d", gateway.WAL().Count())
 	}
+}
+
+func TestGatewayStopsNewACKWhenPublicationBacklogReachesLimit(t *testing.T) {
+	config := testConfig(t)
+	config.MaxPendingSegments = 1
+	config.MaxPendingBytes = 1
+	gateway, client, stop := startGateway(t, config)
+	defer stop()
+
+	gateway.SetPendingPublication(1, 1)
+	status, err := gateway.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ReadyForACK || status.BlockedReason != "publication_backlog_limit" {
+		t.Fatalf("gateway status under publication pressure = %+v", status)
+	}
+	ack, err := client.SendBatch(testBatch(1, 1000, 1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.Status != protocol.AckRetryableError || gateway.WAL().Count() != 0 {
+		t.Fatalf("new batch was accepted under backlog pressure: ack=%+v wal=%d", ack, gateway.WAL().Count())
+	}
+}
+
+func TestCatalogBacklogReachesGatewayThroughLocalPipeline(t *testing.T) {
+	config := testConfig(t)
+	config.MaxPendingSegments = 1
+	config.MaxPendingBytes = 1
+	gateway, client, stop := startGateway(t, config)
+	defer stop()
+
+	catalog, err := publication.NewCatalog(filepath.Join(filepath.Dir(config.WALRoot), "publication", "catalog.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Stop(context.Background())
+	manifestSHA := sha256.Sum256([]byte("pending-manifest"))
+	if err := catalog.UpsertManifest(context.Background(), publication.ManifestRecord{
+		Date: "2024-03-09", Revision: 1, Path: filepath.Join(filepath.Dir(config.WALRoot), "manifest.json"),
+		SHA256: manifestSHA, Bytes: 1, UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pipeline, err := publication.NewLocalPipeline(publication.LocalPipelineConfig{
+		WAL: gateway.WAL(), Catalog: catalog,
+		RawOutboxRoot: filepath.Join(filepath.Dir(config.WALRoot), "raw-outbox"),
+		ManifestRoot:  filepath.Join(filepath.Dir(config.WALRoot), "manifests"),
+		Scope: archive.ScopeConfig{
+			DatasetID: "dataset-test", ProviderID: "provider-test", StableFeedID: "feed-test",
+			ExactSourceSymbol: "EURUSD", BrokerServerFingerprint: "broker-test", GatewayBuildIdentity: "gateway-test",
+			ProducerBuildIdentity: "producer-test", DayDefinitionID: "utc-day-v1", SettlePolicy: "manual-v1",
+			PublisherID: "publisher-test", PublisherEpoch: 1,
+			ProtocolLimits: archive.ProtocolLimits{MaxFrameBytes: protocol.MaxFrameBytes, MaxRecords: protocol.MaxRecords},
+		},
+		SealMaxBytes: 1 << 30, SealInterval: time.Hour, ScanInterval: time.Hour, Clock: time.Now,
+		PendingSink: gatewayPendingSink{gateway: gateway},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, err := gateway.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ReadyForACK || status.BlockedReason != "publication_backlog_limit" {
+		t.Fatalf("Catalog backlog did not reach Gateway policy: %+v", status)
+	}
+	ack, err := client.SendBatch(testBatch(1, 1000, 1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.Status != protocol.AckRetryableError || gateway.WAL().Count() != 0 {
+		t.Fatalf("Gateway accepted batch despite Catalog backlog: ack=%+v wal=%d", ack, gateway.WAL().Count())
+	}
+}
+
+type gatewayPendingSink struct{ gateway *ingest.Gateway }
+
+func (s gatewayPendingSink) SetPendingPublication(segments, bytes uint64) {
+	s.gateway.SetPendingPublication(segments, bytes)
 }
 
 func TestGatewayRejectsExpiredConnectionAfterSessionReplacement(t *testing.T) {
@@ -256,22 +348,23 @@ func TestGatewayRetriesAfterWALSyncBeforeJournalCommit(t *testing.T) {
 	}
 }
 
-func TestGatewayCloseDoesNotStartHandlerAfterAcceptReturns(t *testing.T) {
+func TestGatewayStopDoesNotStartHandlerAfterAcceptReturns(t *testing.T) {
 	config := testConfig(t)
 	config.HeartbeatIdleTimeout = 5 * time.Second
-	gateway, err := ingest.Open(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtime := newStartedGatewayRuntime(t, config)
+	gateway := runtime.Gateway()
 	peer, rawConnection := net.Pipe()
 	connection := &trackingConn{Conn: rawConnection, closed: make(chan struct{})}
 	listener := &closeOnAcceptListener{
 		connection: connection,
 		closed:     make(chan struct{}),
 	}
+	accepted := make(chan struct{})
+	allowAcceptReturn := make(chan struct{})
 	closeErr := make(chan error, 1)
 	listener.onAccept = func() {
-		closeErr <- gateway.Close()
+		close(accepted)
+		<-allowAcceptReturn
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -279,6 +372,20 @@ func TestGatewayCloseDoesNotStartHandlerAfterAcceptReturns(t *testing.T) {
 	go func() { serveDone <- gateway.Serve(ctx, listener) }()
 	defer peer.Close()
 
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("listener did not call Accept callback")
+	}
+	go func() {
+		closeErr <- gateway.Stop(context.Background())
+	}()
+	select {
+	case <-listener.closed:
+	case <-time.After(time.Second):
+		t.Fatal("gateway Stop did not close listener")
+	}
+	close(allowAcceptReturn)
 	select {
 	case err := <-serveDone:
 		if err != nil {
@@ -288,6 +395,9 @@ func TestGatewayCloseDoesNotStartHandlerAfterAcceptReturns(t *testing.T) {
 		t.Fatal("gateway Serve did not stop")
 	}
 	if err := <-closeErr; err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -405,22 +515,20 @@ func TestGatewayDoesNotAppendPartialFrame(t *testing.T) {
 func testConfig(t *testing.T) ingest.Config {
 	root := t.TempDir()
 	return ingest.Config{
-		ListenAddress:           "127.0.0.1:0",
-		GatewayInstanceID:       "gateway-test-01",
-		WALRoot:                 filepath.Join(root, "wal"),
-		JournalPath:             filepath.Join(root, "journal", "gateway.sqlite"),
-		MaxFrameBytes:           protocol.MaxFrameBytes,
-		MaxRecords:              protocol.MaxRecords,
-		InitialFromMSC:          0,
-		InitialBatchCount:       2,
-		MaximumBatchCount:       4,
-		DenseBoundaryHardCap:    4,
-		SessionLeaseTimeout:     5 * time.Second,
-		HeartbeatIdleTimeout:    5 * time.Second,
-		ProducerInstanceID:      "fake-01",
-		ProducerBuildID:         "fake-test-v1",
-		CampaignID:              "campaign-test-01",
-		ProviderID:              "provider-test",
+		ListenAddress:        "127.0.0.1:0",
+		GatewayInstanceID:    "gateway-test-01",
+		WALRoot:              filepath.Join(root, "wal"),
+		JournalPath:          filepath.Join(root, "journal", "gateway.sqlite"),
+		MaxFrameBytes:        protocol.MaxFrameBytes,
+		MaxRecords:           protocol.MaxRecords,
+		InitialFromMSC:       0,
+		InitialBatchCount:    2,
+		MaximumBatchCount:    4,
+		DenseBoundaryHardCap: 4,
+		SessionLeaseTimeout:  5 * time.Second,
+		HeartbeatIdleTimeout: 5 * time.Second,
+		ProducerInstanceID:   "fake-01",
+		ProducerBuildID:      "fake-test-v1", ProviderID: "provider-test",
 		StableFeedID:            "feed-test",
 		BrokerServerFingerprint: "broker-test",
 		ExactSourceSymbol:       "EURUSD",
@@ -465,28 +573,24 @@ func testBatch(sequence uint64, timeMSC int64, count int, copyTicksError int32) 
 
 func startGateway(t *testing.T, config ingest.Config) (*ingest.Gateway, *fake.Client, func()) {
 	t.Helper()
-	gateway, err := ingest.Open(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtime := newStartedGatewayRuntime(t, config)
+	gateway := runtime.Gateway()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- gateway.Serve(ctx, listener) }()
 	hello := protocol.HelloV1{
-		ProducerInstanceID:      config.ProducerInstanceID,
-		ProducerSessionID:       "session-test-01",
-		ProducerBuildID:         config.ProducerBuildID,
-		MQLCompilerBuild:        "fake",
-		TerminalBuild:           "fake",
-		OSContract:              "windows-test",
-		ClockAPIID:              "test-clock",
-		CampaignID:              config.CampaignID,
-		ProviderID:              config.ProviderID,
+		ProducerInstanceID: config.ProducerInstanceID,
+		ProducerSessionID:  "session-test-01",
+		ProducerBuildID:    config.ProducerBuildID,
+		MQLCompilerBuild:   "fake",
+		TerminalBuild:      "fake",
+		OSContract:         "windows-test",
+		ClockAPIID:         "test-clock", ProviderID: config.ProviderID,
 		StableFeedID:            config.StableFeedID,
 		BrokerServerFingerprint: config.BrokerServerFingerprint,
 		ExactSourceSymbol:       config.ExactSourceSymbol,
@@ -497,13 +601,13 @@ func startGateway(t *testing.T, config ingest.Config) (*ingest.Gateway, *fake.Cl
 	client, err := fake.Dial(context.Background(), listener.Addr().String(), hello)
 	if err != nil {
 		cancel()
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		t.Fatal(err)
 	}
 	stop := func() {
 		_ = client.Close()
 		cancel()
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		select {
 		case <-serveDone:
 		case <-time.After(time.Second):
@@ -511,6 +615,24 @@ func startGateway(t *testing.T, config ingest.Config) (*ingest.Gateway, *fake.Cl
 		}
 	}
 	return gateway, client, stop
+}
+
+func newStartedGatewayRuntime(t *testing.T, config ingest.Config) *app.LocalGatewayRuntime {
+	t.Helper()
+	runtime, err := app.NewLocalGatewayRuntime(config, ingest.DiskWatermarks{
+		HighFreeBytes:      config.DiskHighFreeBytes,
+		CriticalFreeBytes:  config.DiskCriticalFreeBytes,
+		EmergencyFreeBytes: config.DiskEmergencyFreeBytes,
+		MaxPendingSegments: config.MaxPendingSegments,
+		MaxPendingBytes:    config.MaxPendingBytes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return runtime
 }
 
 func clientAddress(t *testing.T, client *fake.Client) string {

@@ -41,4 +41,35 @@ jobs:
         shell: pwsh
         env:
           CGO_ENABLED: "1"
-        run: mise exec -- go test -race ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/catalog ./internal/continuity ./internal/parquet
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          mise exec -- go test -race ./internal/app ./internal/ingest ./internal/wal ./internal/archive ./internal/r2 ./internal/delivery ./internal/retention ./internal/operations ./internal/httpapi -count=1 -json > artifacts/windows-race.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Capture race environment
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          @(
+            "run_id=${{ github.run_id }}"
+            "sha=${{ github.sha }}"
+            "ref=${{ github.ref }}"
+            "runner_os=${{ runner.os }}"
+            "runner_arch=${{ runner.arch }}"
+            "go=$(mise exec -- go version)"
+            "goos=$(mise exec -- go env GOOS)"
+            "goarch=$(mise exec -- go env GOARCH)"
+            "cgo=$(mise exec -- go env CGO_ENABLED)"
+            "cc=$(mise exec -- go env CC)"
+            "compiler=$(gcc --version | Select-Object -First 1)"
+          ) | Set-Content artifacts/windows-race-environment.txt
+
+      - name: Upload race evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-race-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

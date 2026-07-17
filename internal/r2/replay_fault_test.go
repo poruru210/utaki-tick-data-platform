@@ -50,7 +50,7 @@ func TestReplayFaultRestartAfterEveryActionBarrier(t *testing.T) {
 			}
 			copies := 0
 			for _, key := range fixture.tool.copyKeys {
-				if key == resolved.rcloneKey {
+				if key == resolved.remoteKey {
 					copies++
 				}
 			}

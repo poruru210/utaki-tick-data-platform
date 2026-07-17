@@ -28,8 +28,6 @@ type ReplayPublicationBundleInput struct {
 	ReplayManifest         []byte
 	PreviousReplayManifest []byte
 	ReceiptPath            string
-	RcloneBinaryPath       string
-	RcloneTool             RcloneTool
 }
 
 type ReplayLocalArtifact struct {
@@ -42,9 +40,8 @@ type ReplayLocalArtifact struct {
 }
 
 type ReplayLocalSources struct {
-	Artifacts        map[ReplayObjectID]ReplayLocalArtifact
-	ReceiptPath      string
-	RcloneBinaryPath string
+	Artifacts   map[ReplayObjectID]ReplayLocalArtifact
+	ReceiptPath string
 }
 
 // ReplayPublicationBundle keeps local sources outside the Protocol V1
@@ -63,12 +60,6 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 	}
 	if err := input.Conversion.Validate(); err != nil {
 		return ReplayPublicationBundle{}, err
-	}
-	if err := VerifyRcloneBinary(input.RcloneBinaryPath, input.RcloneTool); err != nil {
-		return ReplayPublicationBundle{}, err
-	}
-	if input.RcloneTool.GOOS == "" || input.RcloneTool.GOARCH == "" {
-		return ReplayPublicationBundle{}, fmt.Errorf("rclone platform identity is incomplete")
 	}
 
 	rawManifest, err := archive.VerifyRawDayManifest(input.RawManifest)
@@ -90,7 +81,7 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 		return ReplayPublicationBundle{}, err
 	}
 	replayScope := protocol.ReplayScope{
-		DatasetID: input.Layout.Scope.DatasetID, CampaignID: input.Layout.Scope.CampaignID,
+		DatasetID:       input.Layout.Scope.DatasetID,
 		DayDefinitionID: input.Layout.Scope.DayDefinitionID, Date: rawManifest.Date,
 		ReplayContractID: input.Conversion.ReplayContractID, ConversionID: input.Conversion.ConversionID,
 		RawDayManifestKey: rawRelative, RawDayManifestSHA256: rawManifest.ManifestSHA256,
@@ -203,14 +194,8 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 	if err != nil {
 		return ReplayPublicationBundle{}, err
 	}
-	rawRcloneKey, err := input.Layout.RcloneManifestKey(rawManifest)
-	if err != nil {
-		return ReplayPublicationBundle{}, err
-	}
-
 	localSources := ReplayLocalSources{
 		Artifacts: make(map[ReplayObjectID]ReplayLocalArtifact), ReceiptPath: input.ReceiptPath,
-		RcloneBinaryPath: input.RcloneBinaryPath,
 	}
 	rawManifestID := makeReplayObjectID("raw_manifest", rawManifest.Revision, rawRelative)
 	localSources.Artifacts[rawManifestID] = ReplayLocalArtifact{
@@ -224,14 +209,10 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 		if err != nil {
 			return ReplayPublicationBundle{}, err
 		}
-		rcloneKey, err := input.Layout.RcloneKey(descriptor.Key)
-		if err != nil {
-			return ReplayPublicationBundle{}, err
-		}
 		digest := hex.EncodeToString(descriptor.SHA256[:])
 		rawObjects = append(rawObjects, protocol.ReplayPublicationRawObject{
 			Bytes: descriptor.Bytes, FullKey: fullKey, RelativeKey: descriptor.Key,
-			RcloneKey: rcloneKey, SHA256: digest,
+			SHA256: digest,
 		})
 		objectID := makeReplayObjectID("raw_object", 0, descriptor.Key)
 		localSources.Artifacts[objectID] = ReplayLocalArtifact{
@@ -248,15 +229,11 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 		if err != nil {
 			return ReplayPublicationBundle{}, err
 		}
-		parquetRcloneKey, err := input.Layout.RcloneReplayPartObjectKey(part)
-		if err != nil {
-			return ReplayPublicationBundle{}, err
-		}
 		parquetID := makeReplayObjectID("parquet", uint64(part.PartSequence), part.PartKey)
 		parquetObjects = append(parquetObjects, protocol.ReplayPublicationParquetObject{
 			Bytes: artifact.PartBytes, FirstStreamSequence: artifact.FirstStreamSequence,
 			FullKey: parquetFullKey, LastStreamSequence: artifact.LastStreamSequence,
-			ObjectID: string(parquetID), RelativeKey: part.PartKey, RcloneKey: parquetRcloneKey,
+			ObjectID: string(parquetID), RelativeKey: part.PartKey,
 			SHA256: hex.EncodeToString(artifact.PartSHA256[:]),
 		})
 		localSources.Artifacts[parquetID] = ReplayLocalArtifact{
@@ -272,15 +249,11 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 		if err != nil {
 			return ReplayPublicationBundle{}, err
 		}
-		partRcloneKey, err := input.Layout.RcloneReplayPartManifestKey(part)
-		if err != nil {
-			return ReplayPublicationBundle{}, err
-		}
 		partID := makeReplayObjectID("part_manifest", uint64(part.PartSequence), partKey)
 		partManifests = append(partManifests, protocol.ReplayPublicationPartManifest{
 			Bytes: uint64(len(partCanonical[index])), DomainDigest: hex.EncodeToString(part.ManifestSHA256[:]),
 			FullKey: partFullKey, ObjectID: string(partID), PartSequence: uint64(part.PartSequence),
-			RelativeKey: partKey, RcloneKey: partRcloneKey,
+			RelativeKey: partKey,
 		})
 		localSources.Artifacts[partID] = ReplayLocalArtifact{
 			Kind: "part_manifest", CanonicalBytes: append([]byte(nil), partCanonical[index]...),
@@ -290,10 +263,6 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 	}
 
 	replayFullKey, err := input.Layout.ReplayDayManifestKey(expectedReplay)
-	if err != nil {
-		return ReplayPublicationBundle{}, err
-	}
-	replayRcloneKey, err := input.Layout.RcloneReplayDayManifestKey(expectedReplay)
 	if err != nil {
 		return ReplayPublicationBundle{}, err
 	}
@@ -322,26 +291,22 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 		PartSetRoot: hex.EncodeToString(expectedReplay.PartSetRoot[:]),
 		RawManifest: protocol.ReplayPublicationRawManifest{
 			Bytes: uint64(len(input.RawManifest)), DomainDigest: hex.EncodeToString(rawManifest.ManifestSHA256[:]),
-			FullKey: rawFullKey, RelativeKey: rawRelative, RcloneKey: rawRcloneKey, Revision: rawManifest.Revision,
+			FullKey: rawFullKey, RelativeKey: rawRelative, Revision: rawManifest.Revision,
 		},
 		RawObjects: rawObjects,
 		ReplayManifest: protocol.ReplayPublicationReplayManifest{
 			Bytes: uint64(len(input.ReplayManifest)), DomainDigest: hex.EncodeToString(expectedReplay.ManifestSHA256[:]),
-			FullKey: replayFullKey, RelativeKey: replayRelative, RcloneKey: replayRcloneKey, Revision: expectedReplay.Revision,
-		},
-		RcloneIdentity: protocol.ReplayPublicationRcloneIdentity{
-			BinarySHA256: input.RcloneTool.BinarySHA256, GOARCH: input.RcloneTool.GOARCH,
-			GOOS: input.RcloneTool.GOOS, Version: RcloneVersion,
+			FullKey: replayFullKey, RelativeKey: replayRelative, Revision: expectedReplay.Revision,
 		},
 		Scope: protocol.ReplayPublicationScope{
 			BrokerServerFingerprint: input.Layout.Scope.BrokerServerFingerprint,
-			CampaignID:              input.Layout.Scope.CampaignID, DatasetID: input.Layout.Scope.DatasetID,
-			Date: rawManifest.Date, DayDefinitionID: input.Layout.Scope.DayDefinitionID,
+			DatasetID:               input.Layout.Scope.DatasetID,
+			Date:                    rawManifest.Date, DayDefinitionID: input.Layout.Scope.DayDefinitionID,
 			ExactSourceSymbol: input.Layout.Scope.ExactSourceSymbol,
-			ImmutablePrefix:   input.Layout.ImmutableCampaignPrefix(), ProviderID: input.Layout.Scope.ProviderID,
+			ImmutablePrefix:   input.Layout.ImmutableScopePrefix(), ProviderID: input.Layout.Scope.ProviderID,
 			PublisherEpoch: input.Layout.Scope.PublisherEpoch, PublisherID: input.Layout.Scope.PublisherID,
-			RclonePrefix: input.Layout.RcloneCampaignPrefix(), ScopeConfigHash: hex.EncodeToString(configHash[:]),
-			ScopeKey: claim.ScopeKey, SettlePolicy: input.Layout.Scope.SettlePolicy, StableFeedID: input.Layout.Scope.StableFeedID,
+			ScopeConfigHash: hex.EncodeToString(configHash[:]),
+			ScopeKey:        claim.ScopeKey, SettlePolicy: input.Layout.Scope.SettlePolicy, StableFeedID: input.Layout.Scope.StableFeedID,
 		},
 	}
 	var budgetErr error

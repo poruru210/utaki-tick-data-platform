@@ -15,7 +15,7 @@ import (
 	"tick-data-platform/internal/protocol"
 )
 
-var ErrReplayCheckDifferent = ErrRcloneCheckMismatch
+var ErrReplayCheckDifferent = ErrRemoteCheckMismatch
 
 type ReplayObservationLock interface {
 	AssertHeld(bundle ReplayPublicationBundle) error
@@ -33,7 +33,7 @@ func NewReplayBoundedObserver(remote ReplayRemoteReadBackend, lock ReplayObserva
 	return &ReplayBoundedObserver{remote: remote, lock: lock}, nil
 }
 
-// Observe performs a fresh bounded read campaign. Remote outcomes are returned
+// Observe performs a fresh bounded read of the publication scope. Remote outcomes are returned
 // as fail-closed observation classes; configuration and lock failures are
 // returned as errors. No journal or prior event is accepted as remote truth.
 func (o *ReplayBoundedObserver) Observe(ctx context.Context, bundle ReplayPublicationBundle) (ReplayRemoteObservation, error) {
@@ -55,7 +55,7 @@ func (o *ReplayBoundedObserver) ObserveWithBudget(ctx context.Context, bundle Re
 		return ReplayRemoteObservation{}, fmt.Errorf("replay observation budget does not match bundle limits")
 	}
 	if err := o.lock.AssertHeld(bundle); err != nil {
-		return ReplayRemoteObservation{}, fmt.Errorf("replay campaign lock is not held: %w", err)
+		return ReplayRemoteObservation{}, fmt.Errorf("replay publication lock is not held: %w", err)
 	}
 	startSnapshot := budget.Snapshot()
 	observation := ReplayRemoteObservation{BundleDigest: bundle.Digest}
@@ -126,7 +126,7 @@ func (o *ReplayBoundedObserver) ObserveWithBudget(ctx context.Context, bundle Re
 	}
 
 	if err := o.lock.AssertHeld(bundle); err != nil {
-		return ReplayRemoteObservation{}, fmt.Errorf("replay campaign lock was lost: %w", err)
+		return ReplayRemoteObservation{}, fmt.Errorf("replay publication lock was lost: %w", err)
 	}
 	snapshot := budget.Snapshot()
 	observation.RequestCount = snapshot.Requests
@@ -223,7 +223,7 @@ func (o *ReplayBoundedObserver) observeRawManifest(ctx context.Context, budget *
 	if err != nil || !bytes.Equal(canonical, read.Body) {
 		return ObservationAmbiguous
 	}
-	if manifest.DatasetID != bundle.Contract.Scope.DatasetID || manifest.CampaignID != bundle.Contract.Scope.CampaignID || manifest.DayDefinitionID != bundle.Contract.Scope.DayDefinitionID || manifest.Date != bundle.Contract.Scope.Date || manifest.PublisherID != bundle.Contract.Scope.PublisherID || manifest.PublisherEpoch != bundle.Contract.Scope.PublisherEpoch || manifest.SettlePolicy != bundle.Contract.Scope.SettlePolicy || manifest.ConfigHash != mustHash(bundle.Contract.Scope.ScopeConfigHash) {
+	if manifest.DatasetID != bundle.Contract.Scope.DatasetID || manifest.DayDefinitionID != bundle.Contract.Scope.DayDefinitionID || manifest.Date != bundle.Contract.Scope.Date || manifest.PublisherID != bundle.Contract.Scope.PublisherID || manifest.PublisherEpoch != bundle.Contract.Scope.PublisherEpoch || manifest.SettlePolicy != bundle.Contract.Scope.SettlePolicy || manifest.ConfigHash != mustHash(bundle.Contract.Scope.ScopeConfigHash) {
 		return ObservationAmbiguous
 	}
 	if uint64(len(read.Body)) != expected.Bytes || manifest.ManifestSHA256 != mustHash(expected.DomainDigest) {
@@ -234,10 +234,10 @@ func (o *ReplayBoundedObserver) observeRawManifest(ctx context.Context, budget *
 
 func validPublisherClaimShape(value any) bool {
 	object, ok := value.(map[string]any)
-	if !ok || len(object) != 13 {
+	if !ok || len(object) != 12 {
 		return false
 	}
-	for _, field := range []string{"broker_server_fingerprint", "campaign_id", "claim_version", "config_hash", "dataset_id", "day_definition_id", "exact_source_symbol", "provider_id", "publisher_id", "scope_key", "settle_policy", "stable_feed_id"} {
+	for _, field := range []string{"broker_server_fingerprint", "claim_version", "config_hash", "dataset_id", "day_definition_id", "exact_source_symbol", "provider_id", "publisher_id", "scope_key", "settle_policy", "stable_feed_id"} {
 		if text, ok := object[field].(string); !ok || text == "" {
 			return false
 		}
@@ -537,7 +537,7 @@ func graphClass(err error, complete bool) ObservationClass {
 }
 
 func replayVerificationInputs(bundle protocol.ReplayPublicationBundle) (protocol.ReplayScope, archive.ConversionTuple, error) {
-	scope := protocol.ReplayScope{DatasetID: bundle.Scope.DatasetID, CampaignID: bundle.Scope.CampaignID, DayDefinitionID: bundle.Scope.DayDefinitionID, Date: bundle.Scope.Date, ReplayContractID: bundle.Conversion.ReplayContractID, ConversionID: bundle.Conversion.ConversionID, RawDayManifestKey: bundle.RawManifest.RelativeKey, RawDayManifestSHA256: mustHash(bundle.RawManifest.DomainDigest)}
+	scope := protocol.ReplayScope{DatasetID: bundle.Scope.DatasetID, DayDefinitionID: bundle.Scope.DayDefinitionID, Date: bundle.Scope.Date, ReplayContractID: bundle.Conversion.ReplayContractID, ConversionID: bundle.Conversion.ConversionID, RawDayManifestKey: bundle.RawManifest.RelativeKey, RawDayManifestSHA256: mustHash(bundle.RawManifest.DomainDigest)}
 	conversion := archive.ConversionTuple{ReplayContractID: bundle.Conversion.ReplayContractID, FormatID: bundle.Conversion.FormatID, ConversionID: bundle.Conversion.ConversionID, ConverterBuildID: bundle.Conversion.ConverterBuildID, DependencyLockHash: mustHash(bundle.Conversion.DependencyLockHash), WriterConfigurationHash: mustHash(bundle.Conversion.WriterConfigurationHash), TargetPlatformContract: bundle.Conversion.TargetPlatformContract}
 	return scope, conversion, scope.Validate()
 }

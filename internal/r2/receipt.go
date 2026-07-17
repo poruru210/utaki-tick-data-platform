@@ -18,10 +18,6 @@ type VerificationReceipt struct {
 	ManifestKey          string
 	ManifestSHA256       [32]byte
 	RawObjects           []PublicationObject
-	RcloneVersion        string
-	RcloneGOOS           string
-	RcloneGOARCH         string
-	RcloneBinarySHA256   string
 	VerificationComplete bool
 }
 
@@ -35,7 +31,6 @@ func (r VerificationReceipt) CanonicalJSON() ([]byte, error) {
 			"bytes":      object.Bytes,
 			"key":        object.Key,
 			"remote_key": object.RemoteKey,
-			"rclone_key": object.RcloneKey,
 			"sha256":     hex.EncodeToString(object.SHA256[:]),
 		}
 	}
@@ -45,10 +40,6 @@ func (r VerificationReceipt) CanonicalJSON() ([]byte, error) {
 		"manifest_sha256":       hex.EncodeToString(r.ManifestSHA256[:]),
 		"raw_objects":           objects,
 		"receipt_version":       r.ReceiptVersion,
-		"rclone_binary_sha256":  r.RcloneBinarySHA256,
-		"rclone_goarch":         r.RcloneGOARCH,
-		"rclone_goos":           r.RcloneGOOS,
-		"rclone_version":        r.RcloneVersion,
 		"scope_config_hash":     hex.EncodeToString(r.ScopeConfigHash[:]),
 		"verification_complete": r.VerificationComplete,
 	})

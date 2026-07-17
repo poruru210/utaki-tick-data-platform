@@ -1,2 +1,2 @@
-// Package catalog owns dataset, campaign, and immutable snapshot discovery.
+// Package catalog owns dataset, scope, and immutable snapshot discovery.
 package catalog

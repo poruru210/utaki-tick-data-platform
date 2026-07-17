@@ -2,11 +2,12 @@ package delivery
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"tick-data-platform/internal/r2"
 )
 
 const ReaderConfigVersion = "tick-reader-v1"
@@ -14,19 +15,22 @@ const ReaderConfigVersion = "tick-reader-v1"
 const (
 	defaultMaxMetadataBytes  = uint64(1 << 20)
 	defaultMaxRawObjectBytes = uint64(8 << 30)
+	defaultMaxRemoteObjects  = uint64(1 << 20)
+	maxRemoteObjects         = uint64(1 << 20)
 )
 
 type ReaderConfig struct {
-	Version           string `toml:"reader_config_version"`
-	Endpoint          string `toml:"endpoint"`
-	BucketEnv         string `toml:"bucket_env"`
-	AccessKeyEnv      string `toml:"access_key_env"`
-	SecretKeyEnv      string `toml:"secret_key_env"`
-	Region            string `toml:"region"`
-	ImmutableRoot     string `toml:"immutable_root"`
-	CacheRoot         string `toml:"cache_root"`
-	MaxMetadataBytes  uint64 `toml:"max_metadata_bytes"`
-	MaxRawObjectBytes uint64 `toml:"max_raw_object_bytes"`
+	Version               string `toml:"reader_config_version"`
+	Endpoint              string `toml:"endpoint"`
+	Bucket                string `toml:"bucket"`
+	CredentialsPath       string `toml:"credentials_path"`
+	CredentialsProtection string `toml:"credentials_protection"`
+	Region                string `toml:"region"`
+	ImmutableRoot         string `toml:"immutable_root"`
+	CacheRoot             string `toml:"cache_root"`
+	MaxMetadataBytes      uint64 `toml:"max_metadata_bytes"`
+	MaxRawObjectBytes     uint64 `toml:"max_raw_object_bytes"`
+	MaxRemoteObjects      uint64 `toml:"max_remote_objects"`
 }
 
 func LoadReaderConfig(path string) (ReaderConfig, error) {
@@ -53,18 +57,17 @@ func (c *ReaderConfig) Validate() error {
 	if c.Version != ReaderConfigVersion {
 		return fmt.Errorf("unsupported reader config version")
 	}
-	parsed, err := url.Parse(c.Endpoint)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
-		return fmt.Errorf("reader endpoint must be an explicit HTTP(S) URL")
+	if err := r2.ValidateHTTPSHostEndpoint(c.Endpoint); err != nil {
+		return fmt.Errorf("reader %w", err)
 	}
-	for name, value := range map[string]string{
-		"bucket_env":     c.BucketEnv,
-		"access_key_env": c.AccessKeyEnv,
-		"secret_key_env": c.SecretKeyEnv,
-	} {
-		if !validEnvName(value) {
-			return fmt.Errorf("%s is not a valid environment variable name", name)
-		}
+	if strings.TrimSpace(c.Bucket) == "" {
+		return fmt.Errorf("reader bucket is required")
+	}
+	if strings.TrimSpace(c.CredentialsPath) == "" {
+		return fmt.Errorf("reader credentials_path is required")
+	}
+	if c.CredentialsProtection != "" && c.CredentialsProtection != "native-acl" && c.CredentialsProtection != "managed-mount" {
+		return fmt.Errorf("reader credentials_protection is unsupported")
 	}
 	if c.Region != "auto" {
 		return fmt.Errorf("reader region must be auto")
@@ -81,33 +84,20 @@ func (c *ReaderConfig) Validate() error {
 	if c.MaxRawObjectBytes == 0 {
 		c.MaxRawObjectBytes = defaultMaxRawObjectBytes
 	}
-	if c.MaxMetadataBytes > 16<<20 || c.MaxRawObjectBytes > 64<<30 {
+	if c.MaxRemoteObjects == 0 {
+		c.MaxRemoteObjects = defaultMaxRemoteObjects
+	}
+	if c.MaxMetadataBytes > 16<<20 || c.MaxRawObjectBytes > 64<<30 || c.MaxRemoteObjects > maxRemoteObjects {
 		return fmt.Errorf("reader size limits are too large")
 	}
 	return nil
 }
 
-func (c ReaderConfig) Bucket() (string, error) {
+func (c ReaderConfig) BucketName() (string, error) {
 	if err := c.Validate(); err != nil {
 		return "", err
 	}
-	value, ok := os.LookupEnv(c.BucketEnv)
-	if !ok || value == "" {
-		return "", fmt.Errorf("reader bucket is unavailable")
-	}
-	return value, nil
-}
-
-func validEnvName(value string) bool {
-	if value == "" || strings.ContainsAny(value, "=\x00\r\n") {
-		return false
-	}
-	for i, char := range value {
-		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && (i == 0 || char < '0' || char > '9') && char != '_' {
-			return false
-		}
-	}
-	return true
+	return c.Bucket, nil
 }
 
 func validateRemoteRoot(root string) error {

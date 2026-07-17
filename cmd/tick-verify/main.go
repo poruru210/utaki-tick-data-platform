@@ -52,8 +52,8 @@ func runWithReader(args []string, reader delivery.ArchiveReaderV1, output, error
 	switch args[0] {
 	case "day":
 		return runDay(args[1:], reader, output, errorsOut)
-	case "campaign":
-		return runCampaign(args[1:], reader, output, errorsOut)
+	case "scope":
+		return runScope(args[1:], reader, output, errorsOut)
 	case "replay-day":
 		return runReplayDay(args[1:], reader, output, errorsOut)
 	default:
@@ -77,7 +77,7 @@ func runReplayDay(args []string, reader delivery.ArchiveReaderV1, output, errors
 	}
 	return writeJSON(replayDayOutput{
 		GenesisVerified: report.GenesisVerified, VerificationScope: report.VerificationScope,
-		DatasetID: report.DatasetID, CampaignID: report.CampaignID, DayDefinitionID: report.DayDefinitionID,
+		DatasetID: report.DatasetID, Source: report.ProviderID, Symbol: report.ExactSourceSymbol, DayDefinitionID: report.DayDefinitionID,
 		Date: report.Date, ReplayContractID: report.ReplayContractID, ConversionID: report.ConversionID,
 		Revision: report.Revision, ManifestKey: report.ManifestKey, ManifestSHA256: hex.EncodeToString(report.ManifestSHA256[:]),
 		RawBindingVerified: report.RawBindingVerified, RawDaySemanticsVerified: report.RawDaySemanticsVerified,
@@ -103,7 +103,7 @@ func runDay(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io
 	}
 	return writeJSON(dayOutput{
 		GenesisVerified: report.GenesisVerified, VerificationScope: report.VerificationScope,
-		DatasetID: report.DatasetID, CampaignID: report.CampaignID, Date: report.Date, Revision: report.Revision,
+		DatasetID: report.DatasetID, Date: report.Date, Revision: report.Revision,
 		ManifestKey: report.ManifestKey, ManifestSHA256: hex.EncodeToString(report.ManifestSHA256[:]),
 		PredecessorAnchor: hex.EncodeToString(report.PredecessorAnchor[:]),
 		ChainSliceStart:   report.ChainSliceStart, ChainSliceStartRoot: hex.EncodeToString(report.ChainSliceStartRoot[:]),
@@ -113,24 +113,25 @@ func runDay(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io
 	}, output, errorsOut)
 }
 
-func runCampaign(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
-	flags := flag.NewFlagSet("campaign", flag.ContinueOnError)
+func runScope(args []string, reader delivery.ArchiveReaderV1, output, errorsOut io.Writer) int {
+	flags := flag.NewFlagSet("scope", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.String("config", "", "reader configuration")
 	dataset := flags.String("dataset", "", "dataset identity")
-	campaign := flags.String("campaign", "", "campaign identity")
-	throughRoot := flags.String("through-root", "", "campaign root")
-	if err := flags.Parse(args); err != nil || *dataset == "" || *campaign == "" || *throughRoot == "" {
-		fmt.Fprintln(errorsOut, "--dataset, --campaign, and --through-root are required")
+	source := flags.String("source", "", "source identity")
+	symbol := flags.String("symbol", "", "exact source symbol")
+	throughRoot := flags.String("through-root", "", "scope root")
+	if err := flags.Parse(args); err != nil || *dataset == "" || *source == "" || *symbol == "" || *throughRoot == "" {
+		fmt.Fprintln(errorsOut, "--dataset, --source, --symbol, and --through-root are required")
 		return 2
 	}
-	report, err := reader.VerifyCampaign(context.Background(), *dataset, *campaign, *throughRoot)
+	report, err := reader.VerifyScope(context.Background(), delivery.RawScopeSelector{DatasetID: *dataset, ProviderID: *source, ExactSourceSymbol: *symbol}, *throughRoot)
 	if err != nil {
 		return reportError(err, errorsOut)
 	}
-	return writeJSON(campaignOutput{
+	return writeJSON(scopeOutput{
 		GenesisVerified: report.GenesisVerified, VerificationScope: report.VerificationScope,
-		DatasetID: report.DatasetID, CampaignID: report.CampaignID,
+		DatasetID: report.DatasetID, Source: report.ProviderID, Symbol: report.ExactSourceSymbol,
 		ThroughRoot: hex.EncodeToString(report.ThroughRoot[:]), VerifiedThrough: report.VerifiedThrough,
 		SegmentCount: report.SegmentCount, EntryCount: report.EntryCount,
 	}, output, errorsOut)
@@ -140,7 +141,6 @@ type dayOutput struct {
 	GenesisVerified     bool   `json:"genesis_verified"`
 	VerificationScope   string `json:"verification_scope"`
 	DatasetID           string `json:"dataset_id"`
-	CampaignID          string `json:"campaign_id"`
 	Date                string `json:"date"`
 	Revision            uint64 `json:"revision"`
 	ManifestKey         string `json:"manifest_key"`
@@ -155,11 +155,12 @@ type dayOutput struct {
 	EntryCount          int    `json:"entry_count"`
 }
 
-type campaignOutput struct {
+type scopeOutput struct {
 	GenesisVerified   bool   `json:"genesis_verified"`
 	VerificationScope string `json:"verification_scope"`
 	DatasetID         string `json:"dataset_id"`
-	CampaignID        string `json:"campaign_id"`
+	Source            string `json:"source"`
+	Symbol            string `json:"symbol"`
 	ThroughRoot       string `json:"through_root"`
 	VerifiedThrough   uint64 `json:"verified_through"`
 	SegmentCount      int    `json:"segment_count"`
@@ -170,7 +171,8 @@ type replayDayOutput struct {
 	GenesisVerified               bool   `json:"genesis_verified"`
 	VerificationScope             string `json:"verification_scope"`
 	DatasetID                     string `json:"dataset_id"`
-	CampaignID                    string `json:"campaign_id"`
+	Source                        string `json:"source"`
+	Symbol                        string `json:"symbol"`
 	DayDefinitionID               string `json:"day_definition_id"`
 	Date                          string `json:"date"`
 	ReplayContractID              string `json:"replay_contract_id"`

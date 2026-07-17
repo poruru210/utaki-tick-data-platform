@@ -15,7 +15,7 @@ import (
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/protocol"
 	"tick-data-platform/internal/r2"
-	"tick-data-platform/internal/wal"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/producers/fake"
 )
 
@@ -49,12 +49,40 @@ func (b *memoryReadBackend) List(_ context.Context, prefix string) ([]r2.RemoteO
 	return result, nil
 }
 
+func (b *memoryReadBackend) ListLimited(ctx context.Context, prefix string, maxObjects uint64) ([]r2.RemoteObject, error) {
+	if maxObjects == 0 {
+		return nil, r2.ErrResourceLimit
+	}
+	result, err := b.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(result)) > maxObjects {
+		return nil, r2.ErrResourceLimit
+	}
+	return result, nil
+}
+
 func (b *memoryReadBackend) Get(_ context.Context, key string) ([]byte, error) {
 	body, ok := b.objects[key]
 	if !ok {
 		return nil, r2.ErrObjectNotFound
 	}
 	return append([]byte(nil), body...), nil
+}
+
+func (b *memoryReadBackend) GetLimited(ctx context.Context, key string, maxBytes uint64) ([]byte, error) {
+	if maxBytes == 0 {
+		return nil, r2.ErrResourceLimit
+	}
+	body, err := b.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) > maxBytes {
+		return nil, r2.ErrResourceLimit
+	}
+	return body, nil
 }
 
 func (b *memoryReadBackend) Open(_ context.Context, key string) (io.ReadCloser, int64, error) {
@@ -85,7 +113,6 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 	t.Helper()
 	scope := archive.ScopeConfig{
 		DatasetID:               "dataset-reader",
-		CampaignID:              "campaign-reader",
 		ProviderID:              "provider-reader",
 		StableFeedID:            "feed-reader",
 		ExactSourceSymbol:       "EURUSD.raw",
@@ -97,14 +124,14 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 		PublisherID:             "publisher-reader",
 		PublisherEpoch:          1,
 	}
-	layout, err := r2.NewLayout("v1", "", scope)
+	layout, err := r2.NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	objects := make([]archive.RawObject, 0, 3)
 	root := t.TempDir()
 	outbox := t.TempDir()
-	store, err := wal.Open(root, "gateway-reader")
+	store, err := testsupport.NewStartedWAL(root, "gateway-reader")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,22 +148,22 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 	for index, item := range frames {
 		frame := readerTestFrame(t, item.timeMSC, uint64(index+1), item.zero)
 		if _, err := store.Append(frame, 1710000000+int64(index), uint64(100+index)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		sealed, err := store.Seal()
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		object, err := archive.PromoteSealedSegment(outbox, sealed.Path)
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		objects = append(objects, object)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	base := archive.RawDayManifestInput{
@@ -193,10 +220,23 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 
 func testReaderConfig(cacheRoot string) ReaderConfig {
 	return ReaderConfig{
-		Version: ReaderConfigVersion, Endpoint: "https://reader.invalid",
-		BucketEnv: "TICK_READER_TEST_BUCKET", AccessKeyEnv: "TICK_READER_TEST_ACCESS",
-		SecretKeyEnv: "TICK_READER_TEST_SECRET", Region: "auto", ImmutableRoot: "v1",
+		Version: ReaderConfigVersion, Endpoint: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+		Bucket: "tick-reader-test", CredentialsPath: filepath.Join(cacheRoot, "credentials.json"),
+		Region: "auto", ImmutableRoot: "v1",
 		CacheRoot: cacheRoot, MaxMetadataBytes: 1 << 20, MaxRawObjectBytes: 1 << 30,
+	}
+}
+
+func TestArchiveReaderUsesBoundedRemoteListing(t *testing.T) {
+	fixture := newDeliveryFixture(t)
+	config := testReaderConfig(t.TempDir())
+	config.MaxRemoteObjects = 1
+	reader, err := NewArchiveReaderV1WithBackend(config, fixture.backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.ListDatasets(context.Background()); !errors.Is(err, r2.ErrResourceLimit) {
+		t.Fatalf("unbounded inventory result = %v, want ErrResourceLimit", err)
 	}
 }
 
@@ -242,14 +282,14 @@ func TestArchiveReaderDiscoveryFetchAndDayRestoration(t *testing.T) {
 	if len(datasets) != 1 || datasets[0].DatasetID != fixture.scope.DatasetID {
 		t.Fatalf("datasets = %+v", datasets)
 	}
-	campaigns, err := fixture.reader.ListCampaigns(ctx, fixture.scope.DatasetID)
+	scopes, err := fixture.reader.ListScopes(ctx, fixture.scope.DatasetID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(campaigns) != 1 || campaigns[0].CampaignID != fixture.scope.CampaignID {
-		t.Fatalf("campaigns = %+v", campaigns)
+	if len(scopes) != 1 || scopes[0].ProviderID != fixture.scope.ProviderID || scopes[0].ExactSourceSymbol != fixture.scope.ExactSourceSymbol {
+		t.Fatalf("scopes = %+v", scopes)
 	}
-	snapshots, err := fixture.reader.ListRawSnapshots(ctx, RawDayScope{DatasetID: fixture.scope.DatasetID, CampaignID: fixture.scope.CampaignID, Date: "2024-03-09"})
+	snapshots, err := fixture.reader.ListRawSnapshots(ctx, RawDayScope{DatasetID: fixture.scope.DatasetID, ProviderID: fixture.scope.ProviderID, ExactSourceSymbol: fixture.scope.ExactSourceSymbol, Date: "2024-03-09"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,23 +445,23 @@ func TestArchiveReaderDoesNotPersistCredentialValues(t *testing.T) {
 	}
 }
 
-func TestArchiveReaderCampaignProvesGenesisToRootAndRejectsMissingRoot(t *testing.T) {
+func TestArchiveReaderScopeProvesGenesisToRootAndRejectsMissingRoot(t *testing.T) {
 	fixture := newDeliveryFixture(t)
 	ctx := context.Background()
 	throughRoot := fixture.objects[2].Segment.ChainRoot
-	report, err := fixture.reader.VerifyCampaign(ctx, fixture.scope.DatasetID, fixture.scope.CampaignID, hexDigest(throughRoot))
+	report, err := fixture.reader.VerifyScope(ctx, RawScopeSelector{DatasetID: fixture.scope.DatasetID, ProviderID: fixture.scope.ProviderID, ExactSourceSymbol: fixture.scope.ExactSourceSymbol}, hexDigest(throughRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !report.GenesisVerified || report.VerificationScope != VerificationScopeCampaign || report.VerifiedThrough != 3 {
-		t.Fatalf("campaign report = %+v", report)
+	if !report.GenesisVerified || report.VerificationScope != VerificationScopeFullChain || report.VerifiedThrough != 3 {
+		t.Fatalf("scope report = %+v", report)
 	}
-	if _, err := fixture.reader.VerifyCampaign(ctx, fixture.scope.DatasetID, fixture.scope.CampaignID, strings.Repeat("f", 64)); !errors.Is(err, archive.ErrIntegrity) {
+	if _, err := fixture.reader.VerifyScope(ctx, RawScopeSelector{DatasetID: fixture.scope.DatasetID, ProviderID: fixture.scope.ProviderID, ExactSourceSymbol: fixture.scope.ExactSourceSymbol}, strings.Repeat("f", 64)); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("missing root error = %v, want ErrIntegrity", err)
 	}
 }
 
-func TestArchiveReaderCampaignRejectsCanonicalButSemanticallyMutatedManifest(t *testing.T) {
+func TestArchiveReaderScopeRejectsCanonicalButSemanticallyMutatedManifest(t *testing.T) {
 	fixture := newDeliveryFixture(t)
 	mutated := fixture.manifestA
 	mutated.Objects = append([]archive.RawObjectRange(nil), mutated.Objects...)
@@ -454,7 +494,7 @@ func TestArchiveReaderCampaignRejectsCanonicalButSemanticallyMutatedManifest(t *
 	delete(fixture.backend.objects, oldKey)
 	fixture.backend.objects[newKey] = body
 	throughRoot := fixture.objects[2].Segment.ChainRoot
-	if _, err := fixture.reader.VerifyCampaign(context.Background(), fixture.scope.DatasetID, fixture.scope.CampaignID, hexDigest(throughRoot)); !errors.Is(err, archive.ErrIntegrity) {
+	if _, err := fixture.reader.VerifyScope(context.Background(), RawScopeSelector{DatasetID: fixture.scope.DatasetID, ProviderID: fixture.scope.ProviderID, ExactSourceSymbol: fixture.scope.ExactSourceSymbol}, hexDigest(throughRoot)); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("semantic manifest mutation error = %v, want ErrIntegrity", err)
 	}
 }
@@ -492,7 +532,11 @@ func TestArchiveReaderRejectsMalformedSelectorAndRevisionBranch(t *testing.T) {
 		}
 		fixture.backend.objects[key] = body
 	}
-	if _, err := fixture.reader.ListRawSnapshots(ctx, RawDayScope{DatasetID: fixture.scope.DatasetID, CampaignID: fixture.scope.CampaignID}); !errors.Is(err, archive.ErrIntegrity) {
+	if _, err := fixture.reader.ListRawSnapshots(ctx, RawDayScope{
+		DatasetID:         fixture.scope.DatasetID,
+		ProviderID:        fixture.scope.ProviderID,
+		ExactSourceSymbol: fixture.scope.ExactSourceSymbol,
+	}); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("revision branch error = %v, want ErrIntegrity", err)
 	}
 }

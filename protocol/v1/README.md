@@ -24,13 +24,13 @@ part manifestはexact ReplayScope、raw-day manifest key+domain digest、Convers
 
 part setは同一scope/raw binding/conversionだけを受理し、最後のpartの`last_row_chain_hash`とreplay-day manifestの`canonical_stream_row_chain_root`を一致させます。
 
-M3 derivativeの物理keyは、exact UTF-8 bytesへSHA-256を適用するProtocol V1の一元`ExactIdentityPathKey`から導出するcampaign-relative date-local keyです。
+M3 derivativeの物理keyは、exact UTF-8 bytesへSHA-256を適用するProtocol V1の一元`ExactIdentityPathKey`から導出するscope-relative date-local keyです。
 
 baseは`derivatives/stream=<sha256(replay_contract_id)>/format=ticks-parquet-v1/conversion=<sha256(conversion_id)>/day-definition=<sha256(day_definition_id)>/date=YYYY-MM-DD`であり、hour partitionは持ちません。
 
 Parquet、part manifest、replay-day manifestのkeyは`manifests.md`の形式だけを受理し、`objects/replay`、`manifests/replay`、`snapshots/replay`のgeneric keyとaliasを拒否します。
 
-trusted `r2.Layout`は検証済みrelative keyへimmutable rootとcampaign prefixを一度だけprependします。
+trusted `r2.Layout`は検証済みrelative keyへimmutable rootとscope prefixを一度だけprependします。
 
 M0のempty-parts replay fixtureは読み取り専用互換形として残し、M3の新規manifestはraw manifest key+SHA bindingとrevision predecessorを必須にします。
 
@@ -61,6 +61,8 @@ fixtureとconformanceの形式は[fixtures/README.md](fixtures/README.md)と[con
 hashの入力bytesは[hash-domains.md](hash-domains.md)に定義します。
 
 manifestのcanonical JSONは[manifests.md](manifests.md)に定義します。
+
+M4のretention、prune checkpoint、resource limit contractは[operations.md](operations.md)に定義します。
 
 ## 実装境界
 

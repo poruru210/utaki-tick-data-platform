@@ -36,7 +36,7 @@ func (r *archiveReaderV1) BuildFetchPlan(_ context.Context, snapshot ResolvedSna
 	if snapshot.ManifestKey == "" || snapshot.ManifestSHA256 == ([32]byte{}) {
 		return FetchPlan{}, fmt.Errorf("%w: snapshot identity is incomplete", archive.ErrIntegrity)
 	}
-	layout, err := r2.NewLayout(r.config.ImmutableRoot, "", snapshot.Scope)
+	layout, err := r2.NewLayout(r.config.ImmutableRoot, snapshot.Scope)
 	if err != nil {
 		return FetchPlan{}, fmt.Errorf("%w: snapshot scope layout is invalid", archive.ErrIntegrity)
 	}

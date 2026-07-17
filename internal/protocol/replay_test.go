@@ -14,7 +14,7 @@ func replayTestScope() ReplayScope {
 	manifestBytes := []byte("raw-manifest-v1")
 	manifestHash := sha256Bytes(manifestBytes)
 	return ReplayScope{
-		DatasetID: "demo", CampaignID: "campaign-demo", DayDefinitionID: "utc-day-v1", Date: "2024-03-09",
+		DatasetID: "demo", DayDefinitionID: "utc-day-v1", Date: "2024-03-09",
 		ReplayContractID: "replay-v1", ConversionID: "conversion-v1",
 		RawDayManifestKey:    "snapshots/raw/day-definition=utc-day-v1/date=2024-03-09/raw-day-1-demo.json",
 		RawDayManifestSHA256: manifestHash,
@@ -70,7 +70,7 @@ func TestReplayCanonicalRowsAndRootsAreStrict(t *testing.T) {
 
 func TestPartAndReplayManifestDigestsAndM0Compatibility(t *testing.T) {
 	part := PartManifest{
-		ManifestVersion: PartManifestVersion, DatasetID: "demo", CampaignID: "campaign-demo", DayDefinitionID: "utc-day-v1", Date: "2024-03-09",
+		ManifestVersion: PartManifestVersion, DatasetID: "demo", DayDefinitionID: "utc-day-v1", Date: "2024-03-09",
 		ReplayContractID: "replay-v1", FormatID: ReplayFormatID, ConversionID: "conversion-v1", ConverterBuildID: "converter-1",
 		DependencyLockHash: hashFill(0x44), WriterConfigurationHash: hashFill(0x55), TargetPlatformContract: "parquet-v1",
 		RawDayManifestKey: replayTestScope().RawDayManifestKey, RawDayManifestSHA256: replayTestScope().RawDayManifestSHA256,
@@ -108,7 +108,7 @@ func TestPartAndReplayManifestDigestsAndM0Compatibility(t *testing.T) {
 		t.Fatal("unknown part manifest key was accepted")
 	}
 	replay := ReplayDayManifest{
-		ManifestVersion: ReplayDayManifestVersion, ManifestID: "replay-demo-r1", DatasetID: "demo", CampaignID: "campaign-demo", DayDefinitionID: "utc-day-v1", Date: "2024-03-09", Revision: 1,
+		ManifestVersion: ReplayDayManifestVersion, ManifestID: "replay-demo-r1", DatasetID: "demo", DayDefinitionID: "utc-day-v1", Date: "2024-03-09", Revision: 1,
 		RawDayManifestKey: replayTestScope().RawDayManifestKey, RawDayManifestSHA256: replayTestScope().RawDayManifestSHA256,
 		ReplayContractID: "replay-v1", FormatID: ReplayFormatID, ConversionID: "conversion-v1", ConverterBuildID: "converter-1",
 		DependencyLockHash: hashFill(0x44), WriterConfigurationHash: hashFill(0x55), TargetPlatformContract: "parquet-v1", CompletenessStatus: "settled_snapshot",
@@ -252,8 +252,7 @@ func TestDerivativeKeysAreExactDateLocalAndRejectGenericOrRangeMismatches(t *tes
 func validPartManifestForZeroTest() PartManifest {
 	scope := replayTestScope()
 	return PartManifest{
-		ManifestVersion: PartManifestVersion, DatasetID: scope.DatasetID, CampaignID: scope.CampaignID,
-		DayDefinitionID: scope.DayDefinitionID, Date: scope.Date, ReplayContractID: scope.ReplayContractID,
+		ManifestVersion: PartManifestVersion, DatasetID: scope.DatasetID, DayDefinitionID: scope.DayDefinitionID, Date: scope.Date, ReplayContractID: scope.ReplayContractID,
 		FormatID: ReplayFormatID, ConversionID: scope.ConversionID, ConverterBuildID: "converter-1",
 		DependencyLockHash: hashFill(0x44), WriterConfigurationHash: hashFill(0x55), TargetPlatformContract: "parquet-v1",
 		RawDayManifestKey: scope.RawDayManifestKey, RawDayManifestSHA256: scope.RawDayManifestSHA256,

@@ -29,7 +29,7 @@ func (r *archiveReaderV1) BuildReplayFetchPlan(ctx context.Context, snapshot Res
 		return ReplayFetchPlan{}, fmt.Errorf("%w: resolved replay snapshot differs from remote immutable manifest", archive.ErrIntegrity)
 	}
 	manifest := trusted.Manifest
-	layout, err := r2.NewLayout(r.config.ImmutableRoot, "", trusted.Scope)
+	layout, err := r2.NewLayout(r.config.ImmutableRoot, trusted.Scope)
 	if err != nil {
 		return ReplayFetchPlan{}, err
 	}
@@ -145,7 +145,7 @@ func (r *archiveReaderV1) validateReplayFetchPlanAgainstSnapshot(plan ReplayFetc
 	if plan.Manifest.Key != snapshot.ManifestKey || plan.Manifest.Digest != snapshot.ManifestSHA256 || !bytes.Equal(plan.Manifest.CanonicalBytes, snapshot.ManifestBytes) {
 		return fmt.Errorf("%w: replay plan is not bound to the resolved manifest", archive.ErrIntegrity)
 	}
-	layout, err := r2.NewLayout(r.config.ImmutableRoot, "", snapshot.Scope)
+	layout, err := r2.NewLayout(r.config.ImmutableRoot, snapshot.Scope)
 	if err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func (r *archiveReaderV1) cacheReplayParquetPath(digest [32]byte) string {
 }
 
 func replayProtocolScope(manifest protocol.ReplayDayManifest) protocol.ReplayScope {
-	return protocol.ReplayScope{DatasetID: manifest.DatasetID, CampaignID: manifest.CampaignID, DayDefinitionID: manifest.DayDefinitionID, Date: manifest.Date, ReplayContractID: manifest.ReplayContractID, ConversionID: manifest.ConversionID, RawDayManifestKey: manifest.RawDayManifestKey, RawDayManifestSHA256: manifest.RawDayManifestSHA256}
+	return protocol.ReplayScope{DatasetID: manifest.DatasetID, DayDefinitionID: manifest.DayDefinitionID, Date: manifest.Date, ReplayContractID: manifest.ReplayContractID, ConversionID: manifest.ConversionID, RawDayManifestKey: manifest.RawDayManifestKey, RawDayManifestSHA256: manifest.RawDayManifestSHA256}
 }
 
 func replayConversion(manifest protocol.ReplayDayManifest) archive.ConversionTuple {

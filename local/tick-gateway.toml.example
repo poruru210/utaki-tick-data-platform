@@ -3,6 +3,7 @@ gateway_instance_id = "gateway-local-01"
 max_frame_bytes = 1048576
 max_records = 4096
 wal_root = "./wal"
+raw_outbox_root = "./outbox"
 journal_path = "./journal/gateway.sqlite"
 initial_from_msc = 0
 initial_batch_count = 128
@@ -12,8 +13,37 @@ session_lease_timeout_ms = 30000
 heartbeat_idle_timeout_ms = 60000
 producer_instance_id = "mt5-local-01"
 producer_build_id = "tick-capture-mt5-v1"
-campaign_id = "campaign-local-01"
+dataset_id = "dataset-local-01"
 provider_id = "broker-provider"
 stable_feed_id = "broker-feed-01"
 broker_server_fingerprint = "broker-server-local-01"
 exact_source_symbol = "EURUSD"
+gateway_build_identity = "tick-gateway-build-v1"
+day_definition_id = "utc-day-v1"
+settle_policy = "manual-v1"
+publisher_id = "publisher-local-01"
+publisher_epoch = 1
+
+[credentials]
+provider = "file"
+path = "./secrets/tick-gateway-r2.json"
+protection = "native-acl"
+
+[r2]
+endpoint = "https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
+bucket = "replace-with-r2-bucket"
+region = "auto"
+immutable_root = "v1"
+
+[publication]
+catalog_path = "./publication/catalog.sqlite"
+remote_journal_path = "./publication/remote.sqlite"
+manifest_root = "./publication/manifests"
+receipt_root = "./publication/receipts"
+seal_max_bytes = 67108864
+seal_interval_ms = 60000
+scan_interval_ms = 1000
+retry_min_ms = 1000
+retry_max_ms = 300000
+max_pending_segments = 1000
+max_pending_bytes = 1099511627776

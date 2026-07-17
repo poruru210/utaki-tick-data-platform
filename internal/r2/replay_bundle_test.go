@@ -28,7 +28,6 @@ func replayBundleInputFromFixture(t *testing.T, fixture *replayPublicationFixtur
 		RawManifest: fixture.input.RawManifestBytes, RawObjectPaths: cloneStringMap(fixture.input.RawObjectPaths),
 		Parts: append([]parquet.PartArtifact(nil), fixture.artifacts...), PartManifests: partManifests,
 		ReplayManifest: fixture.input.ReplayManifestBytes, ReceiptPath: filepath.Join(t.TempDir(), "receipt.json"),
-		RcloneBinaryPath: fixture.toolPath, RcloneTool: fixture.publisher.rclone.Tool(),
 	}
 }
 
@@ -42,7 +41,7 @@ func TestSealReplayPublicationBundleIsDeterministicAndPathIndependent(t *testing
 	if len(first.Contract.ParquetObjects) != len(fixture.artifacts) || len(first.Contract.PartManifests) != len(fixture.parts) {
 		t.Fatalf("sealed bundle inventory = %+v", first.Contract)
 	}
-	for _, forbidden := range []string{input.ReceiptPath, input.RcloneBinaryPath} {
+	for _, forbidden := range []string{input.ReceiptPath} {
 		if forbidden != "" && bytes.Contains(first.CanonicalBytes, []byte(forbidden)) {
 			t.Fatalf("canonical bundle contains local path %q", forbidden)
 		}
@@ -62,7 +61,6 @@ func TestSealReplayPublicationBundleIsDeterministicAndPathIndependent(t *testing
 	for index := range secondInput.Parts {
 		secondInput.Parts[index].Path = copyReplayBundleFile(t, input.Parts[index].Path)
 	}
-	secondInput.RcloneBinaryPath = copyReplayBundleFile(t, input.RcloneBinaryPath)
 	secondInput.ReceiptPath = filepath.Join(t.TempDir(), "other-receipt.json")
 	second, err := SealReplayPublicationBundle(secondInput)
 	if err != nil {
@@ -92,14 +90,9 @@ func TestSealReplayPublicationBundleDerivesAllRemoteKeysFromLayout(t *testing.T)
 		if err != nil || object.FullKey != want {
 			t.Fatalf("raw full key = %q, want %q, err=%v", object.FullKey, want, err)
 		}
-		wantRclone, err := fixture.layout.RcloneKey(object.RelativeKey)
-		if err != nil || object.RcloneKey != wantRclone {
-			t.Fatalf("raw rclone key = %q, want %q, err=%v", object.RcloneKey, wantRclone, err)
-		}
 	}
-	if !strings.HasPrefix(sealed.Contract.ReplayManifest.FullKey, fixture.layout.ImmutableCampaignPrefix()+"/") ||
-		!strings.HasPrefix(sealed.Contract.ReplayManifest.RcloneKey, fixture.layout.RcloneCampaignPrefix()+"/") {
-		t.Fatal("replay manifest keys are not under trusted Layout prefixes")
+	if !strings.HasPrefix(sealed.Contract.ReplayManifest.FullKey, fixture.layout.ImmutableScopePrefix()+"/") {
+		t.Fatal("replay manifest key is not under trusted Layout prefix")
 	}
 }
 

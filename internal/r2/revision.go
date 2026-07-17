@@ -143,7 +143,7 @@ func ValidateRevisionGraph(candidate archive.RawDayManifest, candidateBytes []by
 }
 
 func validateRevisionSuccessor(previous, current archive.RawDayManifest) error {
-	if previous.DatasetID != current.DatasetID || previous.CampaignID != current.CampaignID ||
+	if previous.DatasetID != current.DatasetID ||
 		previous.DayDefinitionID != current.DayDefinitionID || previous.Date != current.Date ||
 		previous.PublisherID != current.PublisherID || previous.PublisherEpoch != current.PublisherEpoch ||
 		previous.ConfigHash != current.ConfigHash || previous.SettlePolicy != current.SettlePolicy {
@@ -196,7 +196,7 @@ func validateManifestRecord(record ManifestRecord) error {
 
 func sameManifestScope(left, right archive.RawDayManifest) bool {
 	return left.ManifestVersion == right.ManifestVersion &&
-		left.DatasetID == right.DatasetID && left.CampaignID == right.CampaignID &&
+		left.DatasetID == right.DatasetID &&
 		left.DayDefinitionID == right.DayDefinitionID && left.Date == right.Date &&
 		left.PublisherID == right.PublisherID && left.PublisherEpoch == right.PublisherEpoch &&
 		left.ConfigHash == right.ConfigHash && left.SettlePolicy == right.SettlePolicy

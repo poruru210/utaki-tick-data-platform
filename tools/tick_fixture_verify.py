@@ -158,7 +158,6 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
                 "manifest_version",
                 "manifest_id",
                 "dataset_id",
-                "campaign_id",
                 "day_definition_id",
                 "date",
                 "publisher_id",
@@ -343,7 +342,6 @@ def _verify_manifest_schema(fixture_id: str, value: dict[str, Any]) -> None:
             "manifest_version",
             "manifest_id",
             "dataset_id",
-            "campaign_id",
             "day_definition_id",
             "date",
             "raw_day_manifest_sha256",
@@ -462,7 +460,6 @@ def _verify_replay_contract(fixture: dict[str, Any]) -> None:
     manifest = fixture["replay_manifest"]
     for key in (
         "dataset_id",
-        "campaign_id",
         "day_definition_id",
         "date",
         "replay_contract_id",

@@ -62,7 +62,7 @@ const (
 	MarkerSourceError          = internal.MarkerSourceError
 	MarkerGap                  = internal.MarkerGap
 	MarkerTimestampRegression  = internal.MarkerTimestampRegression
-	MarkerCampaignBoundary     = internal.MarkerCampaignBoundary
+	MarkerScopeBoundary        = internal.MarkerScopeBoundary
 )
 
 var (

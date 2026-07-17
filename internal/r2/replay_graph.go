@@ -73,7 +73,7 @@ func VerifyReplayPartGraph(parts []protocol.PartManifest, scope protocol.ReplayS
 }
 
 func replayPartMatchesScope(part protocol.PartManifest, scope protocol.ReplayScope, conversion archive.ConversionTuple) bool {
-	return part.DatasetID == scope.DatasetID && part.CampaignID == scope.CampaignID && part.DayDefinitionID == scope.DayDefinitionID && part.Date == scope.Date && part.RawDayManifestKey == scope.RawDayManifestKey && part.RawDayManifestSHA256 == scope.RawDayManifestSHA256 && part.ReplayContractID == conversion.ReplayContractID && part.FormatID == conversion.FormatID && part.ConversionID == conversion.ConversionID && part.ConverterBuildID == conversion.ConverterBuildID && part.DependencyLockHash == conversion.DependencyLockHash && part.WriterConfigurationHash == conversion.WriterConfigurationHash && part.TargetPlatformContract == conversion.TargetPlatformContract
+	return part.DatasetID == scope.DatasetID && part.DayDefinitionID == scope.DayDefinitionID && part.Date == scope.Date && part.RawDayManifestKey == scope.RawDayManifestKey && part.RawDayManifestSHA256 == scope.RawDayManifestSHA256 && part.ReplayContractID == conversion.ReplayContractID && part.FormatID == conversion.FormatID && part.ConversionID == conversion.ConversionID && part.ConverterBuildID == conversion.ConverterBuildID && part.DependencyLockHash == conversion.DependencyLockHash && part.WriterConfigurationHash == conversion.WriterConfigurationHash && part.TargetPlatformContract == conversion.TargetPlatformContract
 }
 
 type ReplayRevisionGraph struct {
@@ -180,5 +180,5 @@ func VerifyReplayRevisionSuccessor(previous, current protocol.ReplayDayManifest)
 }
 
 func sameReplayStableIdentity(left, right protocol.ReplayDayManifest) bool {
-	return left.ManifestID == right.ManifestID && left.DatasetID == right.DatasetID && left.CampaignID == right.CampaignID && left.DayDefinitionID == right.DayDefinitionID && left.Date == right.Date && left.ReplayContractID == right.ReplayContractID && left.FormatID == right.FormatID && left.ConversionID == right.ConversionID && left.ConverterBuildID == right.ConverterBuildID && left.DependencyLockHash == right.DependencyLockHash && left.WriterConfigurationHash == right.WriterConfigurationHash && left.TargetPlatformContract == right.TargetPlatformContract
+	return left.ManifestID == right.ManifestID && left.DatasetID == right.DatasetID && left.DayDefinitionID == right.DayDefinitionID && left.Date == right.Date && left.ReplayContractID == right.ReplayContractID && left.FormatID == right.FormatID && left.ConversionID == right.ConversionID && left.ConverterBuildID == right.ConverterBuildID && left.DependencyLockHash == right.DependencyLockHash && left.WriterConfigurationHash == right.WriterConfigurationHash && left.TargetPlatformContract == right.TargetPlatformContract
 }

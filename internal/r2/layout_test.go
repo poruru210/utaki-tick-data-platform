@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/protocol"
@@ -11,7 +12,7 @@ import (
 
 func TestLayoutUsesImmutableRootExactlyOnce(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("v1", "r2:isolated-bucket/v1", scope)
+	layout, err := NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,59 +21,85 @@ func TestLayoutUsesImmutableRootExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rcloneObject, err := layout.RcloneKey(objectKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantPrefix := "dataset=" + archive.IdentityPathKey(scope.DatasetID) +
-		"/provider=" + archive.IdentityPathKey(scope.ProviderID) +
-		"/feed=" + archive.IdentityPathKey(scope.StableFeedID) +
-		"/symbol=" + archive.IdentityPathKey(scope.ExactSourceSymbol) +
-		"/campaign=" + archive.IdentityPathKey(scope.CampaignID) + "/"
-	if CampaignPrefix(scope) != wantPrefix {
-		t.Fatalf("campaign prefix = %q, want %q", CampaignPrefix(scope), wantPrefix)
+	wantPrefix := "source=" + exactPathComponent(scope.ProviderID) +
+		"/symbol=" + exactPathComponent(scope.ExactSourceSymbol) + "/"
+	if ScopePrefix(scope) != wantPrefix {
+		t.Fatalf("scope prefix = %q, want %q", ScopePrefix(scope), wantPrefix)
 	}
 	if remoteObject != "v1/"+wantPrefix+objectKey {
 		t.Fatalf("S3 key = %q, want %q", remoteObject, "v1/"+wantPrefix+objectKey)
 	}
-	if rcloneObject != "r2:isolated-bucket/v1/"+wantPrefix+objectKey {
-		t.Fatalf("rclone locator = %q, want %q", rcloneObject, "r2:isolated-bucket/v1/"+wantPrefix+objectKey)
-	}
-	if strings.Count(remoteObject, "v1/") != 1 || strings.Count(rcloneObject, "v1/") != 1 {
-		t.Fatalf("immutable roots were duplicated: S3=%q rclone=%q", remoteObject, rcloneObject)
+	if strings.Count(remoteObject, "v1/") != 1 {
+		t.Fatalf("immutable root was duplicated: S3=%q", remoteObject)
 	}
 }
 
 func TestLayoutDerivesReplayBundlePrefixesWithoutCallerKeys(t *testing.T) {
-	layout, err := NewLayout("v1", "r2:isolated-bucket/v1", layoutTestScope())
+	layout, err := NewLayout("v1", layoutTestScope())
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantImmutable := "v1/" + CampaignPrefix(layout.Scope)
-	wantRclone := "r2:isolated-bucket/v1/" + CampaignPrefix(layout.Scope)
-	if got := layout.ImmutableCampaignPrefix(); got != strings.TrimSuffix(wantImmutable, "/") {
-		t.Fatalf("immutable campaign prefix = %q", got)
-	}
-	if got := layout.RcloneCampaignPrefix(); got != strings.TrimSuffix(wantRclone, "/") {
-		t.Fatalf("rclone campaign prefix = %q", got)
+	wantImmutable := "v1/" + ScopePrefix(layout.Scope)
+	if got := layout.ImmutableScopePrefix(); got != strings.TrimSuffix(wantImmutable, "/") {
+		t.Fatalf("immutable scope prefix = %q", got)
 	}
 }
 
-func TestLayoutSeparatesDatasetsWithTheSameCampaignIdentity(t *testing.T) {
+func TestLayoutPhysicalPrefixIsStableForSameSourceSymbol(t *testing.T) {
 	first := layoutTestScope()
 	second := first
 	second.DatasetID = "dataset-other"
-	if CampaignPrefix(first) == CampaignPrefix(second) {
-		t.Fatalf("campaign prefixes collide across dataset identities: %q", CampaignPrefix(first))
+	if ScopePrefix(first) != ScopePrefix(second) {
+		t.Fatalf("v1 physical prefix should depend on source/symbol only: first=%q second=%q", ScopePrefix(first), ScopePrefix(second))
 	}
-	if !strings.Contains(CampaignPrefix(first), "dataset="+archive.IdentityPathKey(first.DatasetID)+"/") {
-		t.Fatalf("campaign prefix does not bind dataset identity: %q", CampaignPrefix(first))
+}
+
+func TestLayoutPhysicalPrefixUsesExactPathComponents(t *testing.T) {
+	scope := layoutTestScope()
+	scope.ProviderID = "OANDA Japan"
+	scope.ExactSourceSymbol = "EURUSD.pro#"
+	prefix := ScopePrefix(scope)
+	for _, want := range []string{"source=OANDA!20Japan", "symbol=EURUSD.pro!23"} {
+		if !strings.Contains(prefix, want) {
+			t.Fatalf("scope prefix %q does not contain exact component %q", prefix, want)
+		}
+	}
+	other := scope
+	other.ProviderID = "oanda japan"
+	if ScopePrefix(other) == prefix {
+		t.Fatalf("case-distinct source identities collided: %q", prefix)
+	}
+}
+
+func TestPublicationRunRootUsesGatewayAndRunBeforeScope(t *testing.T) {
+	runID := PublicationRunID(time.Date(2026, 7, 17, 9, 8, 16, 866795970, time.UTC))
+	root, err := PublicationRunRoot("v1", "gateway-r2-smoke-01", runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := layoutTestScope()
+	scope.ProviderID = "smoke"
+	layout, err := NewLayout(root, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "v1/gateway=gateway-r2-smoke-01/run=20260717T090816.866795970Z/source=smoke/symbol=" + exactPathComponent(scope.ExactSourceSymbol)
+	if layout.ImmutableScopePrefix() != want {
+		t.Fatalf("immutable scope prefix = %q want %q", layout.ImmutableScopePrefix(), want)
+	}
+}
+
+func TestPublicationRunRootRejectsGeneratedSegmentsInBaseRoot(t *testing.T) {
+	for _, root := range []string{"v1/gateway=x", "v1/run=x", "v1/source=x", "v1/symbol=x"} {
+		if _, err := PublicationRunRoot(root, "gateway", "run"); err == nil {
+			t.Fatalf("publication run root accepted generated segment in %q", root)
+		}
 	}
 }
 
 func TestLayoutDerivesManifestLocatorFromOneRelativeKey(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("smoke/v1", "r2:isolated-bucket/smoke/v1", scope)
+	layout, err := NewLayout("smoke/v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,25 +116,20 @@ func TestLayoutDerivesManifestLocatorFromOneRelativeKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rcloneKey, err := layout.RcloneManifestKey(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
 	wantRelative := "snapshots/raw/day-definition=" + archive.IdentityPathKey(scope.DayDefinitionID) +
 		"/date=2024-03-09/raw-day-2-" + fmt.Sprintf("%x", digest) + ".json"
-	wantS3 := "smoke/v1/" + CampaignPrefix(scope) + wantRelative
-	wantRclone := "r2:isolated-bucket/smoke/v1/" + CampaignPrefix(scope) + wantRelative
-	if s3Key != wantS3 || rcloneKey != wantRclone {
-		t.Fatalf("manifest locators differ: S3=%q rclone=%q want S3=%q rclone=%q", s3Key, rcloneKey, wantS3, wantRclone)
+	wantS3 := "smoke/v1/" + ScopePrefix(scope) + wantRelative
+	if s3Key != wantS3 {
+		t.Fatalf("manifest key = %q want %q", s3Key, wantS3)
 	}
-	if strings.Count(s3Key, CampaignPrefix(scope)) != 1 || strings.Count(rcloneKey, CampaignPrefix(scope)) != 1 {
-		t.Fatalf("campaign prefix was duplicated: S3=%q rclone=%q", s3Key, rcloneKey)
+	if strings.Count(s3Key, ScopePrefix(scope)) != 1 {
+		t.Fatalf("scope prefix was duplicated: S3=%q", s3Key)
 	}
 }
 
 func TestLayoutRejectsUnsafeRoots(t *testing.T) {
 	for _, root := range []string{"/v1", "//server/share", "C:/v1", "v1/../x", "v1/./x"} {
-		if _, err := NewLayout(root, "r2:bucket/v1", layoutTestScope()); err == nil {
+		if _, err := NewLayout(root, layoutTestScope()); err == nil {
 			t.Fatalf("unsafe immutable root %q was accepted", root)
 		}
 	}
@@ -115,7 +137,7 @@ func TestLayoutRejectsUnsafeRoots(t *testing.T) {
 
 func TestLayoutRejectsForgedManifestDigestAndTraversalDate(t *testing.T) {
 	scope := layoutTestScope()
-	layout, err := NewLayout("v1", "r2:bucket/v1", scope)
+	layout, err := NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,14 +148,11 @@ func TestLayoutRejectsForgedManifestDigestAndTraversalDate(t *testing.T) {
 		if _, err := layout.ManifestKey(manifest); err == nil {
 			t.Fatalf("forged manifest key input was accepted: %+v", manifest)
 		}
-		if _, err := layout.RcloneManifestKey(manifest); err == nil {
-			t.Fatalf("forged rclone manifest key input was accepted: %+v", manifest)
-		}
 	}
 }
 
 func TestLayoutValidatesTrustedFullDerivativeKeys(t *testing.T) {
-	layout, err := NewLayout("v1", "r2:bucket/v1", layoutTestScope())
+	layout, err := NewLayout("v1", layoutTestScope())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +161,7 @@ func TestLayoutValidatesTrustedFullDerivativeKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fullObject != "v1/"+CampaignPrefix(layout.Scope)+part.PartKey {
+	if fullObject != "v1/"+ScopePrefix(layout.Scope)+part.PartKey {
 		t.Fatalf("full part object key = %q", fullObject)
 	}
 	if err := layout.VerifyReplayPartObjectKey(part, fullObject); err != nil {
@@ -156,9 +175,9 @@ func TestLayoutValidatesTrustedFullDerivativeKeys(t *testing.T) {
 		t.Fatal("generic replay object key was accepted by trusted derivative verifier")
 	}
 	foreignPart := part
-	foreignPart.CampaignID = "campaign-other"
+	foreignPart.DayDefinitionID = "exchange-day-v1"
 	if _, err := layout.ReplayPartObjectKey(foreignPart); err == nil {
-		t.Fatal("cross-campaign part key was accepted by trusted layout")
+		t.Fatal("cross-scope part key was accepted by trusted layout")
 	}
 	fullManifest, err := layout.ReplayPartManifestKey(part)
 	if err != nil {
@@ -168,8 +187,7 @@ func TestLayoutValidatesTrustedFullDerivativeKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := protocol.ReplayDayManifest{
-		ManifestVersion: protocol.ReplayDayManifestVersion, ManifestID: "replay-layout-r1", DatasetID: part.DatasetID,
-		CampaignID: part.CampaignID, DayDefinitionID: part.DayDefinitionID, Date: part.Date, Revision: 1,
+		ManifestVersion: protocol.ReplayDayManifestVersion, ManifestID: "replay-layout-r1", DatasetID: part.DatasetID, DayDefinitionID: part.DayDefinitionID, Date: part.Date, Revision: 1,
 		RawDayManifestKey: part.RawDayManifestKey, RawDayManifestSHA256: part.RawDayManifestSHA256,
 		ReplayContractID: part.ReplayContractID, FormatID: protocol.ReplayFormatID, ConversionID: part.ConversionID,
 		ConverterBuildID: part.ConverterBuildID, DependencyLockHash: part.DependencyLockHash,
@@ -185,35 +203,9 @@ func TestLayoutValidatesTrustedFullDerivativeKeys(t *testing.T) {
 	}
 }
 
-func TestLayoutDerivesTrustedRcloneDerivativeKeys(t *testing.T) {
-	layout, err := NewLayout("v1", "r2:bucket/v1", layoutTestScope())
-	if err != nil {
-		t.Fatal(err)
-	}
-	part := layoutTestPart()
-	partRclone, err := layout.RcloneReplayPartObjectKey(part)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if partRclone != "r2:bucket/v1/"+CampaignPrefix(layout.Scope)+part.PartKey {
-		t.Fatalf("rclone Parquet key = %q", partRclone)
-	}
-	manifestRclone, err := layout.RcloneReplayPartManifestKey(part)
-	if err != nil {
-		t.Fatal(err)
-	}
-	partManifestKey, err := protocol.PartManifestKey(part)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if manifestRclone != "r2:bucket/v1/"+CampaignPrefix(layout.Scope)+partManifestKey {
-		t.Fatalf("rclone part manifest key = %q", manifestRclone)
-	}
-}
-
 func layoutTestPart() protocol.PartManifest {
 	scope := protocol.ReplayScope{
-		DatasetID: layoutTestScope().DatasetID, CampaignID: layoutTestScope().CampaignID, DayDefinitionID: layoutTestScope().DayDefinitionID,
+		DatasetID: layoutTestScope().DatasetID, DayDefinitionID: layoutTestScope().DayDefinitionID,
 		Date: "2024-03-09", ReplayContractID: "replay-v1", ConversionID: "conversion-v1",
 		RawDayManifestKey: "snapshots/raw/day-definition=utc-day-v1/date=2024-03-09/raw-day-1.json", RawDayManifestSHA256: [32]byte{0x55},
 	}
@@ -223,8 +215,7 @@ func layoutTestPart() protocol.PartManifest {
 		panic(err)
 	}
 	return protocol.PartManifest{
-		ManifestVersion: protocol.PartManifestVersion, DatasetID: scope.DatasetID, CampaignID: scope.CampaignID,
-		DayDefinitionID: scope.DayDefinitionID, Date: scope.Date, ReplayContractID: scope.ReplayContractID,
+		ManifestVersion: protocol.PartManifestVersion, DatasetID: scope.DatasetID, DayDefinitionID: scope.DayDefinitionID, Date: scope.Date, ReplayContractID: scope.ReplayContractID,
 		FormatID: protocol.ReplayFormatID, ConversionID: scope.ConversionID, ConverterBuildID: "converter-1",
 		DependencyLockHash: [32]byte{0x44}, WriterConfigurationHash: [32]byte{0x55}, TargetPlatformContract: "parquet-v1",
 		RawDayManifestKey: scope.RawDayManifestKey, RawDayManifestSHA256: scope.RawDayManifestSHA256,
@@ -236,7 +227,6 @@ func layoutTestPart() protocol.PartManifest {
 func layoutTestScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
 		DatasetID:               "dataset-demo",
-		CampaignID:              "campaign-demo",
 		ProviderID:              "provider-demo",
 		StableFeedID:            "feed-demo",
 		ExactSourceSymbol:       "EURUSD.raw",

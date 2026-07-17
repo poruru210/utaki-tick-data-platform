@@ -31,7 +31,6 @@ payload fieldsは次の順序で並べます。
 | terminal_build | String |
 | os_contract | String |
 | clock_api_id | String |
-| campaign_id | String |
 | provider_id | String |
 | stable_feed_id | String |
 | broker_server_fingerprint | String |

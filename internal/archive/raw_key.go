@@ -5,19 +5,18 @@ import (
 	"fmt"
 )
 
-// RawWALObjectKey returns the canonical campaign-relative key for a sealed WAL
+// RawWALObjectKey returns the canonical scope-relative key for a sealed WAL
 // object. The key is ASCII and is derived only from the complete object hash.
 func RawWALObjectKey(hash [32]byte) string {
 	return "objects/raw/wal-" + hex.EncodeToString(hash[:]) + ".rtw"
 }
 
-// RawDayManifestRelativeKey returns the canonical campaign-relative raw-day
-// manifest key. r2.Layout adds the immutable campaign prefix and remote root;
+// RawDayManifestRelativeKey returns the canonical scope-relative raw-day
+// manifest key. r2.Layout adds the immutable scope prefix and remote root;
 // replay input verification uses this relative form so the layout derivation
 // remains in one place.
 func RawDayManifestRelativeKey(scope ScopeConfig, manifest RawDayManifest) (string, error) {
-	if manifest.DatasetID != scope.DatasetID || manifest.CampaignID != scope.CampaignID ||
-		manifest.DayDefinitionID != scope.DayDefinitionID {
+	if manifest.DatasetID != scope.DatasetID || manifest.DayDefinitionID != scope.DayDefinitionID {
 		return "", fmt.Errorf("%w: raw-day manifest key scope mismatch", ErrIntegrity)
 	}
 	if manifest.Date == "" || manifest.Revision == 0 {
@@ -36,7 +35,7 @@ func RawDayManifestRelativeKey(scope ScopeConfig, manifest RawDayManifest) (stri
 	), nil
 }
 
-// VerifyRawDayManifestRelativeKey accepts only the exact campaign-relative
+// VerifyRawDayManifestRelativeKey accepts only the exact scope-relative
 // key derived from the manifest. A full remote key requires a trusted
 // r2.Layout and is intentionally outside this API's trust boundary.
 func VerifyRawDayManifestRelativeKey(scope ScopeConfig, manifest RawDayManifest, key string) error {

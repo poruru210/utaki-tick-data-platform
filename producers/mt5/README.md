@@ -30,7 +30,7 @@ processを再起動した場合は新しいproducer sessionでHelloを送り、R
 
 `TickCaptureService.mq5`は、CopyTicks、built-in TCP socket、Hello/Resume、Batch送信、Ack判定、再接続、再送を一つのService control flowとして実装しています。
 
-ServiceのinputでGateway endpoint、producer identity、campaign、broker fingerprint、exact symbol、初期cursor、batch上限を固定します。
+ServiceのinputでGateway endpoint、producer identity、source、broker fingerprint、exact symbol、初期cursor、batch上限を固定します。
 
 MQL5 compilerを使ったコンパイル結果は、このrepositoryのGo/Python自動検証には含めません。
 

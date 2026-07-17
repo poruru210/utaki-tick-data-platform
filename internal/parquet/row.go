@@ -9,7 +9,6 @@ type parquetRow struct {
 	RowKind              uint8      `parquet:"row_kind,uint(8),uncompressed,plain"`
 	StreamSequence       uint64     `parquet:"stream_sequence,uint(64),uncompressed,plain"`
 	DatasetID            string     `parquet:"dataset_id,uncompressed,plain"`
-	CampaignID           string     `parquet:"campaign_id,uncompressed,plain"`
 	DayDefinitionID      string     `parquet:"day_definition_id,uncompressed,plain"`
 	Date                 string     `parquet:"date,uncompressed,plain"`
 	ReplayContractID     string     `parquet:"replay_contract_id,uncompressed,plain"`
@@ -79,7 +78,6 @@ func makeParquetRow(row protocol.ReplayRow, previous [32]byte) (parquetRow, []by
 		RowKind:              row.Kind,
 		StreamSequence:       row.StreamSequence(),
 		DatasetID:            scope.DatasetID,
-		CampaignID:           scope.CampaignID,
 		DayDefinitionID:      scope.DayDefinitionID,
 		Date:                 scope.Date,
 		ReplayContractID:     scope.ReplayContractID,
@@ -121,7 +119,7 @@ func makeParquetRow(row protocol.ReplayRow, previous [32]byte) (parquetRow, []by
 
 func (r parquetRow) replayRow() (protocol.ReplayRow, error) {
 	scope := protocol.ReplayScope{
-		DatasetID: r.DatasetID, CampaignID: r.CampaignID, DayDefinitionID: r.DayDefinitionID,
+		DatasetID: r.DatasetID, DayDefinitionID: r.DayDefinitionID,
 		Date: r.Date, ReplayContractID: r.ReplayContractID, ConversionID: r.ConversionID,
 		RawDayManifestKey: r.RawDayManifestKey, RawDayManifestSHA256: r.RawDayManifestSHA256,
 	}

@@ -2,6 +2,7 @@ package continuity_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/continuity"
 	"tick-data-platform/internal/protocol"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/internal/wal"
 )
 
@@ -294,7 +296,7 @@ func TestOpenVerifiedReplaySourceRejectsTrustBoundaryFailures(t *testing.T) {
 		name   string
 		mutate func(*rawFixture)
 	}{
-		{name: "raw key mismatch", mutate: func(f *rawFixture) { f.bytes = append([]byte(nil), f.bytes...); f.scope.CampaignID = "other" }},
+		{name: "raw key mismatch", mutate: func(f *rawFixture) { f.bytes = append([]byte(nil), f.bytes...); f.scope.ProviderID = "other-source" }},
 		{name: "scope config mismatch", mutate: func(f *rawFixture) { f.scope.ProtocolLimits.MaxRecords = 1 }},
 		{name: "missing sealed object", mutate: func(f *rawFixture) { f.paths = map[string]string{} }},
 	}
@@ -660,18 +662,18 @@ func buildFixture(t *testing.T, batches []protocol.BatchFrameV1) rawFixture {
 	t.Helper()
 	scope := testScope()
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for index, batch := range batches {
 		frame, err := protocol.EncodeMessage(batch)
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		if _, err := store.Append(frame, 1710000000+int64(index), uint64(100+index)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 	}
@@ -679,17 +681,17 @@ func buildFixture(t *testing.T, batches []protocol.BatchFrameV1) rawFixture {
 	if len(batches) > 0 {
 		sealed, err := store.Seal()
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		object, err := archive.PromoteSealedSegment(t.TempDir(), sealed.Path)
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		objects = []archive.RawObject{object}
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	manifest, err := archive.BuildRawDayManifest(archive.RawDayManifestInput{
@@ -789,7 +791,7 @@ func replayLimitsForManifest(manifest archive.RawDayManifest) archive.ReplayReso
 
 func testScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
-		DatasetID: "dataset-demo", CampaignID: "campaign-demo", ProviderID: "provider-demo", StableFeedID: "feed-demo",
+		DatasetID: "dataset-demo", ProviderID: "provider-demo", StableFeedID: "feed-demo",
 		ExactSourceSymbol: "EURUSD.raw", BrokerServerFingerprint: "server-fingerprint", GatewayBuildIdentity: "gateway-build-1",
 		ProducerBuildIdentity: "producer-build-1", DayDefinitionID: "utc-day-v1", SettlePolicy: "manual-v1",
 		PublisherID: "publisher-1", PublisherEpoch: 1, ProtocolLimits: archive.ProtocolLimits{MaxFrameBytes: protocol.MaxFrameBytes, MaxRecords: 4, MaxStringBytes: protocol.MaxStringBytes},
@@ -802,7 +804,7 @@ func batch(session string, sequence uint64, records ...protocol.RawMqlTickV1) pr
 		requestedFrom = records[0].TimeMSC
 	}
 	scope := testScope()
-	lease := protocol.DeriveSessionLeaseID(testProducerInstanceID, session, scope.CampaignID, scope.ProviderID, scope.StableFeedID, scope.BrokerServerFingerprint, scope.ExactSourceSymbol)
+	lease := protocol.DeriveSessionLeaseID(testProducerInstanceID, session, scope.ProviderID, scope.StableFeedID, scope.BrokerServerFingerprint, scope.ExactSourceSymbol)
 	return protocol.BatchFrameV1{SessionLeaseID: lease, ProducerSessionID: session, BatchSequence: sequence,
 		RequestedFromMSC: requestedFrom, RequestedCount: uint32(len(records)), FetchWallStartS: 1, FetchWallEndS: 1,
 		FetchMonotonicStartUS: sequence, FetchMonotonicEndUS: sequence + 1, ReturnedCount: int32(len(records)),

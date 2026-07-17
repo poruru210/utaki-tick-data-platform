@@ -11,22 +11,23 @@ import (
 var (
 	ErrUnsupportedReplay = errors.New("replay delivery is outside M2R-3")
 	ErrSelectorInvalid   = errors.New("snapshot selector is invalid")
+	ErrSelectorNotFound  = errors.New("snapshot selector was not found")
 )
 
 const (
 	VerificationScopeAnchoredDay = "anchored_day_slice"
-	VerificationScopeCampaign    = "campaign_genesis_to_root"
+	VerificationScopeFullChain   = "scope_genesis_to_root"
 )
 
 type ArchiveReaderV1 interface {
 	ListDatasets(ctx context.Context) ([]DatasetDescriptor, error)
-	ListCampaigns(ctx context.Context, datasetID string) ([]CampaignDescriptor, error)
+	ListScopes(ctx context.Context, datasetID string) ([]ScopeDescriptor, error)
 	ListRawSnapshots(ctx context.Context, scope RawDayScope) ([]SnapshotDescriptor, error)
 	ResolveSnapshot(ctx context.Context, selector SnapshotSelector) (ResolvedSnapshot, error)
 	BuildFetchPlan(ctx context.Context, snapshot ResolvedSnapshot) (FetchPlan, error)
 	Fetch(ctx context.Context, plan FetchPlan, destination string) (FetchResult, error)
 	VerifyDay(ctx context.Context, selector SnapshotSelector) (DayVerificationReport, error)
-	VerifyCampaign(ctx context.Context, datasetID, campaignID, throughRoot string) (CampaignVerificationReport, error)
+	VerifyScope(ctx context.Context, scope RawScopeSelector, throughRoot string) (ScopeVerificationReport, error)
 	ListReplaySnapshots(ctx context.Context, scope ReplayDayScope) ([]ReplaySnapshotDescriptor, error)
 	ResolveReplaySnapshot(ctx context.Context, selector ReplaySnapshotSelector) (ResolvedReplaySnapshot, error)
 	BuildReplayFetchPlan(ctx context.Context, snapshot ResolvedReplaySnapshot) (ReplayFetchPlan, error)
@@ -38,9 +39,8 @@ type DatasetDescriptor struct {
 	DatasetID string
 }
 
-type CampaignDescriptor struct {
+type ScopeDescriptor struct {
 	DatasetID               string
-	CampaignID              string
 	ProviderID              string
 	StableFeedID            string
 	ExactSourceSymbol       string
@@ -52,21 +52,24 @@ type CampaignDescriptor struct {
 }
 
 type RawDayScope struct {
-	DatasetID  string
-	CampaignID string
-	Date       string
+	DatasetID         string
+	ProviderID        string
+	ExactSourceSymbol string
+	Date              string
 }
 
 type SnapshotSelector struct {
-	DatasetID  string
-	CampaignID string
-	Date       string
-	Manifest   string
+	DatasetID         string
+	ProviderID        string
+	ExactSourceSymbol string
+	Date              string
+	Manifest          string
 }
 
 type SnapshotDescriptor struct {
 	DatasetID           string
-	CampaignID          string
+	ProviderID          string
+	ExactSourceSymbol   string
 	DayDefinitionID     string
 	Date                string
 	Revision            uint64
@@ -127,7 +130,6 @@ type DayVerificationReport struct {
 	GenesisVerified     bool
 	VerificationScope   string
 	DatasetID           string
-	CampaignID          string
 	Date                string
 	Revision            uint64
 	ManifestKey         string
@@ -142,11 +144,18 @@ type DayVerificationReport struct {
 	Entries             []RestoredEntry
 }
 
-type CampaignVerificationReport struct {
+type RawScopeSelector struct {
+	DatasetID         string
+	ProviderID        string
+	ExactSourceSymbol string
+}
+
+type ScopeVerificationReport struct {
 	GenesisVerified   bool
 	VerificationScope string
 	DatasetID         string
-	CampaignID        string
+	ProviderID        string
+	ExactSourceSymbol string
 	ThroughRoot       [32]byte
 	VerifiedThrough   uint64
 	SegmentCount      int
@@ -156,12 +165,13 @@ type CampaignVerificationReport struct {
 const VerificationScopeReplayAnchoredDay = "replay_anchored_day"
 
 type ReplayDayScope struct {
-	DatasetID        string
-	CampaignID       string
-	DayDefinitionID  string
-	Date             string
-	ReplayContractID string
-	ConversionID     string
+	DatasetID         string
+	ProviderID        string
+	ExactSourceSymbol string
+	DayDefinitionID   string
+	Date              string
+	ReplayContractID  string
+	ConversionID      string
 }
 
 type ReplaySnapshotSelector struct {
@@ -172,7 +182,8 @@ type ReplaySnapshotSelector struct {
 
 type ReplaySnapshotDescriptor struct {
 	DatasetID                   string
-	CampaignID                  string
+	ProviderID                  string
+	ExactSourceSymbol           string
 	DayDefinitionID             string
 	Date                        string
 	ReplayContractID            string
@@ -231,7 +242,8 @@ type ReplayDayVerificationReport struct {
 	GenesisVerified               bool
 	VerificationScope             string
 	DatasetID                     string
-	CampaignID                    string
+	ProviderID                    string
+	ExactSourceSymbol             string
 	DayDefinitionID               string
 	Date                          string
 	ReplayContractID              string

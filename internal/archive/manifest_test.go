@@ -1,6 +1,7 @@
 package archive_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -12,7 +13,7 @@ import (
 
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/protocol"
-	"tick-data-platform/internal/wal"
+	"tick-data-platform/internal/testsupport"
 )
 
 func TestBuildRawDayManifestSelectsRangesAndZeroBatchSentinel(t *testing.T) {
@@ -88,6 +89,27 @@ func TestBuildRawDayManifestSelectsRangesAndZeroBatchSentinel(t *testing.T) {
 	if second.ManifestSHA256 != manifest.ManifestSHA256 {
 		t.Fatal("same verified WAL input did not produce a deterministic manifest")
 	}
+	coverage, err := archive.VerifyRawDaySegmentCoverage(manifest, object.Segment, object.Key, object.SHA256, uint64(object.Bytes), scope)
+	if err != nil || len(coverage.SelectedRanges) != 3 || coverage.AcceptedRecordCount != 2 || coverage.ErrorCount != 1 {
+		t.Fatalf("segment semantic coverage = %+v, err=%v", coverage, err)
+	}
+	tampered := manifest
+	tampered.Objects = append([]archive.RawObjectRange(nil), manifest.Objects[:2]...)
+	tampered.RawSetRoot, err = archive.RawSetRoot(tampered.Objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.VerifyRawDaySegmentCoverage(tampered, object.Segment, object.Key, object.SHA256, uint64(object.Bytes), scope); err == nil {
+		t.Fatal("segment semantic coverage accepted a missing selected range")
+	}
+	if report, err := archive.VerifyRawDaySnapshotSegments(manifest, []archive.RawObject{object}, scope); err != nil || report.AcceptedRecordCount != manifest.AcceptedRecordCount || report.ErrorCount != manifest.ErrorCount {
+		t.Fatalf("full remote semantic report = %+v, err=%v", report, err)
+	}
+	tamperedSummary := manifest
+	tamperedSummary.AcceptedRecordCount++
+	if _, err := archive.VerifyRawDaySnapshotSegments(tamperedSummary, []archive.RawObject{object}, scope); err == nil {
+		t.Fatal("full remote semantic verification accepted a forged aggregate count")
+	}
 }
 
 func TestBuildRawDayManifestRevisionChainAndScopeDescriptor(t *testing.T) {
@@ -135,20 +157,20 @@ func TestBuildRawDayManifestRevisionChainAndScopeDescriptor(t *testing.T) {
 	}
 
 	descriptorRoot := t.TempDir()
-	if _, err := archive.EnsureCampaignScopeDescriptor(descriptorRoot, scope); err != nil {
+	if _, err := archive.EnsureScopeDescriptor(descriptorRoot, scope); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := archive.EnsureCampaignScopeDescriptor(descriptorRoot, scope); err != nil {
+	if _, err := archive.EnsureScopeDescriptor(descriptorRoot, scope); err != nil {
 		t.Fatal(err)
 	}
 	different := scope
-	different.ExactSourceSymbol = "EURUSD"
-	if _, err := archive.EnsureCampaignScopeDescriptor(descriptorRoot, different); !errors.Is(err, archive.ErrIntegrity) {
+	different.PublisherID = "publisher-other"
+	if _, err := archive.EnsureScopeDescriptor(descriptorRoot, different); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("different scope content error = %v, want ErrIntegrity", err)
 	}
 }
 
-func TestBuildRawDayManifestRejectsDiscontinuousCampaignSegments(t *testing.T) {
+func TestBuildRawDayManifestRejectsDiscontinuousScopeSegments(t *testing.T) {
 	first := promoteTestObject(t, testFrame(t, time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli(), 1), nil)
 	second := promoteTestObject(t, testFrame(t, time.Date(2024, 3, 9, 0, 0, 2, 0, time.UTC).UnixMilli(), 2), nil)
 	input := archive.RawDayManifestInput{
@@ -160,14 +182,14 @@ func TestBuildRawDayManifestRejectsDiscontinuousCampaignSegments(t *testing.T) {
 		LogicalCloseTimeS:  1710003600,
 	}
 	if _, err := archive.BuildRawDayManifest(input); !errors.Is(err, archive.ErrIntegrity) {
-		t.Fatalf("discontinuous campaign error = %v, want ErrIntegrity", err)
+		t.Fatalf("discontinuous scope error = %v, want ErrIntegrity", err)
 	}
 }
 
 func TestRawDayManifestChainObjectsContainCrossDayMiddleObject(t *testing.T) {
 	dayA := time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli()
 	dayB := time.Date(2024, 3, 10, 0, 0, 1, 0, time.UTC).UnixMilli()
-	objects := promoteCampaignObjects(t, []int64{dayA, dayB, dayA})
+	objects := promoteScopeObjects(t, []int64{dayA, dayB, dayA})
 	input := archive.RawDayManifestInput{
 		Scope:              testScope(),
 		Date:               "2024-03-09",
@@ -221,7 +243,7 @@ func TestRawDayManifestChainObjectsContainCrossDayMiddleObject(t *testing.T) {
 
 func TestVerifyRawDaySnapshotRejectsMissingTamperedFalseBoundaryAndCrossArray(t *testing.T) {
 	day := time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli()
-	objects := promoteCampaignObjects(t, []int64{day, day + 1000, day})
+	objects := promoteScopeObjects(t, []int64{day, day + 1000, day})
 	input := archive.RawDayManifestInput{
 		Scope:              testScope(),
 		Date:               "2024-03-09",
@@ -365,9 +387,7 @@ func TestVerifyGoldenRawDayManifest(t *testing.T) {
 
 func testScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
-		DatasetID:               "dataset-demo",
-		CampaignID:              "campaign-demo",
-		ProviderID:              "provider-demo",
+		DatasetID: "dataset-demo", ProviderID: "provider-demo",
 		StableFeedID:            "feed-demo",
 		ExactSourceSymbol:       "EURUSD.raw",
 		BrokerServerFingerprint: "server-fingerprint",
@@ -389,11 +409,11 @@ func inputForObjects(base archive.RawDayManifestInput, objects []archive.RawObje
 	return base
 }
 
-func promoteCampaignObjects(t *testing.T, times []int64) []archive.RawObject {
+func promoteScopeObjects(t *testing.T, times []int64) []archive.RawObject {
 	t.Helper()
 	root := t.TempDir()
 	outbox := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,22 +421,22 @@ func promoteCampaignObjects(t *testing.T, times []int64) []archive.RawObject {
 	for i, timeMSC := range times {
 		frame := testFrame(t, timeMSC, uint64(i+1))
 		if _, err := store.Append(frame, 1710000000+int64(i), uint64(100+i)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		sealed, err := store.Seal()
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		object, err := archive.PromoteSealedSegment(outbox, sealed.Path)
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		objects = append(objects, object)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return objects
@@ -464,7 +484,7 @@ func decodeFixtureCanonicalJSON(data []byte) (string, error) {
 func promoteTestObject(t *testing.T, frames ...[]byte) archive.RawObject {
 	t.Helper()
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,16 +493,16 @@ func promoteTestObject(t *testing.T, frames ...[]byte) archive.RawObject {
 			continue
 		}
 		if _, err := store.Append(frame, 1710000000+int64(i), uint64(100+i)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 	}
 	sealed, err := store.Seal()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	object, err := archive.PromoteSealedSegment(t.TempDir(), sealed.Path)

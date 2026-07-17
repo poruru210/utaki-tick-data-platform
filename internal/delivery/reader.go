@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/credentials"
 	"tick-data-platform/internal/r2"
 )
 
@@ -21,18 +22,18 @@ func NewArchiveReaderV1(ctx context.Context, config ReaderConfig) (ArchiveReader
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	bucket, err := config.Bucket()
+	provider, err := credentials.NewFileProvider(credentials.FileConfig{
+		Path: config.CredentialsPath, Protection: credentials.ProtectionMode(config.CredentialsProtection),
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create reader credential provider: %w", err)
 	}
-	backend, err := r2.NewS3ReadBackend(ctx, r2.S3ReadBackendConfig{
-		Bucket:           bucket,
+	backend, err := r2.NewS3ReadBackendWithProvider(ctx, r2.S3ReadBackendConfig{
+		Bucket:           config.Bucket,
 		Endpoint:         config.Endpoint,
 		Region:           config.Region,
-		AccessKeyEnv:     config.AccessKeyEnv,
-		SecretKeyEnv:     config.SecretKeyEnv,
 		MaxMetadataBytes: int64(config.MaxMetadataBytes),
-	})
+	}, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +58,7 @@ type discoveredScope struct {
 
 func (r *archiveReaderV1) discoverScopes(ctx context.Context) ([]discoveredScope, error) {
 	prefix := strings.TrimRight(r.config.ImmutableRoot, "/") + "/"
-	objects, err := r.backend.List(ctx, prefix)
+	objects, err := r.backend.ListLimited(ctx, prefix, r.config.MaxRemoteObjects)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func (r *archiveReaderV1) discoverScopes(ctx context.Context) ([]discoveredScope
 		if err != nil {
 			return nil, fmt.Errorf("%w: scope descriptor is invalid", archive.ErrIntegrity)
 		}
-		layout, err := r2.NewLayout(r.config.ImmutableRoot, "", scope)
+		layout, err := r2.NewLayout(r.config.ImmutableRoot, scope)
 		if err != nil {
 			return nil, fmt.Errorf("%w: scope layout is invalid", archive.ErrIntegrity)
 		}
@@ -113,8 +114,30 @@ func seenScopeKey(scopes []discoveredScope, want string) (discoveredScope, bool)
 	return discoveredScope{}, false
 }
 
+func selectRawScope(scopes []discoveredScope, selector RawScopeSelector) (discoveredScope, error) {
+	if selector.DatasetID == "" || selector.ProviderID == "" || selector.ExactSourceSymbol == "" {
+		return discoveredScope{}, fmt.Errorf("dataset, provider, and exact source symbol are required")
+	}
+	var selected *discoveredScope
+	for i := range scopes {
+		if scopes[i].Scope.DatasetID != selector.DatasetID ||
+			scopes[i].Scope.ProviderID != selector.ProviderID ||
+			scopes[i].Scope.ExactSourceSymbol != selector.ExactSourceSymbol {
+			continue
+		}
+		if selected != nil {
+			return discoveredScope{}, fmt.Errorf("%w: scope identity is ambiguous", archive.ErrIntegrity)
+		}
+		selected = &scopes[i]
+	}
+	if selected == nil {
+		return discoveredScope{}, fmt.Errorf("%w: scope identity was not discovered", archive.ErrIntegrity)
+	}
+	return *selected, nil
+}
+
 func (r *archiveReaderV1) metadata(ctx context.Context, key string) ([]byte, error) {
-	body, err := r.backend.Get(ctx, key)
+	body, err := r.backend.GetLimited(ctx, key, r.config.MaxMetadataBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +165,7 @@ func (r *archiveReaderV1) ListDatasets(ctx context.Context) ([]DatasetDescriptor
 	return result, nil
 }
 
-func (r *archiveReaderV1) ListCampaigns(ctx context.Context, datasetID string) ([]CampaignDescriptor, error) {
+func (r *archiveReaderV1) ListScopes(ctx context.Context, datasetID string) ([]ScopeDescriptor, error) {
 	if datasetID == "" {
 		return nil, fmt.Errorf("dataset is required")
 	}
@@ -150,7 +173,7 @@ func (r *archiveReaderV1) ListCampaigns(ctx context.Context, datasetID string) (
 	if err != nil {
 		return nil, err
 	}
-	result := make([]CampaignDescriptor, 0)
+	result := make([]ScopeDescriptor, 0)
 	for _, item := range scopes {
 		if item.Scope.DatasetID != datasetID {
 			continue
@@ -159,8 +182,8 @@ func (r *archiveReaderV1) ListCampaigns(ctx context.Context, datasetID string) (
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, CampaignDescriptor{
-			DatasetID: item.Scope.DatasetID, CampaignID: item.Scope.CampaignID,
+		result = append(result, ScopeDescriptor{
+			DatasetID:  item.Scope.DatasetID,
 			ProviderID: item.Scope.ProviderID, StableFeedID: item.Scope.StableFeedID,
 			ExactSourceSymbol:       item.Scope.ExactSourceSymbol,
 			BrokerServerFingerprint: item.Scope.BrokerServerFingerprint,
@@ -169,32 +192,26 @@ func (r *archiveReaderV1) ListCampaigns(ctx context.Context, datasetID string) (
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].CampaignID != result[j].CampaignID {
-			return result[i].CampaignID < result[j].CampaignID
+		if result[i].ProviderID != result[j].ProviderID {
+			return result[i].ProviderID < result[j].ProviderID
 		}
-		return result[i].ProviderID < result[j].ProviderID
+		return result[i].ExactSourceSymbol < result[j].ExactSourceSymbol
 	})
 	return result, nil
 }
 
 func (r *archiveReaderV1) ListRawSnapshots(ctx context.Context, scope RawDayScope) ([]SnapshotDescriptor, error) {
-	if scope.DatasetID == "" || scope.CampaignID == "" {
-		return nil, fmt.Errorf("dataset and campaign are required")
-	}
 	scopes, err := r.discoverScopes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var matches []discoveredScope
-	for _, item := range scopes {
-		if item.Scope.DatasetID == scope.DatasetID && item.Scope.CampaignID == scope.CampaignID {
-			matches = append(matches, item)
-		}
+	selected, err := selectRawScope(scopes, RawScopeSelector{
+		DatasetID: scope.DatasetID, ProviderID: scope.ProviderID, ExactSourceSymbol: scope.ExactSourceSymbol,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if len(matches) != 1 {
-		return nil, fmt.Errorf("%w: campaign identity is ambiguous or absent", archive.ErrIntegrity)
-	}
-	snapshots, err := r.loadSnapshots(ctx, matches[0])
+	snapshots, err := r.loadSnapshots(ctx, selected)
 	if err != nil {
 		return nil, err
 	}
@@ -211,15 +228,15 @@ func (r *archiveReaderV1) ListRawSnapshots(ctx context.Context, scope RawDayScop
 }
 
 func (r *archiveReaderV1) loadSnapshots(ctx context.Context, discovered discoveredScope) ([]SnapshotDescriptor, error) {
-	layout, err := r2.NewLayout(r.config.ImmutableRoot, "", discovered.Scope)
+	layout, err := r2.NewLayout(r.config.ImmutableRoot, discovered.Scope)
 	if err != nil {
-		return nil, fmt.Errorf("%w: campaign layout is invalid", archive.ErrIntegrity)
+		return nil, fmt.Errorf("%w: scope layout is invalid", archive.ErrIntegrity)
 	}
 	base, err := layout.RemoteKey("snapshots/raw/day-definition=" + archive.IdentityPathKey(discovered.Scope.DayDefinitionID))
 	if err != nil {
 		return nil, err
 	}
-	objects, err := r.backend.List(ctx, base+"/")
+	objects, err := r.backend.ListLimited(ctx, base+"/", r.config.MaxRemoteObjects)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +277,7 @@ func (r *archiveReaderV1) loadSnapshots(ctx context.Context, discovered discover
 		}
 		seenDigest[manifest.ManifestSHA256] = struct{}{}
 		records = append(records, r2.ManifestRecord{Key: object.Key, Bytes: append([]byte(nil), body...), Manifest: manifest})
-		descriptors = append(descriptors, snapshotDescriptor(manifest, object.Key))
+		descriptors = append(descriptors, snapshotDescriptor(discovered.Scope, manifest, object.Key))
 	}
 	byDate := make(map[string][]r2.ManifestRecord)
 	for _, record := range records {
@@ -283,10 +300,11 @@ func (r *archiveReaderV1) loadSnapshots(ctx context.Context, discovered discover
 	return descriptors, nil
 }
 
-func snapshotDescriptor(manifest archive.RawDayManifest, key string) SnapshotDescriptor {
+func snapshotDescriptor(scope archive.ScopeConfig, manifest archive.RawDayManifest, key string) SnapshotDescriptor {
 	return SnapshotDescriptor{
-		DatasetID: manifest.DatasetID, CampaignID: manifest.CampaignID, DayDefinitionID: manifest.DayDefinitionID,
-		Date: manifest.Date, Revision: manifest.Revision, PublisherID: manifest.PublisherID,
+		DatasetID: manifest.DatasetID, ProviderID: scope.ProviderID, ExactSourceSymbol: scope.ExactSourceSymbol,
+		DayDefinitionID: manifest.DayDefinitionID,
+		Date:            manifest.Date, Revision: manifest.Revision, PublisherID: manifest.PublisherID,
 		PublisherEpoch: manifest.PublisherEpoch, ManifestKey: key, ManifestSHA256: manifest.ManifestSHA256,
 		ChainSliceStart: manifest.ChainSliceStartSequence, ChainSliceStartRoot: manifest.ChainSliceStartRoot,
 		ChainSliceEnd: manifest.ChainSliceEndSequence, ChainSliceEndRoot: manifest.ChainSliceEndRoot,
@@ -299,7 +317,7 @@ func manifestMatchesScope(manifest archive.RawDayManifest, scope archive.ScopeCo
 	if err != nil {
 		return err
 	}
-	if manifest.DatasetID != scope.DatasetID || manifest.CampaignID != scope.CampaignID ||
+	if manifest.DatasetID != scope.DatasetID ||
 		manifest.DayDefinitionID != scope.DayDefinitionID || manifest.PublisherID != scope.PublisherID ||
 		manifest.PublisherEpoch != scope.PublisherEpoch || manifest.SettlePolicy != scope.SettlePolicy ||
 		manifest.ConfigHash != hash {
@@ -325,7 +343,10 @@ func (r *archiveReaderV1) ResolveSnapshot(ctx context.Context, selector Snapshot
 		if selector.DatasetID != "" && discovered.Scope.DatasetID != selector.DatasetID {
 			continue
 		}
-		if selector.CampaignID != "" && discovered.Scope.CampaignID != selector.CampaignID {
+		if selector.ProviderID != "" && discovered.Scope.ProviderID != selector.ProviderID {
+			continue
+		}
+		if selector.ExactSourceSymbol != "" && discovered.Scope.ExactSourceSymbol != selector.ExactSourceSymbol {
 			continue
 		}
 		snapshots, err := r.loadSnapshots(ctx, discovered)
@@ -356,7 +377,7 @@ func (r *archiveReaderV1) ResolveSnapshot(ctx context.Context, selector Snapshot
 		}
 	}
 	if len(matches) == 0 {
-		return ResolvedSnapshot{}, fmt.Errorf("%w: manifest selector did not match exactly one snapshot", archive.ErrIntegrity)
+		return ResolvedSnapshot{}, fmt.Errorf("%w: manifest selector did not match exactly one snapshot", ErrSelectorNotFound)
 	}
 	if len(matches) != 1 {
 		return ResolvedSnapshot{}, fmt.Errorf("%w: manifest selector matched multiple snapshots", archive.ErrIntegrity)

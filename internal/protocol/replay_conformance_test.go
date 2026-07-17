@@ -22,7 +22,7 @@ func TestReplayGoldenConformanceMatchesPythonFixture(t *testing.T) {
 	getHash := func(value string) [32]byte { return fixtureHash(t, value) }
 	scopeValue := getObject(fixture["scope"])
 	scope := ReplayScope{
-		DatasetID: getString(scopeValue, "dataset_id"), CampaignID: getString(scopeValue, "campaign_id"), DayDefinitionID: getString(scopeValue, "day_definition_id"), Date: getString(scopeValue, "date"),
+		DatasetID: getString(scopeValue, "dataset_id"), DayDefinitionID: getString(scopeValue, "day_definition_id"), Date: getString(scopeValue, "date"),
 		ReplayContractID: getString(scopeValue, "replay_contract_id"), ConversionID: getString(scopeValue, "conversion_id"), RawDayManifestKey: getString(scopeValue, "raw_day_manifest_key"), RawDayManifestSHA256: getHash(getString(scopeValue, "raw_day_manifest_sha256")),
 	}
 	markerValue := getObject(fixture["marker_row"])
@@ -54,7 +54,7 @@ func TestReplayGoldenConformanceMatchesPythonFixture(t *testing.T) {
 	}
 	partValue := getObject(fixture["part_manifest"])
 	part := PartManifest{
-		ManifestVersion: getString(partValue, "manifest_version"), DatasetID: getString(partValue, "dataset_id"), CampaignID: getString(partValue, "campaign_id"), DayDefinitionID: getString(partValue, "day_definition_id"), Date: getString(partValue, "date"),
+		ManifestVersion: getString(partValue, "manifest_version"), DatasetID: getString(partValue, "dataset_id"), DayDefinitionID: getString(partValue, "day_definition_id"), Date: getString(partValue, "date"),
 		ReplayContractID: getString(partValue, "replay_contract_id"), FormatID: getString(partValue, "format_id"), ConversionID: getString(partValue, "conversion_id"), ConverterBuildID: getString(partValue, "converter_build_id"),
 		DependencyLockHash: getHash(getString(partValue, "dependency_lock_hash")), WriterConfigurationHash: getHash(getString(partValue, "writer_configuration_hash")), TargetPlatformContract: getString(partValue, "target_platform_contract"),
 		RawDayManifestKey: getString(partValue, "raw_day_manifest_key"), RawDayManifestSHA256: getHash(getString(partValue, "raw_day_manifest_sha256")),
@@ -81,7 +81,7 @@ func TestReplayGoldenConformanceMatchesPythonFixture(t *testing.T) {
 	for index, value := range replayValue["part_manifest_keys"].([]any) {
 		partKeys[index] = value.(string)
 	}
-	manifest := ReplayDayManifest{ManifestVersion: getString(replayValue, "manifest_version"), ManifestID: getString(replayValue, "manifest_id"), DatasetID: getString(replayValue, "dataset_id"), CampaignID: getString(replayValue, "campaign_id"), DayDefinitionID: getString(replayValue, "day_definition_id"), Date: getString(replayValue, "date"), Revision: getUint(replayValue, "revision"), RawDayManifestKey: getString(replayValue, "raw_day_manifest_key"), RawDayManifestSHA256: getHash(getString(replayValue, "raw_day_manifest_sha256")), ReplayContractID: getString(replayValue, "replay_contract_id"), FormatID: getString(replayValue, "format_id"), ConversionID: getString(replayValue, "conversion_id"), ConverterBuildID: getString(replayValue, "converter_build_id"), DependencyLockHash: getHash(getString(replayValue, "dependency_lock_hash")), WriterConfigurationHash: getHash(getString(replayValue, "writer_configuration_hash")), TargetPlatformContract: getString(replayValue, "target_platform_contract"), CompletenessStatus: getString(replayValue, "completeness_status"), PartManifestKeys: partKeys, PartSetRoot: partRoot, CanonicalStreamRowChainRoot: root}
+	manifest := ReplayDayManifest{ManifestVersion: getString(replayValue, "manifest_version"), ManifestID: getString(replayValue, "manifest_id"), DatasetID: getString(replayValue, "dataset_id"), DayDefinitionID: getString(replayValue, "day_definition_id"), Date: getString(replayValue, "date"), Revision: getUint(replayValue, "revision"), RawDayManifestKey: getString(replayValue, "raw_day_manifest_key"), RawDayManifestSHA256: getHash(getString(replayValue, "raw_day_manifest_sha256")), ReplayContractID: getString(replayValue, "replay_contract_id"), FormatID: getString(replayValue, "format_id"), ConversionID: getString(replayValue, "conversion_id"), ConverterBuildID: getString(replayValue, "converter_build_id"), DependencyLockHash: getHash(getString(replayValue, "dependency_lock_hash")), WriterConfigurationHash: getHash(getString(replayValue, "writer_configuration_hash")), TargetPlatformContract: getString(replayValue, "target_platform_contract"), CompletenessStatus: getString(replayValue, "completeness_status"), PartManifestKeys: partKeys, PartSetRoot: partRoot, CanonicalStreamRowChainRoot: root}
 	replayJSON, err := ReplayDayManifestCanonicalJSON(manifest)
 	if err != nil || string(replayJSON) != getString(fixture, "replay_manifest_canonical_json") {
 		t.Fatalf("Go replay manifest canonical JSON differs: %v", err)

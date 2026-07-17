@@ -30,16 +30,12 @@ type replayPublicationFixture struct {
 	parts     []protocol.PartManifest
 	replay    protocol.ReplayDayManifest
 	rawObject archive.RawObject
-	toolPath  string
 	receipt   string
 }
 
 type replayPublisherTool struct {
-	backend         *fakeBackend
-	immutablePrefix string
-	rclonePrefix    string
-
 	mu          sync.Mutex
+	backend     *fakeBackend
 	copyCalls   int
 	checkCalls  int
 	timeoutNext bool
@@ -95,67 +91,29 @@ func (b *terminalSecondReadBackend) OpenLimited(ctx context.Context, key string,
 	return &boundedReplayReadCloser{Reader: io.LimitReader(bytes.NewReader(b.outcome.body), int64(max)+1), Closer: io.NopCloser(bytes.NewReader(nil))}, size, nil
 }
 
-func (t *replayPublisherTool) fullKey(rcloneKey string) (string, error) {
-	prefix := t.rclonePrefix + "/"
-	if !strings.HasPrefix(rcloneKey, prefix) {
-		return "", fmt.Errorf("rclone key is outside trusted prefix")
-	}
-	return t.immutablePrefix + "/" + strings.TrimPrefix(rcloneKey, prefix), nil
-}
-
-func (t *replayPublisherTool) CopyToImmutable(_ context.Context, localPath, rcloneKey string) error {
+func (t *replayPublisherTool) PutFileIfAbsent(ctx context.Context, remoteKey, localPath string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectCommit, error) {
 	t.mu.Lock()
 	t.copyCalls++
-	t.copyKeys = append(t.copyKeys, rcloneKey)
+	t.copyKeys = append(t.copyKeys, remoteKey)
 	timeout := t.timeoutNext
 	unknown := t.unknownNext
 	t.timeoutNext = false
 	t.unknownNext = false
 	t.mu.Unlock()
 	if timeout {
-		return context.DeadlineExceeded
+		return RemoteObjectCommit{}, context.DeadlineExceeded
 	}
 	if unknown {
-		return errors.New("unknown copy outcome")
+		return RemoteObjectCommit{}, errors.New("unknown copy outcome")
 	}
-	fullKey, err := t.fullKey(rcloneKey)
-	if err != nil {
-		return err
-	}
-	body, err := os.ReadFile(localPath)
-	if err != nil {
-		return err
-	}
-	if existing, err := t.backend.Get(context.Background(), fullKey); err == nil {
-		if !bytes.Equal(existing, body) {
-			return ErrRcloneCollision
-		}
-		return nil
-	}
-	t.backend.force(fullKey, body)
-	return nil
+	return t.backend.PutFileIfAbsent(ctx, remoteKey, localPath, expectedSHA256, expectedBytes)
 }
 
-func (t *replayPublisherTool) CheckDownload(_ context.Context, localPath, rcloneKey string) error {
+func (t *replayPublisherTool) VerifyFile(ctx context.Context, remoteKey, localPath string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectVerification, error) {
 	t.mu.Lock()
 	t.checkCalls++
 	t.mu.Unlock()
-	fullKey, err := t.fullKey(rcloneKey)
-	if err != nil {
-		return err
-	}
-	local, err := os.ReadFile(localPath)
-	if err != nil {
-		return err
-	}
-	remote, err := t.backend.Get(context.Background(), fullKey)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(local, remote) {
-		return ErrRcloneCheckMismatch
-	}
-	return nil
+	return t.backend.VerifyFile(ctx, remoteKey, localPath, expectedSHA256, expectedBytes)
 }
 
 func (t *replayPublisherTool) counts() (int, int) {
@@ -167,7 +125,7 @@ func (t *replayPublisherTool) counts() (int, int) {
 func newReplayPublicationFixture(t *testing.T, empty bool) *replayPublicationFixture {
 	t.Helper()
 	scope := layoutTestScope()
-	layout, err := NewLayout("v1", "v1", scope)
+	layout, err := NewLayout("v1", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +186,7 @@ func newReplayPublicationFixture(t *testing.T, empty bool) *replayPublicationFix
 		t.Fatal(err)
 	}
 	replayScope := protocol.ReplayScope{
-		DatasetID: scope.DatasetID, CampaignID: scope.CampaignID, DayDefinitionID: scope.DayDefinitionID, Date: manifest.Date,
+		DatasetID: scope.DatasetID, DayDefinitionID: scope.DayDefinitionID, Date: manifest.Date,
 		ReplayContractID: spec.ReplayContractID, ConversionID: spec.ConversionID,
 		RawDayManifestKey: rawRelative, RawDayManifestSHA256: manifest.ManifestSHA256,
 	}
@@ -285,28 +243,13 @@ func newReplayPublicationFixture(t *testing.T, empty bool) *replayPublicationFix
 			t.Fatal(err)
 		}
 	}
-	binaryBytes := []byte("fake-rclone-binary")
-	toolPath := filepath.Join(t.TempDir(), "rclone.exe")
-	if err := os.WriteFile(toolPath, binaryBytes, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	runner := &RcloneRunner{
-		binaryPath: toolPath,
-		tool:       RcloneTool{GOOS: "windows", GOARCH: "amd64", BinaryBytes: uint64(len(binaryBytes)), BinarySHA256: fmt.Sprintf("%x", hashString(binaryBytes))},
-		executor: RcloneExecutorFunc(func(_ context.Context, _ string, args ...string) (string, error) {
-			if len(args) == 1 && args[0] == "version" {
-				return "rclone v1.74.4\n", nil
-			}
-			return "", errors.New("runner operation is outside test action tool")
-		}),
-	}
 	remote, err := NewReplayRemoteReadAdapter(backend)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool := &replayPublisherTool{backend: backend, immutablePrefix: layout.ImmutableCampaignPrefix(), rclonePrefix: layout.RcloneCampaignPrefix()}
+	tool := &replayPublisherTool{backend: backend}
 	receiptPath := filepath.Join(t.TempDir(), "replay-receipt.json")
-	publisher, err := NewReplayPublisher(layout, remote, runner, tool, NewReplayDiagnosticEventStore(), FileReplayReceiptStore{}, t.TempDir())
+	publisher, err := NewReplayPublisher(layout, remote, tool, NewReplayDiagnosticEventStore(), FileReplayReceiptStore{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +259,7 @@ func newReplayPublicationFixture(t *testing.T, empty bool) *replayPublicationFix
 	}
 	return &replayPublicationFixture{
 		scope: scope, layout: layout, manifest: manifest, backend: backend, publisher: publisher, tool: tool,
-		artifacts: artifacts, parts: parts, replay: replay, rawObject: rawObject, toolPath: toolPath, receipt: receiptPath,
+		artifacts: artifacts, parts: parts, replay: replay, rawObject: rawObject, receipt: receiptPath,
 		input: ReplayPublicationInput{
 			Conversion: spec, Limits: protocol.ReplayPublicationImplementationBounds, RawManifestBytes: rawBytes,
 			RawObjectPaths: rawPaths, Parts: artifacts, PartManifestBytes: partBytes,
@@ -339,7 +282,7 @@ func (f *replayPublicationFixture) sealedBundle(t *testing.T) ReplayPublicationB
 	return bundle
 }
 
-func TestNewReplayPublisherDerivesCampaignEpochLockFromRoot(t *testing.T) {
+func TestNewReplayPublisherDerivesScopeEpochLockFromRoot(t *testing.T) {
 	fixture := newReplayPublicationFixture(t, true)
 	root := filepath.Dir(fixture.publisher.lockPath)
 	want, err := PublicationLockPath(root, fixture.layout.Scope)
@@ -349,7 +292,7 @@ func TestNewReplayPublisherDerivesCampaignEpochLockFromRoot(t *testing.T) {
 	if fixture.publisher.lockPath != want {
 		t.Fatalf("lock path = %q, want canonical %q", fixture.publisher.lockPath, want)
 	}
-	if fixture.publisher.lockPath == filepath.Join(root, "campaign.lock") {
+	if fixture.publisher.lockPath == filepath.Join(root, "publication.lock") {
 		t.Fatal("publisher retained an arbitrary lock filename")
 	}
 }
@@ -569,7 +512,7 @@ func TestReplayPublisherRejectsInsufficientRoundsBeforeLock(t *testing.T) {
 		t.Fatalf("round error = %v", err)
 	}
 	if lockAcquired {
-		t.Fatal("insufficient round budget acquired the campaign lock")
+		t.Fatal("insufficient round budget acquired the publication lock")
 	}
 	if _, err := os.Stat(fixture.receipt); !os.IsNotExist(err) {
 		t.Fatalf("receipt exists after round stop: %v", err)
@@ -588,7 +531,7 @@ func TestReplayPublisherPreLockBudgetFailureDoesNotAcquireLock(t *testing.T) {
 		t.Fatalf("pre-lock budget failure = %v, want ErrResourceLimit", err)
 	}
 	if lockAcquired {
-		t.Fatal("campaign lock was acquired after pre-lock budget failure")
+		t.Fatal("publication lock was acquired after pre-lock budget failure")
 	}
 }
 
@@ -603,7 +546,7 @@ func (s *lockCheckingReceiptStore) SaveNoClobber(_ context.Context, path string,
 		_ = second.Close()
 	}
 	if !errors.Is(err, ErrPublicationLock) {
-		return fmt.Errorf("receipt save occurred without held campaign lock: %v", err)
+		return fmt.Errorf("receipt save occurred without held publication lock: %v", err)
 	}
 	s.saved = true
 	return SaveReplayVerificationReceipt(path, receipt)

@@ -53,6 +53,14 @@ func VerifySealedSegment(path string) (VerifiedSegment, error) {
 	return verifySealedBytes(path, data)
 }
 
+// VerifySealedBytes verifies a sealed WAL object already held by a bounded
+// reader. The path is only an audit label; no filesystem access is performed.
+// This keeps remote retention observation from materializing untrusted bytes
+// into a caller-selected local path before the WAL contract is checked.
+func VerifySealedBytes(path string, data []byte) (VerifiedSegment, error) {
+	return verifySealedBytes(path, data)
+}
+
 func verifySealedBytes(path string, data []byte) (VerifiedSegment, error) {
 	if len(data) < 30+trailerBytes {
 		return VerifiedSegment{}, fmt.Errorf("%w: sealed WAL is too short", ErrIntegrity)
