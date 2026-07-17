@@ -15,7 +15,7 @@ import (
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/protocol"
 	"tick-data-platform/internal/r2"
-	"tick-data-platform/internal/wal"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/producers/fake"
 )
 
@@ -132,7 +132,7 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 	objects := make([]archive.RawObject, 0, 3)
 	root := t.TempDir()
 	outbox := t.TempDir()
-	store, err := wal.Open(root, "gateway-reader")
+	store, err := testsupport.NewStartedWAL(root, "gateway-reader")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,22 +149,22 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 	for index, item := range frames {
 		frame := readerTestFrame(t, item.timeMSC, uint64(index+1), item.zero)
 		if _, err := store.Append(frame, 1710000000+int64(index), uint64(100+index)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		sealed, err := store.Seal()
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		object, err := archive.PromoteSealedSegment(outbox, sealed.Path)
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		objects = append(objects, object)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	base := archive.RawDayManifestInput{

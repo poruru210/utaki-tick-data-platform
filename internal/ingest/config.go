@@ -136,18 +136,6 @@ func (c Config) Validate() error {
 	return nil
 }
 
-func LoadConfig(path string) (Config, error) {
-	loaded, err := appconfig.Load(path)
-	if err != nil {
-		return Config{}, err
-	}
-	config := ConfigFromGatewayConfig(loaded.Gateway())
-	if err := config.Validate(); err != nil {
-		return Config{}, err
-	}
-	return config, nil
-}
-
 // ConfigFromGatewayConfig is the single boundary that converts the strict
 // application config into the ingest-owned runtime config. Both one-shot
 // commands and the Fx composition root use it so field mappings cannot drift.

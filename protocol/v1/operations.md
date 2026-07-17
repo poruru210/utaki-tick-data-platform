@@ -3,63 +3,6 @@
 この文書はM4-1で固定する、M3 derivative contractの外側にある運用契約です。
 canonical JSONはProtocol V1と同じUTF-8、重複key拒否、整数のみ、辞書順key、末尾byteなしの規則を使います。
 
-## Publisher handover artifact
-
-handover artifactのcanonical objectは次の12 keyを必須とします。
-
-```text
-campaign_id
-dataset_id
-expected_next_claim_domain_digest
-expected_next_claim_key
-handover_version
-next_publisher_epoch
-operator_evidence_digest
-prior_claim_domain_digest
-prior_claim_key
-prior_publisher_epoch
-scope_key
-transition_key
-```
-
-`handover_version`は`publisher-handover-v1`、digest domainは
-`tick-data-platform/publisher-handover/v1\0`です。全digestはzeroでないlowercase SHA-256
-hex、epochはU64かつ`next_publisher_epoch > prior_publisher_epoch`でなければなりません。
-
-trusted immutable campaign prefixを`P`とすると、物理keyは次のように導出します。
-
-```text
-handover artifact: P/handover/next-epoch=N.json
-prior claim:       P/publisher-claims/epoch=E.json
-next claim:        P/publisher-claims/epoch=N.json
-transition:        P/handover-transitions/next-epoch=N.json
-```
-
-bodyにはcredential、endpoint、local path、自由形式secretを含めません。decoderはunknown key、
-missing key、duplicate key、non-canonical bytes、wrong suffix、zero digestをfail closedします。
-artifact digestは`SHA256(domain || canonical_bytes)`です。
-
-## Operator confirmation record
-
-Typed process-stop and credential-revocation evidence is not an operator
-approval. Before a remote action, the operator supplies a separate
-`operator-handover-confirmation-v1` record with these fields:
-
-```text
-confirmation_version
-confirmed
-confirmed_at_unix_ms
-operator_id_digest
-prior_epoch
-scope_key
-seal_digest
-```
-
-The confirmation binds the exact handover seal digest, trusted scope key, and
-prior epoch. `confirmed` must be true; the operator identity is represented by
-a nonzero digest only. The record is checked again by the conditional
-executor immediately before its bounded fresh observation and remote write.
-
 ## Retention proof
 
 retention proofはProtocol wire messageではなく、local `internal/retention`が所有する
@@ -112,8 +55,6 @@ limits_version
 max_api_request_bytes
 max_api_response_items
 max_concurrent_requests
-max_handover_observation_bytes
-max_handover_observation_requests
 max_manifest_nodes
 max_proof_bytes
 max_proof_objects
@@ -121,6 +62,5 @@ max_prune_candidates
 request_timeout_ms
 ```
 
-全値は正のU64で、実装上限、`max_proof_bytes <= max_handover_observation_bytes`、
-`request_timeout_ms`のGo duration変換可能性を検査します。limit超過、overflow、unknown field、
+全値は正のU64で、実装上限、`request_timeout_ms`のGo duration変換可能性を検査します。limit超過、overflow、unknown field、
 incomplete objectはfail closedです。

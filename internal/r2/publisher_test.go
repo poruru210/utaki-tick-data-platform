@@ -568,11 +568,7 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 		t.Fatal(err)
 	}
 	backend := newFakeBackend()
-	journal, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = journal.Close() })
+	journal := newStartedPublicationJournal(t, filepath.Join(t.TempDir(), "publication.sqlite"))
 	return &publicationFixture{
 		scope: scope, layout: layout, manifest: manifest,
 		input:   PublicationInput{Manifest: manifest, ManifestBytes: manifestBytes, ObjectPaths: map[string]string{object.Key: object.Path}},
@@ -582,7 +578,7 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 
 func (f *publicationFixture) publisher(t *testing.T, afterStage func(string) error) *Publisher {
 	t.Helper()
-	publisher, err := NewPublisher(f.layout, f.backend, f.journal, filepath.Join(filepath.Dir(f.journal.Path()), "campaign.lock"))
+	publisher, err := NewPublisher(f.layout, f.backend, f.journal, filepath.Join(filepath.Dir(f.journal.Path()), "campaign.lock"), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +589,7 @@ func (f *publicationFixture) publisher(t *testing.T, afterStage func(string) err
 func publicationObject(t *testing.T) archive.RawObject {
 	t.Helper()
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := newStartedPublisherWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +612,7 @@ func publicationObject(t *testing.T) archive.RawObject {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	object, err := archive.PromoteSealedSegment(t.TempDir(), sealed.Path)
@@ -624,4 +620,15 @@ func publicationObject(t *testing.T) archive.RawObject {
 		t.Fatal(err)
 	}
 	return object
+}
+
+func newStartedPublisherWAL(root, gatewayID string) (*wal.Store, error) {
+	store, err := wal.NewStore(root, gatewayID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Start(context.Background()); err != nil {
+		return nil, err
+	}
+	return store, nil
 }

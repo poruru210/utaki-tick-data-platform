@@ -33,14 +33,9 @@ type publicationHooks struct {
 	afterStage func(string) error
 }
 
-func NewPublisher(layout Layout, backend WriteBackend, journal *PublicationJournal, lockPath string) (*Publisher, error) {
-	return NewPublisherWithClock(layout, backend, journal, lockPath, time.Now)
-}
-
-// NewPublisherWithClock is the deterministic constructor used by the
-// production worker and network-free tests. NewPublisher remains the
-// compatibility wrapper for callers that accept the system clock.
-func NewPublisherWithClock(layout Layout, backend WriteBackend, journal *PublicationJournal, lockPath string, clock func() time.Time) (*Publisher, error) {
+// NewPublisher constructs the publisher with an explicit clock.
+// Production code supplies time.Now; tests supply a deterministic clock.
+func NewPublisher(layout Layout, backend WriteBackend, journal *PublicationJournal, lockPath string, clock func() time.Time) (*Publisher, error) {
 	if backend == nil || journal == nil {
 		return nil, fmt.Errorf("publisher dependencies are incomplete")
 	}

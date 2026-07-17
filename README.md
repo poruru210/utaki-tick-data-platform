@@ -39,7 +39,7 @@ M2の通常検証はnetwork-freeなfake backendによるものです。
 
 real R2 smokeは、明示的な確認、isolated bucketまたはprefix、endpoint、credentialの存在を同時に指定した場合だけsynthetic bytesで実行できます。
 
-M2はParquet、replay-dayまたはpart manifest、handover、pruning、Worker、HTTP API、live brokerを実装対象から除外します。
+M2はParquet、replay-dayまたはpart manifest、pruning、Worker、HTTP API、live brokerを実装対象から除外します。
 
 Pythonは本番Gatewayの実装には使わず、fixtureと契約の検証に使います。
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"tick-data-platform/internal/app"
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/ingest"
 	"tick-data-platform/internal/operations"
@@ -51,6 +52,7 @@ func integrationScopeConfig(t *testing.T, index int) operations.ScopeProcessConf
 }
 
 type integrationGateway struct {
+	runtime *app.LocalGatewayRuntime
 	gateway *ingest.Gateway
 	client  *fake.Client
 	cancel  context.CancelFunc
@@ -78,10 +80,14 @@ func openIntegrationGateway(t *testing.T, scope operations.ScopeProcessConfig) i
 		BrokerServerFingerprint: scope.Scope.BrokerServerFingerprint,
 		ExactSourceSymbol:       scope.Scope.ExactSourceSymbol,
 	}
-	gateway, err := ingest.Open(config)
+	runtime, err := app.NewLocalGatewayRuntime(config, ingest.DiskWatermarks{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := runtime.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	gateway := runtime.Gateway()
 	server, clientConn := net.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -105,17 +111,17 @@ func openIntegrationGateway(t *testing.T, scope operations.ScopeProcessConfig) i
 	})
 	if err != nil {
 		cancel()
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		t.Fatal(err)
 	}
-	return integrationGateway{gateway: gateway, client: client, cancel: cancel, done: done}
+	return integrationGateway{runtime: runtime, gateway: gateway, client: client, cancel: cancel, done: done}
 }
 
 func (g integrationGateway) close(t *testing.T) {
 	t.Helper()
 	_ = g.client.Close()
 	g.cancel()
-	_ = g.gateway.Close()
+	_ = g.runtime.Stop(context.Background())
 	select {
 	case <-g.done:
 	case <-time.After(time.Second):
@@ -196,7 +202,7 @@ func TestMultiScopeFailureDoesNotBlockOtherACKPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	healthy := operations.ScopeHealthStatus{ScopeKey: rightKey, PublisherEpoch: 1, TerminalSynchronization: "synced"}
-	for _, failure := range []string{"disk_high_watermark", "r2_outage", "publisher_handover_blocked"} {
+	for _, failure := range []string{"disk_high_watermark", "r2_outage"} {
 		aggregate, err := operations.AggregateScopeHealth([]operations.ScopeHealthStatus{
 			{ScopeKey: leftKey, PublisherEpoch: 1, BlockedReason: failure}, healthy,
 		})

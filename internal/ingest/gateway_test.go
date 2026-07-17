@@ -13,6 +13,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"tick-data-platform/internal/app"
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/ingest"
 	"tick-data-platform/internal/protocol"
@@ -347,22 +348,23 @@ func TestGatewayRetriesAfterWALSyncBeforeJournalCommit(t *testing.T) {
 	}
 }
 
-func TestGatewayCloseDoesNotStartHandlerAfterAcceptReturns(t *testing.T) {
+func TestGatewayStopDoesNotStartHandlerAfterAcceptReturns(t *testing.T) {
 	config := testConfig(t)
 	config.HeartbeatIdleTimeout = 5 * time.Second
-	gateway, err := ingest.Open(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtime := newStartedGatewayRuntime(t, config)
+	gateway := runtime.Gateway()
 	peer, rawConnection := net.Pipe()
 	connection := &trackingConn{Conn: rawConnection, closed: make(chan struct{})}
 	listener := &closeOnAcceptListener{
 		connection: connection,
 		closed:     make(chan struct{}),
 	}
+	accepted := make(chan struct{})
+	allowAcceptReturn := make(chan struct{})
 	closeErr := make(chan error, 1)
 	listener.onAccept = func() {
-		closeErr <- gateway.Close()
+		close(accepted)
+		<-allowAcceptReturn
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -370,6 +372,20 @@ func TestGatewayCloseDoesNotStartHandlerAfterAcceptReturns(t *testing.T) {
 	go func() { serveDone <- gateway.Serve(ctx, listener) }()
 	defer peer.Close()
 
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("listener did not call Accept callback")
+	}
+	go func() {
+		closeErr <- gateway.Stop(context.Background())
+	}()
+	select {
+	case <-listener.closed:
+	case <-time.After(time.Second):
+		t.Fatal("gateway Stop did not close listener")
+	}
+	close(allowAcceptReturn)
 	select {
 	case err := <-serveDone:
 		if err != nil {
@@ -379,6 +395,9 @@ func TestGatewayCloseDoesNotStartHandlerAfterAcceptReturns(t *testing.T) {
 		t.Fatal("gateway Serve did not stop")
 	}
 	if err := <-closeErr; err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -556,13 +575,11 @@ func testBatch(sequence uint64, timeMSC int64, count int, copyTicksError int32) 
 
 func startGateway(t *testing.T, config ingest.Config) (*ingest.Gateway, *fake.Client, func()) {
 	t.Helper()
-	gateway, err := ingest.Open(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtime := newStartedGatewayRuntime(t, config)
+	gateway := runtime.Gateway()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -588,13 +605,13 @@ func startGateway(t *testing.T, config ingest.Config) (*ingest.Gateway, *fake.Cl
 	client, err := fake.Dial(context.Background(), listener.Addr().String(), hello)
 	if err != nil {
 		cancel()
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		t.Fatal(err)
 	}
 	stop := func() {
 		_ = client.Close()
 		cancel()
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		select {
 		case <-serveDone:
 		case <-time.After(time.Second):
@@ -602,6 +619,24 @@ func startGateway(t *testing.T, config ingest.Config) (*ingest.Gateway, *fake.Cl
 		}
 	}
 	return gateway, client, stop
+}
+
+func newStartedGatewayRuntime(t *testing.T, config ingest.Config) *app.LocalGatewayRuntime {
+	t.Helper()
+	runtime, err := app.NewLocalGatewayRuntime(config, ingest.DiskWatermarks{
+		HighFreeBytes:      config.DiskHighFreeBytes,
+		CriticalFreeBytes:  config.DiskCriticalFreeBytes,
+		EmergencyFreeBytes: config.DiskEmergencyFreeBytes,
+		MaxPendingSegments: config.MaxPendingSegments,
+		MaxPendingBytes:    config.MaxPendingBytes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return runtime
 }
 
 func clientAddress(t *testing.T, client *fake.Client) string {

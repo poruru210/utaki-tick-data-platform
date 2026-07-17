@@ -71,22 +71,6 @@ func (l Layout) ClaimKey(epoch uint64) (string, error) {
 	return l.RemoteKey(fmt.Sprintf("publisher-claims/epoch=%d.json", epoch))
 }
 
-func (l Layout) HandoverArtifactKey(nextEpoch uint64) (string, error) {
-	return protocol.HandoverArtifactKey(l.ImmutableCampaignPrefix(), nextEpoch)
-}
-
-func (l Layout) HandoverTransitionKey(nextEpoch uint64) (string, error) {
-	return protocol.HandoverTransitionKey(l.ImmutableCampaignPrefix(), nextEpoch)
-}
-
-func (l Layout) HandoverCandidatePrefix(nextEpoch uint64) (string, error) {
-	key, err := l.ClaimKey(nextEpoch)
-	if err != nil {
-		return "", err
-	}
-	return key, nil
-}
-
 func (l Layout) ManifestPrefix(date string) (string, error) {
 	if err := validateManifestDate(date); err != nil {
 		return "", fmt.Errorf("manifest date is not YYYY-MM-DD")

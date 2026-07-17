@@ -10,7 +10,7 @@ absolute pathをrepositoryへ記録しません。
 - WAL、journal、outbox、receipt、lock、cacheのrootを別scopeと共有しない。
 - remote objectはimmutableで、delete、move、sync、overwriteを通常手順に含めない。
 - ACK済みentryを証明なしに捨てない。disk pressureはavailability failureとして扱う。
-- pruning、handover、restoreはfresh observationとdigestを記録し、画面表示だけを根拠にしない。
+- pruning、restoreはfresh observationとdigestを記録し、画面表示だけを根拠にしない。
 - incident logはsecret scannerを通し、credential valueやtokenを貼らない。
 
 ## 起動と日次確認
@@ -79,7 +79,7 @@ artifactは期限を過ぎても削除せず、disk pressureをavailability fail
 | sealed raw WAL | proof成立後7日 | fresh proof成立時刻から`grace_ms`（baseline 24時間）経過後、連続prefixだけ |
 | raw outbox | proof成立後7日 | raw proof、covering manifest、同一bytes再検証、completion record、graceが全て成立した後 |
 | replay outbox / cache | 無期限（M4ではblocked） | replay専用proofが未実装のため削除不可。raw proofを流用しない |
-| publisher receipt / handover evidence | 365日、または依存artifactの保存終了後365日の長い方 | credential valueを含まないredacted recordのみ。手動削除・改変不可 |
+| publisher receipt | 365日、または依存artifactの保存終了後365日の長い方 | credential valueを含まないredacted recordのみ。手動削除・改変不可 |
 | prune checkpoint / completion metadata | 依存するlocal artifactとchainの寿命後365日 | checkpoint chainと監査に必要な間は削除不可 |
 | diagnostic log / incident record | 通常30日、incidentは365日またはfinal audit完了後90日の長い方 | secret scan済みのredacted logだけを保存 |
 | M4 external evidence | 180日またはfinal audit完了後90日の長い方 | raw artifact digest、toolchain、scope digest、retention期限をsummaryへbind |
@@ -111,18 +111,14 @@ restoreは空の別cacheとread-only credentialで開始する。soak hostのcac
 4. remote outage、metadata oversized、manifest conflict、client cancelはpartial successにせず、
    request IDとtyped errorだけを記録する。
 
-## Publisher handover and credential rotation
+## Credential change operation
 
-old process停止確認とold write credential revoke確認が揃うまでtransitionを作成しない。
-evidenceはprocess identity digest、credential ID digest、scope digest、時刻だけを持つ。
+credentialの交換はGatewayを停止した市場休場中に行う。稼働中のwriter切替や、R2上のオンライン切替artifact作成は行わない。
 
-1. prior epochとscope keyをfresh readする。
-2. old processをdrain・停止し、停止証跡を固定する。
-3. provider側でold credentialをrevokeし、revocation証跡を固定する。
-4. operator confirmationを別に作り、seal digestへbindする。
-5. artifact → transition → expected next claimをconditionalに作成し、各step後にfresh observationする。
-6. transition後に失敗してもold epochを再開せず、同じbytesのretryまたはnew epochの続行だけを許可する。
-7. new writerと別read-only credentialでfinal verificationする。old credentialを再有効化しない。
+1. Gatewayを停止し、WAL、journal、raw outboxのdurable状態を確認する。
+2. R2 provider側でcredentialを交換し、Gateway設定のcredential bundleを更新する。
+3. Gatewayを起動し、status、R2接続、既存objectの読み書きを確認する。
+4. 確認完了までpruneや本番データ操作を行わない。
 
 ## R2 outage and upload failure
 
@@ -133,8 +129,9 @@ R2復旧後はfresh observation、manifest chain、object hashを検証してか
 ## Forced reboot and recovery
 
 reboot前にrun identity、WAL status、journal checkpoint、disk classを保存する。再起動後の
-`tick-gateway status`は完全なread-only probeではなく、`ingest.Open`を通じてWAL/journal recoveryを
-行いうるrecovery-capable commandである。実行前にsnapshotとoperator approvalを取り、出力と
+`tick-gateway status`は完全なread-only probeではなく、`app.LocalGatewayRuntime`を明示的に構築して
+`New`→`Start`→`Stop`を行い、WAL/journal recoveryを実施しうるrecovery-capable commandである。
+実行前にsnapshotとoperator approvalを取り、出力と
 recovery eventを保存しながらWAL segment、checkpoint、journal、outbox、publisher epochを検証する。
 矛盾があれば新しいbatchをACKせず、原因と最後のdurable boundaryをescalateする。
 

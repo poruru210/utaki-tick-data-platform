@@ -77,6 +77,6 @@ M2R-4のlocal implementation evidenceはこの記録、fake end-to-end test、SD
 
 GitHub Actionsのcheck workflowとWindows race workflowは追加し、pushおよびPRの実行成功を確認しました。
 
-M2の対象外はParquet、replay-dayまたはpart manifest、handover、pruning、Worker、HTTP API、live brokerです。
+M2の対象外はParquet、replay-dayまたはpart manifest、pruning、Worker、HTTP API、live brokerです。
 
 network-free integration testはproduction Publisher APIをfake `WriteBackend`へ接続し、通常経路と同じ条件付きPut、読戻しVerify、publication journalを検証します。

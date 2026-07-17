@@ -109,7 +109,7 @@ M2R-4はnetwork-free fake end-to-end test、optional isolated real-R2 smoke、re
 
 通常のM2検証はfake backendだけで完結し、real R2 smokeは明示的なenable、confirmation、isolated bucketまたはprefix、endpoint、credentialを要求します。
 
-M2の対象外はParquet、replay-dayまたはpart manifest、handover、pruning、Worker、HTTP API、live brokerです。
+M2の対象外はParquet、replay-dayまたはpart manifest、pruning、Worker、HTTP API、live brokerです。
 
 M2の実装と通常の検証gateは完了しました。
 review修正後のRepository checkはpush run `29380482941`とPR run `29380484737`、Windows raceはpush run `29380482973`とPR run `29380484762`で成功しました。
@@ -182,7 +182,7 @@ M3の検証はfake backend、GoとPythonのfixture、focused test、`mise run ch
 
 real R2 smokeは、隔離bucketまたはprefix、明示的credential、非上書き確認が揃った場合だけ実行し、条件がなければskipします。
 
-M3ではproof-gated pruning、handover、multi-broker/symbol、Worker、HTTP `tick-api`、active audit、24時間soak、live broker、mergeを実施しません。
+M3ではproof-gated pruning、multi-broker/symbol、Worker、HTTP `tick-api`、active audit、24時間soak、live broker、mergeを実施しません。
 
 M3の完了条件は、同じraw manifestとconversion tupleから同じlogical rows、row-chain root、part layoutを再生成でき、指定した同一build条件ではParquet bytesも再現できることです。
 
@@ -422,7 +422,7 @@ M3はwhole-M3 final re-auditをpassし、mainへ統合済みです。
 
 M4-0では専用ExecPlanだけを固定し、M4実装はまだ開始していません。
 
-M4では、日次運用、pruning、handover、長時間稼働、障害注入を整備します。
+M4では、日次運用、pruning、長時間稼働、障害注入を整備します。
 
 必要に応じて、HTTP adapterなどの後続利用者向け接続を追加します。
 

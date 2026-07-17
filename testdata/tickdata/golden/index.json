@@ -15,7 +15,6 @@
     {"fixture_id": "part-manifest-v1", "path": "part-manifest-v1.json", "kind": "part_contract", "expected_result": "accepted"},
     {"fixture_id": "replay-key-contract-v1", "path": "replay-key-contract-v1.json", "kind": "key_contract", "expected_result": "accepted"},
     {"fixture_id": "replay-publication-v1-conformance", "path": "replay-publication-v1-conformance.json", "kind": "publication_contract", "expected_result": "accepted"},
-    {"fixture_id": "publisher-handover-v1", "path": "publisher-handover-v1.json", "kind": "handover_contract", "expected_result": "accepted"},
     {"fixture_id": "wal-entry-v1", "path": "wal-entry-v1.json", "kind": "wal_entry", "expected_result": "accepted"},
     {"fixture_id": "batch-truncated", "path": "batch-truncated.json", "kind": "invalid_frame", "expected_result": "rejected"},
     {"fixture_id": "batch-crc-mismatch", "path": "batch-crc-mismatch.json", "kind": "invalid_frame", "expected_result": "rejected"},

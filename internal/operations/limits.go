@@ -11,16 +11,14 @@ import (
 const (
 	ResourceLimitsVersion = "m4-operational-limits-v1"
 
-	maxPruneCandidates          = uint64(1 << 20)
-	maxProofObjects             = uint64(1 << 20)
-	maxProofBytes               = uint64(1 << 30)
-	maxManifestNodes            = uint64(1 << 20)
-	maxHandoverObservationReqs  = uint64(1 << 20)
-	maxHandoverObservationBytes = uint64(1 << 30)
-	maxAPIRequestBytes          = uint64(64 << 20)
-	maxAPIResponseItems         = uint64(1 << 20)
-	maxConcurrentRequests       = uint64(4096)
-	maxRequestTimeoutMS         = uint64(math.MaxInt64) / uint64(time.Millisecond)
+	maxPruneCandidates    = uint64(1 << 20)
+	maxProofObjects       = uint64(1 << 20)
+	maxProofBytes         = uint64(1 << 30)
+	maxManifestNodes      = uint64(1 << 20)
+	maxAPIRequestBytes    = uint64(64 << 20)
+	maxAPIResponseItems   = uint64(1 << 20)
+	maxConcurrentRequests = uint64(4096)
+	maxRequestTimeoutMS   = uint64(math.MaxInt64) / uint64(time.Millisecond)
 )
 
 // ResourceLimits is the bounded resource policy shared by M4 operation
@@ -28,32 +26,28 @@ const (
 // the contract so Go, Python, and configuration files cannot disagree about
 // duration encoding.
 type ResourceLimits struct {
-	MaxPruneCandidates             uint64 `json:"max_prune_candidates" toml:"max_prune_candidates"`
-	MaxProofObjects                uint64 `json:"max_proof_objects" toml:"max_proof_objects"`
-	MaxProofBytes                  uint64 `json:"max_proof_bytes" toml:"max_proof_bytes"`
-	MaxManifestNodes               uint64 `json:"max_manifest_nodes" toml:"max_manifest_nodes"`
-	MaxHandoverObservationRequests uint64 `json:"max_handover_observation_requests" toml:"max_handover_observation_requests"`
-	MaxHandoverObservationBytes    uint64 `json:"max_handover_observation_bytes" toml:"max_handover_observation_bytes"`
-	MaxAPIRequestBytes             uint64 `json:"max_api_request_bytes" toml:"max_api_request_bytes"`
-	MaxAPIResponseItems            uint64 `json:"max_api_response_items" toml:"max_api_response_items"`
-	MaxConcurrentRequests          uint64 `json:"max_concurrent_requests" toml:"max_concurrent_requests"`
-	RequestTimeoutMS               uint64 `json:"request_timeout_ms" toml:"request_timeout_ms"`
+	MaxPruneCandidates    uint64 `json:"max_prune_candidates" toml:"max_prune_candidates"`
+	MaxProofObjects       uint64 `json:"max_proof_objects" toml:"max_proof_objects"`
+	MaxProofBytes         uint64 `json:"max_proof_bytes" toml:"max_proof_bytes"`
+	MaxManifestNodes      uint64 `json:"max_manifest_nodes" toml:"max_manifest_nodes"`
+	MaxAPIRequestBytes    uint64 `json:"max_api_request_bytes" toml:"max_api_request_bytes"`
+	MaxAPIResponseItems   uint64 `json:"max_api_response_items" toml:"max_api_response_items"`
+	MaxConcurrentRequests uint64 `json:"max_concurrent_requests" toml:"max_concurrent_requests"`
+	RequestTimeoutMS      uint64 `json:"request_timeout_ms" toml:"request_timeout_ms"`
 }
 
 // DefaultResourceLimits is the conservative local-operation policy. A caller
 // may lower values, but Validate never permits zero or a value above the
 // implementation bound.
 var DefaultResourceLimits = ResourceLimits{
-	MaxPruneCandidates:             1_000,
-	MaxProofObjects:                10_000,
-	MaxProofBytes:                  64 << 20,
-	MaxManifestNodes:               10_000,
-	MaxHandoverObservationRequests: 1_000,
-	MaxHandoverObservationBytes:    64 << 20,
-	MaxAPIRequestBytes:             1 << 20,
-	MaxAPIResponseItems:            1_000,
-	MaxConcurrentRequests:          32,
-	RequestTimeoutMS:               30_000,
+	MaxPruneCandidates:    1_000,
+	MaxProofObjects:       10_000,
+	MaxProofBytes:         64 << 20,
+	MaxManifestNodes:      10_000,
+	MaxAPIRequestBytes:    1 << 20,
+	MaxAPIResponseItems:   1_000,
+	MaxConcurrentRequests: 32,
+	RequestTimeoutMS:      30_000,
 }
 
 func (l ResourceLimits) values() []struct {
@@ -70,8 +64,6 @@ func (l ResourceLimits) values() []struct {
 		{"max_proof_objects", l.MaxProofObjects, maxProofObjects},
 		{"max_proof_bytes", l.MaxProofBytes, maxProofBytes},
 		{"max_manifest_nodes", l.MaxManifestNodes, maxManifestNodes},
-		{"max_handover_observation_requests", l.MaxHandoverObservationRequests, maxHandoverObservationReqs},
-		{"max_handover_observation_bytes", l.MaxHandoverObservationBytes, maxHandoverObservationBytes},
 		{"max_api_request_bytes", l.MaxAPIRequestBytes, maxAPIRequestBytes},
 		{"max_api_response_items", l.MaxAPIResponseItems, maxAPIResponseItems},
 		{"max_concurrent_requests", l.MaxConcurrentRequests, maxConcurrentRequests},
@@ -110,21 +102,16 @@ func (l ResourceLimits) validateFields(selected map[string]bool) error {
 // Validate rejects zero, overflow-prone, or implementation-unbounded limits.
 func (l ResourceLimits) Validate() error {
 	if err := l.validateFields(map[string]bool{
-		"max_prune_candidates":              true,
-		"max_proof_objects":                 true,
-		"max_proof_bytes":                   true,
-		"max_manifest_nodes":                true,
-		"max_handover_observation_requests": true,
-		"max_handover_observation_bytes":    true,
-		"max_api_request_bytes":             true,
-		"max_api_response_items":            true,
-		"max_concurrent_requests":           true,
-		"request_timeout_ms":                true,
+		"max_prune_candidates":    true,
+		"max_proof_objects":       true,
+		"max_proof_bytes":         true,
+		"max_manifest_nodes":      true,
+		"max_api_request_bytes":   true,
+		"max_api_response_items":  true,
+		"max_concurrent_requests": true,
+		"request_timeout_ms":      true,
 	}); err != nil {
 		return err
-	}
-	if l.MaxProofBytes > l.MaxHandoverObservationBytes {
-		return fmt.Errorf("max_proof_bytes exceeds max_handover_observation_bytes")
 	}
 	if l.MaxAPIRequestBytes == 0 || l.MaxAPIResponseItems == 0 {
 		return fmt.Errorf("API limits must be nonzero")
@@ -144,17 +131,15 @@ func (l ResourceLimits) RequestTimeout() (time.Duration, error) {
 
 func (l ResourceLimits) Value() map[string]any {
 	return map[string]any{
-		"limits_version":                    ResourceLimitsVersion,
-		"max_api_request_bytes":             l.MaxAPIRequestBytes,
-		"max_api_response_items":            l.MaxAPIResponseItems,
-		"max_concurrent_requests":           l.MaxConcurrentRequests,
-		"max_handover_observation_bytes":    l.MaxHandoverObservationBytes,
-		"max_handover_observation_requests": l.MaxHandoverObservationRequests,
-		"max_manifest_nodes":                l.MaxManifestNodes,
-		"max_proof_bytes":                   l.MaxProofBytes,
-		"max_proof_objects":                 l.MaxProofObjects,
-		"max_prune_candidates":              l.MaxPruneCandidates,
-		"request_timeout_ms":                l.RequestTimeoutMS,
+		"limits_version":          ResourceLimitsVersion,
+		"max_api_request_bytes":   l.MaxAPIRequestBytes,
+		"max_api_response_items":  l.MaxAPIResponseItems,
+		"max_concurrent_requests": l.MaxConcurrentRequests,
+		"max_manifest_nodes":      l.MaxManifestNodes,
+		"max_proof_bytes":         l.MaxProofBytes,
+		"max_proof_objects":       l.MaxProofObjects,
+		"max_prune_candidates":    l.MaxPruneCandidates,
+		"request_timeout_ms":      l.RequestTimeoutMS,
 	}
 }
 
@@ -178,8 +163,7 @@ func DecodeResourceLimits(data []byte) (ResourceLimits, error) {
 	}
 	want := map[string]bool{
 		"limits_version": true, "max_api_request_bytes": true, "max_api_response_items": true,
-		"max_concurrent_requests": true, "max_handover_observation_bytes": true,
-		"max_handover_observation_requests": true, "max_manifest_nodes": true,
+		"max_concurrent_requests": true, "max_manifest_nodes": true,
 		"max_proof_bytes": true, "max_proof_objects": true, "max_prune_candidates": true,
 		"request_timeout_ms": true,
 	}
@@ -210,8 +194,6 @@ func DecodeResourceLimits(data []byte) (ResourceLimits, error) {
 		{"max_api_request_bytes", &result.MaxAPIRequestBytes},
 		{"max_api_response_items", &result.MaxAPIResponseItems},
 		{"max_concurrent_requests", &result.MaxConcurrentRequests},
-		{"max_handover_observation_bytes", &result.MaxHandoverObservationBytes},
-		{"max_handover_observation_requests", &result.MaxHandoverObservationRequests},
 		{"max_manifest_nodes", &result.MaxManifestNodes},
 		{"max_proof_bytes", &result.MaxProofBytes},
 		{"max_proof_objects", &result.MaxProofObjects},

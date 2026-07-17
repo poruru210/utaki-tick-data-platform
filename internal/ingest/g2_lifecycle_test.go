@@ -10,16 +10,12 @@ import (
 	"time"
 
 	"go.uber.org/goleak"
-
-	"tick-data-platform/internal/ingest"
 )
 
 func TestGatewayStartStopIsIdempotentAndBounded(t *testing.T) {
-	gateway, err := ingest.Open(testConfig(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer gateway.Close()
+	runtime := newStartedGatewayRuntime(t, testConfig(t))
+	gateway := runtime.Gateway()
+	defer runtime.Stop(context.Background())
 
 	if err := gateway.Start(context.Background()); err != nil {
 		t.Fatal(err)
@@ -38,32 +34,28 @@ func TestGatewayStartStopIsIdempotentAndBounded(t *testing.T) {
 }
 
 func TestGatewayLifecycleDoesNotLeakGoroutines(t *testing.T) {
-	gateway, err := ingest.Open(testConfig(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtime := newStartedGatewayRuntime(t, testConfig(t))
+	gateway := runtime.Gateway()
 	if err := gateway.Start(context.Background()); err != nil {
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		t.Fatal(err)
 	}
 	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := gateway.Stop(stopCtx); err != nil {
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		t.Fatal(err)
 	}
-	if err := gateway.Close(); err != nil {
+	if err := runtime.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	goleak.VerifyNone(t)
 }
 
 func TestGatewayServeReportsUnexpectedListenerFailure(t *testing.T) {
-	gateway, err := ingest.Open(testConfig(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer gateway.Close()
+	runtime := newStartedGatewayRuntime(t, testConfig(t))
+	gateway := runtime.Gateway()
+	defer runtime.Stop(context.Background())
 
 	want := errors.New("listener fixture failed")
 	listener := &failingListener{err: want}
@@ -88,11 +80,9 @@ func TestGatewayServeReportsUnexpectedListenerFailure(t *testing.T) {
 }
 
 func TestGatewayStopAfterAcceptClosesHandler(t *testing.T) {
-	gateway, err := ingest.Open(testConfig(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer gateway.Close()
+	runtime := newStartedGatewayRuntime(t, testConfig(t))
+	gateway := runtime.Gateway()
+	defer runtime.Stop(context.Background())
 	peer, raw := net.Pipe()
 	defer peer.Close()
 	connection := &trackingConn{Conn: raw, closed: make(chan struct{})}
@@ -130,11 +120,9 @@ func TestGatewayStopAfterAcceptClosesHandler(t *testing.T) {
 }
 
 func TestGatewayStopHonorsTimeoutForStuckHandler(t *testing.T) {
-	gateway, err := ingest.Open(testConfig(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer gateway.Close()
+	runtime := newStartedGatewayRuntime(t, testConfig(t))
+	gateway := runtime.Gateway()
+	defer runtime.Stop(context.Background())
 	connection := newBlockingConn()
 	accepted := make(chan struct{})
 	listener := &closeOnAcceptListener{

@@ -89,17 +89,20 @@ func runPruneLocalWithObserver(configValue appconfig.Config, args []string, obse
 	if err != nil {
 		return err
 	}
-	remoteJournal, err := r2.OpenPublicationJournal(configValue.Publication.RemoteJournalPath)
+	remoteJournal, err := r2.NewPublicationJournal(configValue.Publication.RemoteJournalPath)
 	if err != nil {
-		return fmt.Errorf("open publication journal: %w", err)
+		return fmt.Errorf("construct publication journal: %w", err)
 	}
-	defer remoteJournal.Close()
+	if err := remoteJournal.Start(context.Background()); err != nil {
+		return fmt.Errorf("start publication journal: %w", err)
+	}
+	defer remoteJournal.Stop(context.Background())
 	catalog, err := publication.NewCatalog(configValue.Publication.CatalogPath)
 	if err != nil {
-		return fmt.Errorf("open publication catalog: %w", err)
+		return fmt.Errorf("construct publication catalog: %w", err)
 	}
 	if err := catalog.Start(context.Background()); err != nil {
-		_ = remoteJournal.Close()
+		_ = remoteJournal.Stop(context.Background())
 		return fmt.Errorf("start publication catalog: %w", err)
 	}
 	defer catalog.Stop(context.Background())

@@ -2,6 +2,7 @@ package archive_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/internal/wal"
 	"tick-data-platform/producers/fake"
 )
@@ -56,11 +58,11 @@ func TestPromoteSealedSegmentRejectsActiveWAL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	if _, err := store.Append(fixture.Frame, 1710000000, 42); err != nil {
 		t.Fatal(err)
 	}
@@ -139,20 +141,20 @@ func createSealedSegment(t *testing.T) wal.VerifiedSegment {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Append(fixture.Frame, 1710000000, 42); err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	sealed, err := store.Seal()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return sealed

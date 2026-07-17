@@ -40,10 +40,8 @@ func TestTenXIngestRate(t *testing.T) {
 	}
 
 	config := loadGateConfig(t)
-	gateway, err := ingest.Open(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	gatewayRuntime := newStartedGatewayRuntime(t, config)
+	gateway := gatewayRuntime.Gateway()
 	ctx, cancel := context.WithCancel(context.Background())
 	server, clientConn := net.Pipe()
 	handlerDone := make(chan error, 1)
@@ -53,7 +51,7 @@ func TestTenXIngestRate(t *testing.T) {
 		cancel()
 		_ = server.Close()
 		_ = clientConn.Close()
-		_ = gateway.Close()
+		_ = gatewayRuntime.Stop(context.Background())
 		t.Fatal(err)
 	}
 	defer func() {
@@ -64,7 +62,7 @@ func TestTenXIngestRate(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Error("load gateway handler did not stop")
 		}
-		if err := gateway.Close(); err != nil {
+		if err := gatewayRuntime.Stop(context.Background()); err != nil {
 			t.Error(err)
 		}
 	}()

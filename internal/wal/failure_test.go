@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -18,11 +19,11 @@ func TestAppendPoisonsStoreAfterWALSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := Open(root, "gateway-test-01")
+	store, err := newStartedStore(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 
 	firstSync := true
 	store.syncFile = func() error {
@@ -49,7 +50,7 @@ func TestOpenStopsOnIndividuallyValidCrossSegmentChainMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := Open(root, "gateway-test-01")
+	store, err := newStartedStore(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestOpenStopsOnIndividuallyValidCrossSegmentChainMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +111,7 @@ func TestOpenStopsOnIndividuallyValidCrossSegmentChainMismatch(t *testing.T) {
 	if _, err := VerifySealedSegment(second.Path); err != nil {
 		t.Fatalf("mutated segment must remain locally valid: %v", err)
 	}
-	if _, err := Open(root, "gateway-test-01"); err == nil || !errors.Is(err, ErrIntegrity) {
+	if _, err := newStartedStore(root, "gateway-test-01"); err == nil || !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("expected cross-segment integrity stop, got %v", err)
 	}
 }

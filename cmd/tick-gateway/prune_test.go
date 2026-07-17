@@ -20,7 +20,7 @@ import (
 	"tick-data-platform/internal/publication"
 	"tick-data-platform/internal/r2"
 	"tick-data-platform/internal/retention"
-	"tick-data-platform/internal/wal"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/producers/fake"
 )
 
@@ -51,7 +51,7 @@ func TestPruneRemoteVerificationTruthTable(t *testing.T) {
 			candidates := []retention.CandidateFact{base}
 			localPath := filepath.Join(config.RawOutboxRoot, filepath.FromSlash(base.Artifact.TrustedPath))
 			journal := newPruneTruthJournal(t, scope, layout, sha, 10, test.name, localPath, test.exact)
-			defer journal.Close()
+			defer journal.Stop(context.Background())
 			if err := bindPruneRemoteVerification(candidates, config, layout, journal); err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +85,7 @@ func TestRunPruneLocalUsesFullCommandPathWithBoundedObserver(t *testing.T) {
 	}
 	journal := newPruneTruthJournal(t, scope, layout, artifact.ContentSHA256, artifact.Bytes, "command", rawPath, true)
 	journalPath := journal.Path()
-	if err := journal.Close(); err != nil {
+	if err := journal.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
@@ -175,7 +175,7 @@ func TestPruneLocalCompletionRecorderConvergesAfterCrashBeforeJournalRecord(t *t
 	}
 	journal := newPruneTruthJournal(t, scope, layout, artifact.ContentSHA256, artifact.Bytes, "crash", rawPath, true)
 	journalPath := journal.Path()
-	defer journal.Close()
+	defer journal.Stop(context.Background())
 	catalog, err := publication.NewCatalog(filepath.Join(t.TempDir(), "catalog.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -220,10 +220,10 @@ func TestPruneLocalCompletionRecorderConvergesAfterCrashBeforeJournalRecord(t *t
 
 	// A process restart must reconstruct the pending completion from disk and
 	// reopen the remote verification journal before Catalog records local_pruned.
-	if err := journal.Close(); err != nil {
+	if err := journal.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	journal, err = r2.OpenPublicationJournal(journalPath)
+	journal, err = testsupport.NewStartedPublicationJournal(journalPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,25 +285,25 @@ func (f pruneTestFault) Inject(point retention.PruneFaultPoint, _ string) error 
 func newPruneRawOutboxFixture(t *testing.T) (string, string, retention.LocalArtifact, retention.CandidateFact, string) {
 	t.Helper()
 	walRoot := t.TempDir()
-	store, err := wal.Open(walRoot, "gateway-prune-test")
+	store, err := testsupport.NewStartedWAL(walRoot, "gateway-prune-test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture, err := fake.BatchFixture()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	if _, err := store.Append(fixture.Frame, 1710000000, 42); err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	segment, err := store.Seal()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	rawRoot := t.TempDir()
@@ -401,7 +401,7 @@ func pruneTestScope() archive.ScopeConfig {
 
 func newPruneTruthJournal(t *testing.T, scope archive.ScopeConfig, layout r2.Layout, sha [32]byte, bytes uint64, scenario, localPath string, exact bool) *r2.PublicationJournal {
 	t.Helper()
-	journal, err := r2.OpenPublicationJournal(filepath.Join(t.TempDir(), "remote.sqlite"))
+	journal, err := testsupport.NewStartedPublicationJournal(filepath.Join(t.TempDir(), "remote.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,22 +410,22 @@ func newPruneTruthJournal(t *testing.T, scope archive.ScopeConfig, layout r2.Lay
 		TerminalSyncStatus: "complete", CompletenessStatus: "provisional",
 	})
 	if err != nil {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	manifestBytes, err := archive.ManifestCanonicalJSON(manifest)
 	if err != nil {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	claim, err := r2.NewPublisherClaim(scope)
 	if err != nil {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	claimHash, err := claim.Digest()
 	if err != nil {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	descriptor := []byte(`{"scope":"prune-test"}`)
@@ -438,29 +438,29 @@ func newPruneTruthJournal(t *testing.T, scope archive.ScopeConfig, layout r2.Lay
 		ManifestPath: filepath.Join(t.TempDir(), "manifest.json"), ReceiptPath: filepath.Join(t.TempDir(), "receipt.json"),
 	}
 	if _, err := journal.CreateOrGetIntent(intent); err != nil {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	remoteKey, err := layout.RemoteKey(archive.RawWALObjectKey(sha))
 	if err != nil {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	object := r2.PublicationObject{LocalPath: localPath, SHA256: sha, MD5: [16]byte{1}, Bytes: bytes, RemoteKey: remoteKey}
 	switch {
 	case exact:
 		if err := journal.RecordObjectState(intent.ManifestKey, object, r2.ObjectStateRemoteVerified, "etag", time.Date(2024, 3, 9, 12, 0, 0, 0, time.UTC)); err != nil {
-			_ = journal.Close()
+			_ = journal.Stop(context.Background())
 			t.Fatal(err)
 		}
 	case scenario == "receipt only":
 		if err := journal.AdvanceStage(intent.ManifestKey, r2.StageReceiptSaved); err != nil {
-			_ = journal.Close()
+			_ = journal.Stop(context.Background())
 			t.Fatal(err)
 		}
 	case scenario == "ETag only":
 		if err := journal.RecordObjectState(intent.ManifestKey, object, r2.ObjectStateRemoteCommitted, "etag", time.Time{}); err != nil {
-			_ = journal.Close()
+			_ = journal.Stop(context.Background())
 			t.Fatal(err)
 		}
 	case scenario == "journal intent only", scenario == "remote observation only":

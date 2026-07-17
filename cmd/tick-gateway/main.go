@@ -43,12 +43,15 @@ func main() {
 	config := ingest.ConfigFromGatewayConfig(configValue.Gateway())
 	switch command {
 	case "init":
-		gateway, err := ingest.Open(config)
+		runtime, err := newLocalGatewayRuntime(configValue)
 		if err != nil {
-			fatalf("initialize gateway: %v", err)
+			fatalf("construct gateway runtime: %v", err)
 		}
-		if err := gateway.Close(); err != nil {
-			fatalf("close initialized gateway: %v", err)
+		if err := runtime.Start(context.Background()); err != nil {
+			fatalf("start gateway runtime: %v", err)
+		}
+		if err := runtime.Stop(context.Background()); err != nil {
+			fatalf("stop gateway runtime: %v", err)
 		}
 		fmt.Printf("initialized gateway WAL=%s journal=%s\n", config.WALRoot, config.JournalPath)
 	case "status":
@@ -60,17 +63,20 @@ func main() {
 			fatalf("write status: %v", err)
 		}
 	case "reconcile", "verify-local":
-		gateway, err := ingest.Open(config)
+		runtime, err := newLocalGatewayRuntime(configValue)
 		if err != nil {
-			fatalf("open gateway: %v", err)
+			fatalf("construct gateway runtime: %v", err)
 		}
-		status, statusErr := gateway.Status()
-		closeErr := gateway.Close()
+		if err := runtime.Start(context.Background()); err != nil {
+			fatalf("start gateway runtime: %v", err)
+		}
+		status, statusErr := runtime.Gateway().Status()
+		stopErr := runtime.Stop(context.Background())
 		if statusErr != nil {
 			fatalf("read gateway status: %v", statusErr)
 		}
-		if closeErr != nil {
-			fatalf("close gateway: %v", closeErr)
+		if stopErr != nil {
+			fatalf("stop gateway runtime: %v", stopErr)
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
 			fatalf("write status: %v", err)
@@ -89,23 +95,31 @@ func readLocalStatus(configValue appconfig.Config) (operations.ApplicationStatus
 		return operations.ApplicationStatus{}, fmt.Errorf("status requires publication catalog_path and remote_journal_path")
 	}
 	config := ingest.ConfigFromGatewayConfig(configValue.Gateway())
-	gateway, err := ingest.Open(config)
+	runtime, err := newLocalGatewayRuntime(configValue)
 	if err != nil {
-		return operations.ApplicationStatus{}, fmt.Errorf("open gateway: %w", err)
+		return operations.ApplicationStatus{}, fmt.Errorf("construct gateway runtime: %w", err)
+	}
+	if err := runtime.Start(context.Background()); err != nil {
+		return operations.ApplicationStatus{}, fmt.Errorf("start gateway runtime: %w", err)
 	}
 	catalog, err := publication.NewCatalog(configValue.Publication.CatalogPath)
 	if err != nil {
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		return operations.ApplicationStatus{}, err
 	}
 	if err := catalog.Start(context.Background()); err != nil {
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		return operations.ApplicationStatus{}, err
 	}
-	remoteJournal, err := r2.OpenPublicationJournal(configValue.Publication.RemoteJournalPath)
+	remoteJournal, err := r2.NewPublicationJournal(configValue.Publication.RemoteJournalPath)
 	if err != nil {
 		_ = catalog.Stop(context.Background())
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
+		return operations.ApplicationStatus{}, err
+	}
+	if err := remoteJournal.Start(context.Background()); err != nil {
+		_ = catalog.Stop(context.Background())
+		_ = runtime.Stop(context.Background())
 		return operations.ApplicationStatus{}, err
 	}
 	disk, err := ingest.NewDiskStateMachine(config.WALRoot, ingest.DiskWatermarks{
@@ -115,35 +129,46 @@ func readLocalStatus(configValue appconfig.Config) (operations.ApplicationStatus
 		MaxPendingBytes:    configValue.Publication.MaxPendingBytes,
 	}, ingest.OSDiskUsageProvider{})
 	if err != nil {
-		_ = remoteJournal.Close()
+		_ = remoteJournal.Stop(context.Background())
 		_ = catalog.Stop(context.Background())
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		return operations.ApplicationStatus{}, err
 	}
-	service, err := app.NewLocalStatusService(gateway, catalog, remoteJournal, disk)
+	service, err := app.NewLocalStatusService(runtime.Gateway(), catalog, remoteJournal, disk)
 	if err != nil {
-		_ = remoteJournal.Close()
+		_ = remoteJournal.Stop(context.Background())
 		_ = catalog.Stop(context.Background())
-		_ = gateway.Close()
+		_ = runtime.Stop(context.Background())
 		return operations.ApplicationStatus{}, err
 	}
 	status, statusErr := service.Snapshot(context.Background())
-	remoteCloseErr := remoteJournal.Close()
-	catalogCloseErr := catalog.Stop(context.Background())
-	gatewayCloseErr := gateway.Close()
+	remoteStopErr := remoteJournal.Stop(context.Background())
+	catalogStopErr := catalog.Stop(context.Background())
+	gatewayStopErr := runtime.Stop(context.Background())
 	if statusErr != nil {
 		return operations.ApplicationStatus{}, statusErr
 	}
-	if remoteCloseErr != nil {
-		return operations.ApplicationStatus{}, fmt.Errorf("close remote journal: %w", remoteCloseErr)
+	if remoteStopErr != nil {
+		return operations.ApplicationStatus{}, fmt.Errorf("stop remote journal: %w", remoteStopErr)
 	}
-	if catalogCloseErr != nil {
-		return operations.ApplicationStatus{}, fmt.Errorf("close publication catalog: %w", catalogCloseErr)
+	if catalogStopErr != nil {
+		return operations.ApplicationStatus{}, fmt.Errorf("stop publication catalog: %w", catalogStopErr)
 	}
-	if gatewayCloseErr != nil {
-		return operations.ApplicationStatus{}, fmt.Errorf("close gateway: %w", gatewayCloseErr)
+	if gatewayStopErr != nil {
+		return operations.ApplicationStatus{}, fmt.Errorf("stop gateway runtime: %w", gatewayStopErr)
 	}
 	return status, nil
+}
+
+func newLocalGatewayRuntime(configValue appconfig.Config) (*app.LocalGatewayRuntime, error) {
+	config := ingest.ConfigFromGatewayConfig(configValue.Gateway())
+	return app.NewLocalGatewayRuntime(config, ingest.DiskWatermarks{
+		HighFreeBytes:      config.DiskHighFreeBytes,
+		CriticalFreeBytes:  config.DiskCriticalFreeBytes,
+		EmergencyFreeBytes: config.DiskEmergencyFreeBytes,
+		MaxPendingSegments: configValue.Publication.MaxPendingSegments,
+		MaxPendingBytes:    configValue.Publication.MaxPendingBytes,
+	})
 }
 
 func pruneLocal(configValue appconfig.Config, args []string) error {

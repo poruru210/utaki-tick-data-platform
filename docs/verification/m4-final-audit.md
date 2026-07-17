@@ -17,8 +17,6 @@ required_action_count: 6
 - [x] Linux相当でM4 package race artifactを取得し、8 packageのpass、failなし、`DATA RACE`なしを確認した。
 - [x] PR #5のcommit `1ebecf724fb588eaeff556e664f6bb92e331eae2`について、push/PR両イベントのRepository check、Linux Race、Windows Race、計6 CI実行がsuccessであることを確認した。Race artifact uploadとtoolchain metadata captureもsuccessだった。
 - [ ] isolated real-R2 raw/read smokeをpassさせる。
-- [ ] `m4_real_r2_smoke`のprepare/verifyでreal-R2 handover、old credential revoke、new writer、
-      separate read-only verificationをpassさせる。
 - [ ] 24時間以上のlive MT5 soakとfault event/recovery artifactを取得する。
 - [ ] soak後のempty-cache/read-only independent verificationをpassさせる。
 - [ ] secret scan、scope exclusion、artifact retention、runbook executionを再確認する。

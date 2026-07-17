@@ -349,7 +349,7 @@ raw manifestと全参照raw objectがExactでない限り、Parquet、part manif
 
 part manifestはExactなParquet objectの後にだけ現れ、replay manifestはExactでcompleteなpart chainの後にだけ現れます。
 
-final observation digestはpoint-in-time evidenceであり、future mutation、admin-resistant WORM、failover、handover、remote transactionを証明しません。
+final observation digestはpoint-in-time evidenceであり、future mutation、admin-resistant WORM、failover、remote transactionを証明しません。
 
 receiptへcredential、environment secret、access tokenを保存しません。
 

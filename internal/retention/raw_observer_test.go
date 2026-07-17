@@ -13,6 +13,7 @@ import (
 	"tick-data-platform/internal/operations"
 	"tick-data-platform/internal/protocol"
 	"tick-data-platform/internal/r2"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/internal/wal"
 	"tick-data-platform/producers/fake"
 )
@@ -125,25 +126,25 @@ func TestRawRetentionObserverFailsClosedOnIncompleteManifestListing(t *testing.T
 
 func TestRawRetentionObserverVerifiesFullRemoteSnapshotSemantics(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture, err := fake.BatchFixture()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	if _, err := store.Append(fixture.Frame, 1710000000, 42); err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	segment, err := store.Seal()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	object, err := archive.PromoteSealedSegment(t.TempDir(), segment.Path)
@@ -240,9 +241,9 @@ func TestRawRetentionObserverBlocksCrossDateSegments(t *testing.T) {
 	}
 }
 
-type legacyObserver struct{}
+type unbudgetedObserver struct{}
 
-func (legacyObserver) Observe(context.Context, LocalArtifact, ProofLimits) (RemoteFact, error) {
+func (unbudgetedObserver) Observe(context.Context, LocalArtifact, ProofLimits) (RemoteFact, error) {
 	return RemoteFact{Class: RemoteObservationAbsent}, nil
 }
 
@@ -251,7 +252,7 @@ func TestObserveCandidatesRejectsUnbudgetedMultiCandidateObserver(t *testing.T) 
 	first := observerArtifact()
 	second := first
 	second.TrustedPath = "sealed/segment-00000000000000000002-00000000000000000002.wal"
-	if _, err := ObserveCandidates(context.Background(), legacyObserver{}, []LocalArtifact{first, second}, limits); err == nil {
+	if _, err := ObserveCandidates(context.Background(), unbudgetedObserver{}, []LocalArtifact{first, second}, limits); err == nil {
 		t.Fatal("unbudgeted multi-candidate observer was accepted")
 	}
 }

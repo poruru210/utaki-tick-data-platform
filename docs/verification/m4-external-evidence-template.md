@@ -67,24 +67,6 @@ real_r2:
     fresh_read_report_digest: ""
     same_content_retry: false
     different_content_rejected: false
-  handover:
-    status: not_run
-    status_reason: "<required when status is not_run, skipped, or fail>"
-    prepare_report_digest: ""
-    verify_report_digest: ""
-    old_process_stop_evidence_digest: ""
-    old_process_stopped_at_utc: ""
-    old_credential_id_digest: ""
-    old_credential_revocation_evidence_digest: ""
-    old_credential_revoked_at_utc: ""
-    operator_confirmation_digest: ""
-    old_write_denied_report_digest: ""
-    new_write_accepted_report_digest: ""
-    read_only_write_denied_report_digest: ""
-    probe_object_absent_report_digest: ""
-    transition_digest: ""
-    next_claim_digest: ""
-    independent_read_report_digest: ""
   prune:
     status: not_run
     status_reason: "<required when status is not_run, skipped, or fail>"
@@ -109,7 +91,6 @@ mt5_soak:
   fault_event_report_digest: ""
   restart_recovery_report_digest: ""
   forced_reboot_report_digest: ""
-  handover_report_digest: ""
   resource_summary_digest: ""
   started_at_utc: ""
   finished_at_utc: ""
@@ -144,7 +125,6 @@ final_audit:
 | --- | --- | --- |
 | `race` | `linux-race-<run_id>` or `windows-race-<run_id>` artifact from the corresponding workflow | All M4 packages pass; JSON and toolchain metadata match the commit |
 | `real_r2.raw_smoke` | Isolated synthetic prefix, fresh read, immutable retry and collision behavior | No production `v1/` scope; read verification and negative cases pass |
-| `real_r2.handover` | Prepare/verify are separate; old process stop and provider revoke are independently evidenced | old write denied, new write accepted, read-only write denied, and no probe object exists |
 | `real_r2.prune` | Strict config, complete scope binding, bounded read-only observation, frozen plan time | dry-run and execute bind to the same plan/proof; recovery is verified |
 | `mt5_soak` | One broker, one exact symbol, one Gateway, all scheduled faults, at least 24 hours | Every injected event has expected/observed/recovery evidence; no unexplained gap or loss |
 | `independent_verification` | Empty cache and separate read-only credential after soak | All raw, WAL, campaign, replay, part, Parquet, and API checks pass |

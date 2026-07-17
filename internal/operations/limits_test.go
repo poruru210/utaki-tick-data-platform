@@ -31,9 +31,4 @@ func TestResourceLimitsRejectZeroAndOverflow(t *testing.T) {
 	if err := tooLarge.Validate(); err == nil {
 		t.Fatal("unbounded request limit was accepted")
 	}
-	tooLarge = DefaultResourceLimits
-	tooLarge.MaxProofBytes = tooLarge.MaxHandoverObservationBytes + 1
-	if err := tooLarge.Validate(); err == nil {
-		t.Fatal("inconsistent proof/observation relationship was accepted")
-	}
 }

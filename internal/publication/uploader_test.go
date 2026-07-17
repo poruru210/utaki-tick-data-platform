@@ -18,7 +18,7 @@ import (
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/protocol"
 	"tick-data-platform/internal/r2"
-	"tick-data-platform/internal/wal"
+	"tick-data-platform/internal/testsupport"
 )
 
 func TestUploaderPublishesDueManifestAndRecordsLocalCompletion(t *testing.T) {
@@ -94,36 +94,36 @@ func TestUploaderResumesDurableJournalIntentAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	journalPath := filepath.Join(root, "remote-journal.sqlite")
-	journal, err := r2.OpenPublicationJournal(journalPath)
+	journal, err := testsupport.NewStartedPublicationJournal(journalPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	backend := newUploaderRestartBackend()
 	backend.failClaimOnce = true
-	firstPublisher, err := r2.NewPublisher(layout, backend, journal, filepath.Join(root, "publication.lock"))
+	firstPublisher, err := r2.NewPublisher(layout, backend, journal, filepath.Join(root, "publication.lock"), time.Now)
 	if err != nil {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	if _, err := firstPublisher.Publish(context.Background(), input); err == nil {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatal("first publication unexpectedly completed")
 	}
 	unfinished, err := journal.ListUnfinished(context.Background())
 	if err != nil || len(unfinished) != 1 || unfinished[0].Stage != r2.StageIntent {
-		_ = journal.Close()
+		_ = journal.Stop(context.Background())
 		t.Fatalf("durable unfinished intent = %+v err=%v", unfinished, err)
 	}
-	if err := journal.Close(); err != nil {
+	if err := journal.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
-	journal, err = r2.OpenPublicationJournal(journalPath)
+	journal, err = testsupport.NewStartedPublicationJournal(journalPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer journal.Close()
-	secondPublisher, err := r2.NewPublisher(layout, backend, journal, filepath.Join(root, "publication.lock"))
+	defer journal.Stop(context.Background())
+	secondPublisher, err := r2.NewPublisher(layout, backend, journal, filepath.Join(root, "publication.lock"), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,17 +490,17 @@ func (p *fakeRemotePublisher) Publish(_ context.Context, input r2.PublicationInp
 func spoolUploaderFixture(t *testing.T) (string, *Catalog, ManifestRecord, func()) {
 	t.Helper()
 	root := t.TempDir()
-	store, err := wal.Open(filepath.Join(root, "wal"), "gateway-uploader-test")
+	store, err := testsupport.NewStartedWAL(filepath.Join(root, "wal"), "gateway-uploader-test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	catalog, err := NewCatalog(filepath.Join(root, "catalog.sqlite"))
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	if err := catalog.Start(context.Background()); err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	clock := func() time.Time { return time.Date(2024, 3, 9, 12, 0, 0, 0, time.UTC) }
@@ -511,7 +511,7 @@ func spoolUploaderFixture(t *testing.T) (string, *Catalog, ManifestRecord, func(
 	})
 	if err != nil {
 		_ = catalog.Stop(context.Background())
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	frame, err := protocol.EncodeMessage(protocol.BatchFrameV1{
@@ -534,6 +534,6 @@ func spoolUploaderFixture(t *testing.T) (string, *Catalog, ManifestRecord, func(
 	}
 	return root, catalog, record, func() {
 		_ = catalog.Stop(context.Background())
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 	}
 }

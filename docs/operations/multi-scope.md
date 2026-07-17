@@ -44,5 +44,5 @@ oldest retrievable tick、publisher epoch、last verified snapshot digest、bloc
 同一scopeの重複またはidentity欠落は集約を拒否する。
 
 aggregate statusは観測結果を表示するだけであり、別scopeのACK、WAL、journal、lock、publisher claimを
-操作しない。一つのscopeのdisk pressure、R2 outage、publisher handover failureは、そのscopeのstatusへ
+操作しない。一つのscopeのdisk pressure、R2 outage、publisher failureは、そのscopeのstatusへ
 反映し、他scopeのprocessまたはACK pathを共有しない構成を前提とする。

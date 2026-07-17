@@ -123,6 +123,22 @@ func (b *CredentialBackend) List(ctx context.Context, prefix string) ([]RemoteOb
 	return backend.List(ctx, prefix)
 }
 
+func (b *CredentialBackend) GetLimited(ctx context.Context, key string, maxBytes uint64) ([]byte, error) {
+	backend, err := b.ready()
+	if err != nil {
+		return nil, err
+	}
+	return backend.GetLimited(ctx, key, maxBytes)
+}
+
+func (b *CredentialBackend) ListLimited(ctx context.Context, prefix string, maxObjects uint64) ([]RemoteObject, error) {
+	backend, err := b.ready()
+	if err != nil {
+		return nil, err
+	}
+	return backend.ListLimited(ctx, prefix, maxObjects)
+}
+
 func (b *CredentialBackend) PutFileIfAbsent(ctx context.Context, key, path string, expectedSHA256 [32]byte, expectedBytes uint64) (RemoteObjectCommit, error) {
 	backend, err := b.ready()
 	if err != nil {
@@ -140,3 +156,4 @@ func (b *CredentialBackend) VerifyFile(ctx context.Context, key, path string, ex
 }
 
 var _ WriteBackend = (*CredentialBackend)(nil)
+var _ BoundedObjectBackend = (*CredentialBackend)(nil)

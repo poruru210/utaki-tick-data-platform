@@ -275,20 +275,6 @@ Absent、Different、Ambiguous、Oversized、Unavailable、欠落、異なるbyt
 
 final observation digestと`verification_complete=true`をbindしないreceiptは、M3 replay verification receiptとして受理しません。
 
-## M4 publisher handover artifact digest
-
-M4 handover artifact digestは、prior publisher claimとexpected next claimを結び付ける
-secret-free immutable recordのdigestです。
-
-```text
-"tick-data-platform/publisher-handover/v1\0"
-publisher_handover_artifact_canonical_json_bytes
-```
-
-canonical objectのfield集合、key layout、trusted scope bindingは
-[operations.md](operations.md)に定義します。credential value、endpoint、local path、
-digest自身は入力へ含めません。
-
 ## replay publication resource limits
 
 Protocol V1実装上限は、`max_graph_nodes=50000`、`max_list_objects=50000`、`max_metadata_object_bytes=16777216`、`max_observation_bytes=70368744177664`、`max_observation_requests=100000`、`max_parquet_object_bytes=1099511627776`、`max_parts=10000`、`max_publication_rounds=20002`、`max_total_metadata_bytes=268435456`、`max_total_parquet_bytes=17592186044416`です。

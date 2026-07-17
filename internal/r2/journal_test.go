@@ -12,11 +12,7 @@ import (
 )
 
 func TestPublicationJournalAdvanceStageIsIdempotentAndMonotonic(t *testing.T) {
-	journal, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer journal.Close()
+	journal := newStartedPublicationJournal(t, filepath.Join(t.TempDir(), "publication.sqlite"))
 	intent := testPublicationIntent(t)
 	if _, err := journal.CreateOrGetIntent(intent); err != nil {
 		t.Fatal(err)
@@ -46,11 +42,7 @@ func TestPublicationJournalAdvanceStageIsIdempotentAndMonotonic(t *testing.T) {
 }
 
 func TestPublicationJournalListsUnfinishedIntentForRecovery(t *testing.T) {
-	journal, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer journal.Close()
+	journal := newStartedPublicationJournal(t, filepath.Join(t.TempDir(), "publication.sqlite"))
 	intent := testPublicationIntent(t)
 	if _, err := journal.CreateOrGetIntent(intent); err != nil {
 		t.Fatal(err)
@@ -79,11 +71,7 @@ func TestPublicationJournalListsUnfinishedIntentForRecovery(t *testing.T) {
 }
 
 func TestPublicationJournalRemoteVerificationLookupRequiresExactIdentity(t *testing.T) {
-	journal, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer journal.Close()
+	journal := newStartedPublicationJournal(t, filepath.Join(t.TempDir(), "publication.sqlite"))
 	intent := testPublicationIntent(t)
 	if _, err := journal.CreateOrGetIntent(intent); err != nil {
 		t.Fatal(err)
@@ -112,11 +100,7 @@ func TestPublicationJournalRemoteVerificationLookupRequiresExactIdentity(t *test
 		t.Fatalf("object states = %+v", states)
 	}
 
-	missing, err := OpenPublicationJournal(filepath.Join(t.TempDir(), "missing.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer missing.Close()
+	missing := newStartedPublicationJournal(t, filepath.Join(t.TempDir(), "missing.sqlite"))
 	missingIntent := testPublicationIntent(t)
 	missingIntent.ManifestKey = "missing-manifest"
 	if _, err := missing.CreateOrGetIntent(missingIntent); err != nil {
@@ -125,6 +109,39 @@ func TestPublicationJournalRemoteVerificationLookupRequiresExactIdentity(t *test
 	if _, found, err := missing.FindRemoteVerifiedObject(object.RemoteKey, sha, object.Bytes); err != nil || found {
 		t.Fatalf("missing verification lookup = found=%v err=%v", found, err)
 	}
+}
+
+func TestPublicationJournalCanRestartAfterStop(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "publication.sqlite")
+	j, err := NewPublicationJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Start(context.Background()); err != nil {
+		t.Fatalf("restart publication journal: %v", err)
+	}
+	if err := j.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newStartedPublicationJournal(t *testing.T, path string) *PublicationJournal {
+	t.Helper()
+	journal, err := NewPublicationJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = journal.Stop(context.Background()) })
+	return journal
 }
 
 func testPublicationIntent(t *testing.T) PublicationIntent {

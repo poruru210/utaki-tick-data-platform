@@ -17,7 +17,7 @@ import (
 
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/r2"
-	"tick-data-platform/internal/wal"
+	"tick-data-platform/internal/testsupport"
 )
 
 type m2E2EBackend struct {
@@ -169,12 +169,12 @@ func TestM2RawOffhostDeliveryEndToEndFake(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend := &m2E2EBackend{objects: make(map[string][]byte)}
-	journal, err := r2.OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
+	journal, err := testsupport.NewStartedPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = journal.Close() })
-	publisher, err := r2.NewPublisher(layout, backend, journal, "")
+	t.Cleanup(func() { _ = journal.Stop(context.Background()) })
+	publisher, err := r2.NewPublisher(layout, backend, journal, "", time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,22 +262,22 @@ func m2E2ESealedObject(t *testing.T) (archive.RawObject, [][]byte) {
 	t.Helper()
 	frames := [][]byte{readerTestFrame(t, time.Date(2024, 3, 9, 0, 0, 0, 100000000, time.UTC).UnixMilli(), 1, false), readerTestFrame(t, time.Date(2024, 3, 9, 0, 0, 0, 0, time.UTC).UnixMilli(), 2, true)}
 	root := t.TempDir()
-	store, err := wal.Open(root, "m2-e2e-gateway")
+	store, err := testsupport.NewStartedWAL(root, "m2-e2e-gateway")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for index, frame := range frames {
 		if _, err := store.Append(frame, 1710000000+int64(index), uint64(index+1)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 	}
 	sealed, err := store.Seal()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	object, err := archive.PromoteSealedSegment(t.TempDir(), sealed.Path)

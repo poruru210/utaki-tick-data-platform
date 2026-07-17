@@ -205,7 +205,7 @@ func newLayout(configValue appconfig.Config) (r2.Layout, error) {
 }
 
 func newPublisher(configValue appconfig.Config, layout r2.Layout, backend r2.WriteBackend, journal *r2.PublicationJournal) (*r2.Publisher, error) {
-	return r2.NewPublisherWithClock(layout, backend, journal, filepath.Join(configValue.Publication.ReceiptRoot, "publication.lock"), time.Now)
+	return r2.NewPublisher(layout, backend, journal, filepath.Join(configValue.Publication.ReceiptRoot, "publication.lock"), time.Now)
 }
 
 func newUploader(configValue appconfig.Config, catalog *publication.Catalog, publisher *r2.Publisher, remoteJournal *r2.PublicationJournal, disk *ingest.DiskStateMachine) (*publication.Uploader, error) {

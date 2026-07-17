@@ -1,6 +1,7 @@
 package archive_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -12,7 +13,7 @@ import (
 
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/protocol"
-	"tick-data-platform/internal/wal"
+	"tick-data-platform/internal/testsupport"
 )
 
 func TestBuildRawDayManifestSelectsRangesAndZeroBatchSentinel(t *testing.T) {
@@ -414,7 +415,7 @@ func promoteCampaignObjects(t *testing.T, times []int64) []archive.RawObject {
 	t.Helper()
 	root := t.TempDir()
 	outbox := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,22 +423,22 @@ func promoteCampaignObjects(t *testing.T, times []int64) []archive.RawObject {
 	for i, timeMSC := range times {
 		frame := testFrame(t, timeMSC, uint64(i+1))
 		if _, err := store.Append(frame, 1710000000+int64(i), uint64(100+i)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		sealed, err := store.Seal()
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		object, err := archive.PromoteSealedSegment(outbox, sealed.Path)
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		objects = append(objects, object)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return objects
@@ -485,7 +486,7 @@ func decodeFixtureCanonicalJSON(data []byte) (string, error) {
 func promoteTestObject(t *testing.T, frames ...[]byte) archive.RawObject {
 	t.Helper()
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,16 +495,16 @@ func promoteTestObject(t *testing.T, frames ...[]byte) archive.RawObject {
 			continue
 		}
 		if _, err := store.Append(frame, 1710000000+int64(i), uint64(100+i)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 	}
 	sealed, err := store.Seal()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	object, err := archive.PromoteSealedSegment(t.TempDir(), sealed.Path)

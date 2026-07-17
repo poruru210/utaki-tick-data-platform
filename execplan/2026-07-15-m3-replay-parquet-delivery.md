@@ -135,7 +135,7 @@ Parquetの全byte一致は、同じconverter build、dependency lock、writer co
 - [x] (2026-07-16、G9E completed) Production M2 publisher、M3 replay publisher、read-only replay deliveryを同じnetwork-free backendとcanonical identity graphで接続し、現行local gateを再実行した。
 - [x] (2026-07-16、whole-M3 final re-audit pass) Advisorのphase `final_m3_whole_reaudit`がverdict `pass`、required actionsなしとなり、M3全体をcompletedとした。
 - [x] (2026-07-16、M3 merge) Pull Request #4をmerge commit `cb72752a651c88c3027b409f6f205ac9236f28b8`としてmainへ反映した。
-- [x] (2026-07-16、M4 handoff) proof-gated pruning、handover、multi-broker/symbol、HTTP、24h soak、live brokerをM3の未完了項目ではなくM4へ明示的に委譲した。M4の正本は`execplan/2026-07-16-m4-production-operations-http-delivery.md`とする。
+- [x] (2026-07-16、M4 delegation) proof-gated pruning、運用時の認証情報変更、multi-broker/symbol、HTTP、24h soak、live brokerをM3の未完了項目ではなくM4へ明示的に委譲した。M4の正本は`execplan/2026-07-16-m4-production-operations-http-delivery.md`とする。
 
 ## Surprises & Discoveries
 

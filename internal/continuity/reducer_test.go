@@ -2,6 +2,7 @@ package continuity_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/continuity"
 	"tick-data-platform/internal/protocol"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/internal/wal"
 )
 
@@ -660,18 +662,18 @@ func buildFixture(t *testing.T, batches []protocol.BatchFrameV1) rawFixture {
 	t.Helper()
 	scope := testScope()
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for index, batch := range batches {
 		frame, err := protocol.EncodeMessage(batch)
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		if _, err := store.Append(frame, 1710000000+int64(index), uint64(100+index)); err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 	}
@@ -679,17 +681,17 @@ func buildFixture(t *testing.T, batches []protocol.BatchFrameV1) rawFixture {
 	if len(batches) > 0 {
 		sealed, err := store.Seal()
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		object, err := archive.PromoteSealedSegment(t.TempDir(), sealed.Path)
 		if err != nil {
-			_ = store.Close()
+			_ = store.Stop(context.Background())
 			t.Fatal(err)
 		}
 		objects = []archive.RawObject{object}
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	manifest, err := archive.BuildRawDayManifest(archive.RawDayManifestInput{

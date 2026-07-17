@@ -870,3 +870,7 @@ func ParseHashHex(value string) ([32]byte, error) {
 	copy(result[:], decoded)
 	return result, nil
 }
+
+func EncodeHashHex(value [32]byte) string {
+	return hex.EncodeToString(value[:])
+}

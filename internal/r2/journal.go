@@ -34,10 +34,7 @@ const (
 	ObjectStateUploading       = "uploading"
 	ObjectStateRemoteCommitted = "remote_committed"
 	ObjectStateRemoteVerified  = "remote_verified"
-	// ObjectStateLocalPruned remains readable for legacy journal rows. New
-	// runtime local-pruned authority belongs to publication.Catalog.
-	ObjectStateLocalPruned    = "local_pruned"
-	UploadMethodS3PutObjectV1 = "aws-sdk-go-v2-s3-putobject-if-none-match-getobject-sha256-v1"
+	UploadMethodS3PutObjectV1  = "aws-sdk-go-v2-s3-putobject-if-none-match-getobject-sha256-v1"
 )
 
 type PublicationObject struct {
@@ -102,17 +99,6 @@ type PublicationJournal struct {
 	started bool
 }
 
-func OpenPublicationJournal(path string) (*PublicationJournal, error) {
-	journal, err := NewPublicationJournal(path)
-	if err != nil {
-		return nil, err
-	}
-	if err := journal.Start(context.Background()); err != nil {
-		return nil, err
-	}
-	return journal, nil
-}
-
 // NewPublicationJournal validates the path without opening SQLite.
 // Start performs schema recovery and durable initialization.
 func NewPublicationJournal(path string) (*PublicationJournal, error) {
@@ -157,7 +143,17 @@ func (j *PublicationJournal) Stop(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return j.Close()
+	if j == nil {
+		return nil
+	}
+	if j.db == nil {
+		j.started = false
+		return nil
+	}
+	err := j.db.Close()
+	j.db = nil
+	j.started = false
+	return err
 }
 
 func (j *PublicationJournal) Path() string {
@@ -646,15 +642,6 @@ func (j *PublicationJournal) lookup(identity string) (JournalRecord, bool, error
 	return record, true, nil
 }
 
-func (j *PublicationJournal) Close() error {
-	if j == nil || j.db == nil {
-		return nil
-	}
-	err := j.db.Close()
-	j.db = nil
-	return err
-}
-
 func canonicalIntent(intent PublicationIntent) ([]byte, error) {
 	objects := make([]any, len(intent.Objects))
 	for i, object := range intent.Objects {
@@ -782,7 +769,7 @@ func publicationStageRank(stage string) int {
 
 func validPublicationObjectState(state string) bool {
 	switch state {
-	case ObjectStateSealedLocal, ObjectStateUploading, ObjectStateRemoteCommitted, ObjectStateRemoteVerified, ObjectStateLocalPruned:
+	case ObjectStateSealedLocal, ObjectStateUploading, ObjectStateRemoteCommitted, ObjectStateRemoteVerified:
 		return true
 	default:
 		return false

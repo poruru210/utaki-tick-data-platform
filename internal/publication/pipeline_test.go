@@ -12,6 +12,7 @@ import (
 
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/protocol"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/internal/wal"
 )
 
@@ -37,11 +38,11 @@ func TestAffectedDatesIncludesRecordsAndZeroBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-publication-test")
+	store, err := testsupport.NewStartedWAL(root, "gateway-publication-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	if _, err := store.Append(frame, 1710000000, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -73,11 +74,11 @@ func TestLocalPipelineSealsPromotesAndSpoolsIdempotently(t *testing.T) {
 	outboxRoot := filepath.Join(root, "outbox")
 	catalogPath := filepath.Join(root, "catalog.sqlite")
 	manifestRoot := filepath.Join(root, "manifests")
-	store, err := wal.Open(walRoot, "gateway-publication-test")
+	store, err := testsupport.NewStartedWAL(walRoot, "gateway-publication-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	catalog, err := NewCatalogWithClock(catalogPath, func() time.Time {
 		return time.Date(2024, 3, 9, 12, 0, 0, 0, time.UTC)
 	})
@@ -201,11 +202,11 @@ func TestLocalPipelineSealsPromotesAndSpoolsIdempotently(t *testing.T) {
 func TestLocalPipelineStopForceSealsActiveWAL(t *testing.T) {
 	root := t.TempDir()
 	clock := func() time.Time { return time.Date(2024, 3, 9, 12, 0, 0, 0, time.UTC) }
-	store, err := wal.Open(filepath.Join(root, "wal"), "gateway-publication-stop-test")
+	store, err := testsupport.NewStartedWAL(filepath.Join(root, "wal"), "gateway-publication-stop-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	catalog, err := NewCatalogWithClock(filepath.Join(root, "catalog.sqlite"), clock)
 	if err != nil {
 		t.Fatal(err)
@@ -240,11 +241,11 @@ func TestLocalPipelineStopForceSealsActiveWAL(t *testing.T) {
 
 func TestLocalPipelinePriorityWakeupTriggersDrain(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(filepath.Join(root, "wal"), "gateway-priority-test")
+	store, err := testsupport.NewStartedWAL(filepath.Join(root, "wal"), "gateway-priority-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	catalog, err := NewCatalog(filepath.Join(root, "catalog.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -288,11 +289,11 @@ func TestLocalPipelinePriorityWakeupTriggersDrain(t *testing.T) {
 
 func TestLocalPipelineSkipsLocalPrunedSegmentAfterRestart(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(filepath.Join(root, "wal"), "gateway-local-pruned-test")
+	store, err := testsupport.NewStartedWAL(filepath.Join(root, "wal"), "gateway-local-pruned-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	catalog, err := NewCatalog(filepath.Join(root, "catalog.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -325,11 +326,11 @@ func TestLocalPipelineSkipsLocalPrunedSegmentAfterRestart(t *testing.T) {
 
 func TestLocalPipelineDoesNotRecreatePrunedRawObjectWhenSealedWALRemains(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(filepath.Join(root, "wal"), "gateway-local-pruned-sealed-test")
+	store, err := testsupport.NewStartedWAL(filepath.Join(root, "wal"), "gateway-local-pruned-sealed-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	appendPublicationBatch(t, store, time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC), 1, 1)
 	segment, err := store.Seal()
 	if err != nil {
@@ -381,11 +382,11 @@ func TestLocalPipelineDoesNotRecreatePrunedRawObjectWhenSealedWALRemains(t *test
 
 func TestLocalPipelineUsesInjectedTicker(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(filepath.Join(root, "wal"), "gateway-ticker-test")
+	store, err := testsupport.NewStartedWAL(filepath.Join(root, "wal"), "gateway-ticker-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	catalog, err := NewCatalog(filepath.Join(root, "catalog.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -434,11 +435,11 @@ func TestLocalPipelineUsesInjectedTicker(t *testing.T) {
 
 func TestPlannerWaitsForRemotePredecessor(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(filepath.Join(root, "wal"), "gateway-predecessor-gate-test")
+	store, err := testsupport.NewStartedWAL(filepath.Join(root, "wal"), "gateway-predecessor-gate-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.Stop(context.Background())
 	clock := func() time.Time { return time.Date(2024, 3, 9, 12, 0, 0, 0, time.UTC) }
 	catalog, err := NewCatalogWithClock(filepath.Join(root, "catalog.sqlite"), clock)
 	if err != nil {

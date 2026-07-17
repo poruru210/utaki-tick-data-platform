@@ -6,14 +6,17 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/credentials"
 	"tick-data-platform/internal/r2"
+	"tick-data-platform/internal/testsupport"
 )
 
 const (
@@ -76,29 +79,48 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 	if err := r2.ValidateHTTPSHostEndpoint(endpoint); err != nil {
 		t.Fatalf("real R2 endpoint is invalid: %v", err)
 	}
-	backend, err := r2.NewS3Backend(context.Background(), r2.S3BackendConfig{
-		Bucket: bucket, Endpoint: endpoint, Region: "auto",
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
+	credentialsBody, err := json.Marshal(struct {
+		FormatVersion   int    `json:"format_version"`
+		AccessKeyID     string `json:"access_key_id"`
+		SecretAccessKey string `json:"secret_access_key"`
+	}{
+		FormatVersion:   1,
+		AccessKeyID:     os.Getenv(realR2AccessEnv),
+		SecretAccessKey: os.Getenv(realR2SecretEnv),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal, err := r2.OpenPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
+	if err := os.WriteFile(credentialsPath, credentialsBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := credentials.NewFileProvider(credentials.FileConfig{Path: credentialsPath, Protection: credentials.ProtectionNativeACL})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = journal.Close() })
-	publisher, err := r2.NewPublisher(layout, backend, journal, "")
+	backend, err := r2.NewCredentialBackend(r2.S3BackendConfig{
+		Bucket: bucket, Endpoint: endpoint, Region: "auto",
+	}, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = backend.Stop(context.Background()) })
+	journal, err := testsupport.NewStartedPublicationJournal(filepath.Join(t.TempDir(), "publication.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = journal.Stop(context.Background()) })
+	publisher, err := r2.NewPublisher(layout, backend, journal, "", time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := publisher.Publish(context.Background(), r2.PublicationInput{
 		Manifest: manifest, ManifestBytes: manifestBytes, ObjectPaths: map[string]string{object.Key: object.Path},
 	}); err != nil {
-		t.Fatal(err)
-	}
-	credentialsPath := filepath.Join(t.TempDir(), "reader-credentials.json")
-	credentialsBody := fmt.Sprintf(`{"format_version":1,"access_key_id":%q,"secret_access_key":%q}`, os.Getenv(realR2AccessEnv), os.Getenv(realR2SecretEnv))
-	if err := os.WriteFile(credentialsPath, []byte(credentialsBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	reader, err := NewArchiveReaderV1(context.Background(), ReaderConfig{

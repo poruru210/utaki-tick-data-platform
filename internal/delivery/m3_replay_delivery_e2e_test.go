@@ -20,7 +20,7 @@ import (
 	"tick-data-platform/internal/parquet"
 	"tick-data-platform/internal/protocol"
 	"tick-data-platform/internal/r2"
-	"tick-data-platform/internal/wal"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/producers/fake"
 )
 
@@ -212,95 +212,95 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 	}
 	rawPaths := map[string]string{rawObject.Key: rawObject.Path}
 	backend := newM3NetworkFreeBackend()
-	m2Journal, err := r2.OpenPublicationJournal(filepath.Join(t.TempDir(), "m2-publication.sqlite"))
+	m2Journal, err := testsupport.NewStartedPublicationJournal(filepath.Join(t.TempDir(), "m2-publication.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m2Publisher, err := r2.NewPublisher(layout, backend, m2Journal, "")
+	m2Publisher, err := r2.NewPublisher(layout, backend, m2Journal, "", time.Now)
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2Input := r2.PublicationInput{Manifest: manifest, ManifestBytes: manifestBytes, ObjectPaths: rawPaths, ReceiptPath: filepath.Join(t.TempDir(), "m2-receipt.json")}
 	m2Receipt, err := m2Publisher.Publish(ctx, m2Input)
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2ManifestKey, err := layout.ManifestKey(manifest)
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2Claim, err := r2.NewPublisherClaim(scope)
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2ClaimKey, err := layout.ClaimKey(scope.PublisherEpoch)
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2ClaimBytes, err := m2Claim.CanonicalJSON()
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2ClaimHash, err := m2Claim.Digest()
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2ScopeHash, err := scope.ConfigHash()
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	if !m2Receipt.VerificationComplete || m2Receipt.ReceiptVersion != "publication-verification-receipt-v1" || m2Receipt.ManifestKey != m2ManifestKey || m2Receipt.ManifestSHA256 != manifest.ManifestSHA256 || m2Receipt.ClaimHash != m2ClaimHash || m2Receipt.ScopeConfigHash != m2ScopeHash || len(m2Receipt.RawObjects) != 1 || m2Receipt.RawObjects[0].SHA256 != rawObject.SHA256 || m2Receipt.RawObjects[0].Bytes != uint64(rawObject.Bytes) {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatalf("production M2 receipt identity mismatch: %+v", m2Receipt)
 	}
 	m2ScopeKey, err := layout.ScopeDescriptorKey()
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2ScopeBytes, err := scope.CanonicalConfigJSON()
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2RawKey, err := layout.RemoteKey(rawObject.Key)
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2RawBytes, err := os.ReadFile(rawObject.Path)
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	for key, want := range map[string][]byte{m2ScopeKey: m2ScopeBytes, m2ClaimKey: m2ClaimBytes, m2RawKey: m2RawBytes, m2ManifestKey: manifestBytes} {
 		got, err := backend.Get(ctx, key)
 		if err != nil || !bytes.Equal(got, want) {
-			_ = m2Journal.Close()
+			_ = m2Journal.Stop(context.Background())
 			t.Fatalf("production M2 remote object %q differs: err=%v", key, err)
 		}
 	}
 	if got := backend.putIfAbsentKeys(); len(got) != 1 || got[0] != m2ClaimKey {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatalf("production M2 conditional claim writes = %v", got)
 	}
 	m2FileMutations := backend.fileMutationKeys()
 	expectedM2FileMutations := []string{m2ScopeKey, m2RawKey, m2ManifestKey}
 	if !equalM3E2EStrings(m2FileMutations, expectedM2FileMutations) {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatalf("production M2 SDK object mutations = %v, want %v", m2FileMutations, expectedM2FileMutations)
 	}
 	m2ReceiptCanonical, err := m2Receipt.CanonicalJSON()
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2Writes := backend.writeCount()
@@ -308,19 +308,19 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 	m2ClaimWrites := len(backend.putIfAbsentKeys())
 	m2RetryReceipt, err := m2Publisher.Publish(ctx, m2Input)
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	m2RetryCanonical, err := m2RetryReceipt.CanonicalJSON()
 	if err != nil {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal(err)
 	}
 	if !bytes.Equal(m2RetryCanonical, m2ReceiptCanonical) || backend.writeCount() != m2Writes || len(backend.fileMutationKeys()) != m2Copies || len(backend.putIfAbsentKeys()) != m2ClaimWrites {
-		_ = m2Journal.Close()
+		_ = m2Journal.Stop(context.Background())
 		t.Fatal("same-content production M2 retry changed receipt identity, claim writes, or remote copy mutations")
 	}
-	if err := m2Journal.Close(); err != nil {
+	if err := m2Journal.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -519,7 +519,7 @@ func buildM3E2ERawTruth(t *testing.T, scope archive.ScopeConfig, producerInstanc
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wal.Open(t.TempDir(), scope.GatewayBuildIdentity)
+	store, err := testsupport.NewStartedWAL(t.TempDir(), scope.GatewayBuildIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +530,7 @@ func buildM3E2ERawTruth(t *testing.T, scope archive.ScopeConfig, producerInstanc
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	rawObject, err := archive.PromoteSealedSegment(t.TempDir(), sealed.Path)

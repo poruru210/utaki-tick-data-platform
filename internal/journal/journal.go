@@ -57,20 +57,6 @@ type Store struct {
 	started        bool
 }
 
-func Open(path, gatewayID string, initialFromMSC int64, initialCount uint32) (*Store, error) {
-	if path == "" {
-		return nil, fmt.Errorf("journal path is empty")
-	}
-	store, err := NewStore(path, gatewayID, initialFromMSC, initialCount)
-	if err != nil {
-		return nil, err
-	}
-	if err := store.Start(context.Background()); err != nil {
-		return nil, err
-	}
-	return store, nil
-}
-
 // NewStore validates the journal identity without opening files or SQLite.
 // Start performs recovery and durable initialization.
 func NewStore(path, gatewayID string, initialFromMSC int64, initialCount uint32) (*Store, error) {
@@ -120,7 +106,12 @@ func (s *Store) Stop(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.Close()
+	if s == nil || s.db == nil {
+		return nil
+	}
+	err := s.db.Close()
+	s.db = nil
+	return err
 }
 
 func (s *Store) Path() string { return s.path }
@@ -396,15 +387,6 @@ func (s *Store) Reset() error {
 		return fmt.Errorf("commit journal reset: %w", err)
 	}
 	return nil
-}
-
-func (s *Store) Close() error {
-	if s.db == nil {
-		return nil
-	}
-	err := s.db.Close()
-	s.db = nil
-	return err
 }
 
 func sqliteInt(value uint64) (int64, error) {

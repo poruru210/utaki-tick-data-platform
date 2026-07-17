@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"tick-data-platform/internal/archive"
+	"tick-data-platform/internal/testsupport"
 	"tick-data-platform/internal/wal"
 	"tick-data-platform/producers/fake"
 )
@@ -26,7 +27,7 @@ func (f failAtPoint) Inject(point PruneFaultPoint, _ string) error {
 
 func TestPruneExecutorPublishesCheckpointBeforeTrashAndRecovers(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestPruneExecutorPublishesCheckpointBeforeTrashAndRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	artifact := LocalArtifact{
@@ -80,16 +81,16 @@ func TestPruneExecutorPublishesCheckpointBeforeTrashAndRecovers(t *testing.T) {
 	if err != nil || checkpoint.EndSequence != 1 || checkpoint.RetainedChainRoot != entry.EntryHash {
 		t.Fatalf("checkpoint=%+v err=%v", checkpoint, err)
 	}
-	anchored, err := wal.OpenWithAnchor(root, "gateway-test-01", &wal.PruneAnchor{EndSequence: 1, ChainRoot: entry.EntryHash})
+	anchored, err := testsupport.NewStartedWALWithAnchor(root, "gateway-test-01", &wal.PruneAnchor{EndSequence: 1, ChainRoot: entry.EntryHash})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = anchored.Close()
+	_ = anchored.Stop(context.Background())
 }
 
 func TestPruneExecutorFaultLeavesCheckpointedSourceForRecovery(t *testing.T) {
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func TestPruneExecutorFaultLeavesCheckpointedSourceForRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.Close()
+	_ = store.Stop(context.Background())
 	artifact := LocalArtifact{Kind: ArtifactWALSegment, TrustedPath: filepath.ToSlash(filepath.Join("sealed", filepath.Base(segment.Path))), Bytes: uint64(segment.FileBytes), ContentSHA256: segment.ObjectSHA256, WALRange: &WALRange{StartSequence: segment.StartSequence, EndSequence: segment.LastSequence, StartChainRoot: segment.ChainStart, EndChainRoot: segment.ChainRoot}}
 	proof := &RetentionProof{ProofVersion: RetentionProofVersion, ArtifactKind: artifact.Kind, TrustedRelativePath: artifact.TrustedPath, Bytes: artifact.Bytes, ContentSHA256: artifact.ContentSHA256, ScopeConfigHash: plannerHash('s'), WALRange: artifact.WALRange, Remote: RemoteObjectObservation{Class: RemoteObservationExact, FullKey: "remote/object", Bytes: artifact.Bytes, SHA256: artifact.ContentSHA256}, CoveringManifestKey: "remote/manifest", CoveringManifestDigest: plannerHash('c'), VerificationReportDigest: plannerHash('d'), ObservedWallTimeUnixMS: 100, GraceNotBeforeUnixMS: 200, Limits: ProofLimits{MaxProofObjects: 100, MaxProofBytes: 1 << 20, MaxManifestNodes: 100}}
 	candidate := CandidateFact{Artifact: artifact, Proof: proof, FreshRemote: true, CoverageVerified: true}
@@ -308,26 +309,26 @@ func TestPruneExecutorFaultMatrixConvergesAfterRecovery(t *testing.T) {
 func newWALPruneFixture(t *testing.T) (string, wal.VerifiedSegment, CandidateFact, PrunePlan) {
 	t.Helper()
 	root := t.TempDir()
-	store, err := wal.Open(root, "gateway-test-01")
+	store, err := testsupport.NewStartedWAL(root, "gateway-test-01")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture, err := fake.BatchFixture()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	entry, err := store.Append(fixture.Frame, 1710000000, 42)
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
 	segment, err := store.Seal()
 	if err != nil {
-		_ = store.Close()
+		_ = store.Stop(context.Background())
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := store.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	artifact := LocalArtifact{

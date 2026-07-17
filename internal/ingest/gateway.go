@@ -85,63 +85,6 @@ type StatusSnapshot struct {
 	Metrics                 Metrics             `json:"metrics"`
 }
 
-func Open(config Config) (*Gateway, error) {
-	config = config.withDefaults()
-	if err := config.Validate(); err != nil {
-		return nil, err
-	}
-	recovery, err := retention.NewWALRecovery(config.WALRoot)
-	if err != nil {
-		return nil, err
-	}
-	if err := recovery.Start(context.Background()); err != nil {
-		return nil, err
-	}
-	store, err := wal.NewStore(config.WALRoot, config.GatewayInstanceID, recovery)
-	if err != nil {
-		_ = recovery.Stop(context.Background())
-		return nil, err
-	}
-	if err := store.Start(context.Background()); err != nil {
-		_ = recovery.Stop(context.Background())
-		return nil, err
-	}
-	journalStore, err := journal.NewStore(config.JournalPath, config.GatewayInstanceID, config.InitialFromMSC, config.InitialBatchCount)
-	if err != nil {
-		_ = store.Close()
-		_ = recovery.Stop(context.Background())
-		return nil, err
-	}
-	if err := journalStore.Start(context.Background()); err != nil {
-		_ = store.Close()
-		_ = recovery.Stop(context.Background())
-		return nil, err
-	}
-	disk, err := NewDiskStateMachine(config.WALRoot, DiskWatermarks{
-		HighFreeBytes: config.DiskHighFreeBytes, CriticalFreeBytes: config.DiskCriticalFreeBytes, EmergencyFreeBytes: config.DiskEmergencyFreeBytes,
-		MaxPendingSegments: config.MaxPendingSegments, MaxPendingBytes: config.MaxPendingBytes,
-	}, OSDiskUsageProvider{})
-	if err != nil {
-		_ = store.Close()
-		_ = journalStore.Close()
-		_ = recovery.Stop(context.Background())
-		return nil, err
-	}
-	gateway, err := NewGateway(config, store, journalStore, disk)
-	if err != nil {
-		_ = store.Close()
-		_ = journalStore.Close()
-		_ = recovery.Stop(context.Background())
-		return nil, err
-	}
-	if err := gateway.Recover(context.Background()); err != nil {
-		_ = gateway.Close()
-		_ = recovery.Stop(context.Background())
-		return nil, err
-	}
-	return gateway, nil
-}
-
 // NewGateway constructs the ingest domain object without opening files,
 // sockets, or starting goroutines. The caller owns the supplied stores.
 func NewGateway(config Config, store *wal.Store, journalStore *journal.Store, disk *DiskStateMachine) (*Gateway, error) {
@@ -193,27 +136,6 @@ func (g *Gateway) SetHooks(hooks Hooks) {
 	g.hooksMu.Lock()
 	defer g.hooksMu.Unlock()
 	g.hooks = hooks
-}
-
-func (g *Gateway) ListenAndServe(ctx context.Context) error {
-	if err := g.Start(ctx); err != nil {
-		return err
-	}
-	g.mu.Lock()
-	done := g.serveDone
-	errorsCh := g.serveErrors
-	g.mu.Unlock()
-	select {
-	case err := <-errorsCh:
-		return err
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		if err := g.Shutdown(context.Background()); err != nil {
-			return err
-		}
-		return nil
-	}
 }
 
 // Start recovers local state, binds the listener synchronously, and starts the
@@ -346,14 +268,10 @@ func (g *Gateway) Serve(ctx context.Context, listener net.Listener) (serveErr er
 	}
 }
 
-// Shutdown stops listener and handlers within ctx but leaves WAL and journal
-// open for their own lifecycle hooks.
-func (g *Gateway) Shutdown(ctx context.Context) error {
-	return g.shutdown(ctx, true)
-}
-
+// Stop stops listener and handlers within ctx but leaves WAL and journal open
+// for their own lifecycle hooks.
 func (g *Gateway) Stop(ctx context.Context) error {
-	return g.Shutdown(ctx)
+	return g.shutdown(ctx, true)
 }
 
 func (g *Gateway) Errors() <-chan error {
@@ -401,24 +319,6 @@ func (g *Gateway) shutdown(ctx context.Context, waitServe bool) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func (g *Gateway) Close() error {
-	var first error
-	if err := g.shutdown(context.Background(), false); err != nil {
-		first = err
-	}
-	if g.wal != nil {
-		if err := g.wal.Close(); err != nil && first == nil {
-			first = err
-		}
-	}
-	if g.journal != nil {
-		if err := g.journal.Close(); err != nil && first == nil {
-			first = err
-		}
-	}
-	return first
 }
 
 func (g *Gateway) HandleConn(ctx context.Context, connection net.Conn) error {

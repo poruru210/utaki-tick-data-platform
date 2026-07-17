@@ -63,10 +63,6 @@ type Store struct {
 	started        bool
 }
 
-func Open(root, gatewayID string) (*Store, error) {
-	return OpenWithAnchor(root, gatewayID, nil)
-}
-
 // PruneAnchor is the durable chain boundary left by retention after deleting
 // an old sealed prefix. It contains no filesystem path or caller-selected
 // authority; the next retained segment must begin at EndSequence+1 and link to
@@ -78,19 +74,6 @@ type PruneAnchor struct {
 
 type AnchorProvider interface {
 	LoadWALAnchor(context.Context) (*PruneAnchor, error)
-}
-
-// OpenWithAnchor reopens a WAL after a verified prefix prune. The legacy Open
-// behavior remains sequence 1 plus a zero chain root when anchor is nil.
-func OpenWithAnchor(root, gatewayID string, anchor *PruneAnchor) (*Store, error) {
-	store, err := NewStoreWithAnchor(root, gatewayID, anchor)
-	if err != nil {
-		return nil, err
-	}
-	if err := store.Start(context.Background()); err != nil {
-		return nil, err
-	}
-	return store, nil
 }
 
 // NewStoreWithAnchor validates WAL identity without opening the filesystem.
@@ -179,7 +162,19 @@ func (s *Store) Stop(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.file == nil {
+		return nil
+	}
+	if err := s.syncFile(); err != nil {
+		_ = s.file.Close()
+		s.file = nil
+		return err
+	}
+	err := s.file.Close()
+	s.file = nil
+	return err
 }
 
 func (s *Store) Path() string {
@@ -325,22 +320,6 @@ func (s *Store) Sync() error {
 		return fmt.Errorf("%w: sync WAL: %v", ErrUnavailable, err)
 	}
 	return nil
-}
-
-func (s *Store) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.file == nil {
-		return nil
-	}
-	if err := s.syncFile(); err != nil {
-		_ = s.file.Close()
-		s.file = nil
-		return err
-	}
-	err := s.file.Close()
-	s.file = nil
-	return err
 }
 
 func (s *Store) writeHeader(createdWallS int64) error {

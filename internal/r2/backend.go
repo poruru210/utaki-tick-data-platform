@@ -91,7 +91,7 @@ type ReplayRemoteReadBackend interface {
 	OpenLimited(ctx context.Context, key string, maxBytes uint64) (io.ReadCloser, int64, error)
 }
 
-// ReplayRemoteReadAdapter narrows the legacy bounded backend to the R3
+// ReplayRemoteReadAdapter narrows the existing bounded backend to the R3
 // observer interface without changing the M2 backend contract.
 type ReplayRemoteReadAdapter struct {
 	backend BoundedObjectBackend
@@ -124,7 +124,7 @@ func (a *ReplayRemoteReadAdapter) OpenLimited(ctx context.Context, key string, m
 }
 
 // ReadBackendReplayAdapter narrows the read-only delivery capability to the
-// bounded observer capability used by retention and handover. It never adds a
+// bounded observer capability used by retention. It never adds a
 // write method or an unbounded inventory operation.
 type ReadBackendReplayAdapter struct {
 	backend ReadBackend
@@ -309,52 +309,6 @@ type S3BackendConfig struct {
 type S3Backend struct {
 	client *s3.Client
 	bucket string
-}
-
-func NewS3Backend(ctx context.Context, settings S3BackendConfig) (*S3Backend, error) {
-	return newS3Backend(ctx, settings, "", "")
-}
-
-// NewS3BackendWithEnv constructs the write-capable backend with credentials
-// selected explicitly by environment-variable name. It is used by isolated
-// handover verification so old and new writer credentials never share ambient
-// process credential state.
-func NewS3BackendWithEnv(ctx context.Context, settings S3BackendConfig, accessKeyEnv, secretKeyEnv string) (*S3Backend, error) {
-	if accessKeyEnv == "" || secretKeyEnv == "" {
-		return nil, fmt.Errorf("explicit S3 credential environment names are required")
-	}
-	return newS3Backend(ctx, settings, accessKeyEnv, secretKeyEnv)
-}
-
-func newS3Backend(ctx context.Context, settings S3BackendConfig, accessKeyEnv, secretKeyEnv string) (*S3Backend, error) {
-	if settings.Bucket == "" {
-		return nil, fmt.Errorf("S3 bucket is required")
-	}
-	if settings.Endpoint != "" {
-		if err := ValidateHTTPSHostEndpoint(settings.Endpoint); err != nil {
-			return nil, err
-		}
-	}
-	if settings.Region == "" {
-		settings.Region = "auto"
-	}
-	loadOptions := []func(*config.LoadOptions) error{config.WithRegion(settings.Region)}
-	if accessKeyEnv != "" || secretKeyEnv != "" {
-		if accessKeyEnv == "" || secretKeyEnv == "" {
-			return nil, fmt.Errorf("S3 credential environment names are incomplete")
-		}
-		accessKey, accessOK := os.LookupEnv(accessKeyEnv)
-		secretKey, secretOK := os.LookupEnv(secretKeyEnv)
-		if !accessOK || !secretOK || accessKey == "" || secretKey == "" {
-			return nil, fmt.Errorf("S3 credentials are unavailable")
-		}
-		loadOptions = append(loadOptions, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")))
-	}
-	awsConfig, err := config.LoadDefaultConfig(ctx, loadOptions...)
-	if err != nil {
-		return nil, fmt.Errorf("load S3 configuration")
-	}
-	return newS3BackendFromConfig(awsConfig, settings), nil
 }
 
 func newS3BackendWithCredentials(ctx context.Context, settings S3BackendConfig, accessKey, secretKey string) (*S3Backend, error) {
