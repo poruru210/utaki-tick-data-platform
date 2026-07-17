@@ -36,9 +36,6 @@ func run(args []string, output, errorsOut io.Writer) int {
 		fmt.Fprintln(errorsOut, "reader configuration is invalid")
 		return 1
 	}
-	if readerConfig.MaxRemoteObjects > apiConfig.Limits.MaxManifestNodes {
-		readerConfig.MaxRemoteObjects = apiConfig.Limits.MaxManifestNodes
-	}
 	reader, err := delivery.NewArchiveReaderV1(context.Background(), readerConfig)
 	if err != nil {
 		fmt.Fprintln(errorsOut, "archive reader is unavailable")

@@ -105,6 +105,7 @@ func InventoryFiles(root, kind string, maxObjects, maxBytes uint64) ([]LocalArti
 		return nil, fmt.Errorf("unsupported file inventory kind %q", kind)
 	}
 	result := make([]LocalArtifact, 0)
+	var totalBytes uint64
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -138,6 +139,10 @@ func InventoryFiles(root, kind string, maxObjects, maxBytes uint64) ([]LocalArti
 		if info.Size() < 0 || uint64(info.Size()) > maxBytes {
 			return fmt.Errorf("file inventory object exceeds byte limit: %s", path)
 		}
+		bytes := uint64(info.Size())
+		if totalBytes > maxBytes || bytes > maxBytes-totalBytes {
+			return fmt.Errorf("file inventory exceeds cumulative byte limit: %s", path)
+		}
 		digest, err := hashFile(path)
 		if err != nil {
 			return err
@@ -162,6 +167,7 @@ func InventoryFiles(root, kind string, maxObjects, maxBytes uint64) ([]LocalArti
 			artifact.WALRange = &WALRange{StartSequence: segment.StartSequence, EndSequence: segment.LastSequence, StartChainRoot: segment.ChainStart, EndChainRoot: segment.ChainRoot}
 		}
 		result = append(result, artifact)
+		totalBytes += bytes
 		return nil
 	})
 	if err != nil {

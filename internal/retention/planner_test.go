@@ -178,3 +178,16 @@ func TestInventoryRejectsWALByteBudgetBeforeReading(t *testing.T) {
 		t.Fatalf("byte budget error = %v", err)
 	}
 }
+
+func TestInventoryFilesEnforcesCumulativeByteBudget(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "first.bin"), []byte("1234"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "second.bin"), []byte("5678"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InventoryFiles(root, ArtifactCache, 10, 6); err == nil || !strings.Contains(err.Error(), "cumulative byte limit") {
+		t.Fatalf("cumulative byte budget error = %v", err)
+	}
+}
