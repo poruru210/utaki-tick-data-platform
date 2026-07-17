@@ -115,12 +115,12 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.listDatasets(w, r)
-	case strings.HasPrefix(r.URL.Path, "/v1/datasets/") && strings.HasSuffix(r.URL.Path, "/campaigns"):
+	case strings.HasPrefix(r.URL.Path, "/v1/datasets/") && strings.HasSuffix(r.URL.Path, "/scopes"):
 		if r.Method != http.MethodGet {
 			h.methodNotAllowed(w, http.MethodGet)
 			return
 		}
-		h.listCampaigns(w, r)
+		h.listScopes(w, r)
 	case r.URL.Path == "/v1/snapshots/raw":
 		if r.Method != http.MethodGet {
 			h.methodNotAllowed(w, http.MethodGet)
@@ -177,9 +177,9 @@ func (h *Handler) listDatasets(w http.ResponseWriter, r *http.Request) {
 	h.writeItems(w, result)
 }
 
-func (h *Handler) listCampaigns(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listScopes(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "v1" || parts[1] != "datasets" || parts[3] != "campaigns" {
+	if len(parts) != 4 || parts[0] != "v1" || parts[1] != "datasets" || parts[3] != "scopes" {
 		h.writeError(w, http.StatusBadRequest, "INVALID_PATH")
 		return
 	}
@@ -192,7 +192,7 @@ func (h *Handler) listCampaigns(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "INVALID_QUERY")
 		return
 	}
-	items, err := h.reader.ListCampaigns(r.Context(), dataset)
+	items, err := h.reader.ListScopes(r.Context(), dataset)
 	if err != nil {
 		h.writeReaderError(w, err)
 		return
@@ -200,11 +200,11 @@ func (h *Handler) listCampaigns(w http.ResponseWriter, r *http.Request) {
 	if !h.checkItemLimit(w, len(items)) {
 		return
 	}
-	result := make([]campaignItem, len(items))
+	result := make([]scopeItem, len(items))
 	for index, item := range items {
-		result[index] = campaignItem{
-			DatasetID: item.DatasetID, CampaignID: item.CampaignID, ProviderID: item.ProviderID,
-			StableFeedID: item.StableFeedID, ExactSourceSymbol: item.ExactSourceSymbol,
+		result[index] = scopeItem{
+			DatasetID: item.DatasetID, Source: item.ProviderID,
+			StableFeedID: item.StableFeedID, Symbol: item.ExactSourceSymbol,
 			BrokerServerFingerprint: item.BrokerServerFingerprint, DayDefinitionID: item.DayDefinitionID,
 			PublisherID: item.PublisherID, PublisherEpoch: item.PublisherEpoch, ConfigHash: hash(item.ConfigHash),
 		}
@@ -213,12 +213,12 @@ func (h *Handler) listCampaigns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listRawSnapshots(w http.ResponseWriter, r *http.Request) {
-	query, err := strictQuery(r, map[string]bool{"dataset": true, "campaign": true, "date": true})
-	if err != nil || !validIdentityQuery(query["dataset"]) || !validIdentityQuery(query["campaign"]) || (query["date"] != "" && !validUTCDate(query["date"])) {
+	query, err := strictQuery(r, map[string]bool{"dataset": true, "source": true, "symbol": true, "date": true})
+	if err != nil || !validIdentityQuery(query["dataset"]) || !validIdentityQuery(query["source"]) || !validIdentityQuery(query["symbol"]) || (query["date"] != "" && !validUTCDate(query["date"])) {
 		h.writeError(w, http.StatusBadRequest, "INVALID_QUERY")
 		return
 	}
-	items, err := h.reader.ListRawSnapshots(r.Context(), delivery.RawDayScope{DatasetID: query["dataset"], CampaignID: query["campaign"], Date: query["date"]})
+	items, err := h.reader.ListRawSnapshots(r.Context(), delivery.RawDayScope{DatasetID: query["dataset"], ProviderID: query["source"], ExactSourceSymbol: query["symbol"], Date: query["date"]})
 	if err != nil {
 		h.writeReaderError(w, err)
 		return
@@ -229,7 +229,7 @@ func (h *Handler) listRawSnapshots(w http.ResponseWriter, r *http.Request) {
 	result := make([]rawSnapshotItem, len(items))
 	for index, item := range items {
 		result[index] = rawSnapshotItem{
-			DatasetID: item.DatasetID, CampaignID: item.CampaignID, DayDefinitionID: item.DayDefinitionID,
+			DatasetID: item.DatasetID, Source: item.ProviderID, Symbol: item.ExactSourceSymbol, DayDefinitionID: item.DayDefinitionID,
 			Date: item.Date, Revision: item.Revision, PublisherID: item.PublisherID, PublisherEpoch: item.PublisherEpoch,
 			ManifestKey: item.ManifestKey, ManifestSHA256: hash(item.ManifestSHA256), ChainSliceStart: item.ChainSliceStart,
 			ChainSliceStartRoot: hash(item.ChainSliceStartRoot), ChainSliceEnd: item.ChainSliceEnd,
@@ -240,13 +240,13 @@ func (h *Handler) listRawSnapshots(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listReplaySnapshots(w http.ResponseWriter, r *http.Request) {
-	query, err := strictQuery(r, map[string]bool{"dataset": true, "campaign": true, "date": true, "stream": true, "conversion": true, "day_definition": true})
-	if err != nil || !validIdentityQuery(query["dataset"]) || !validIdentityQuery(query["campaign"]) || !validUTCDate(query["date"]) || !validIdentityQuery(query["stream"]) || !validIdentityQuery(query["conversion"]) || (query["day_definition"] != "" && !validIdentityQuery(query["day_definition"])) {
+	query, err := strictQuery(r, map[string]bool{"dataset": true, "source": true, "symbol": true, "date": true, "stream": true, "conversion": true, "day_definition": true})
+	if err != nil || !validIdentityQuery(query["dataset"]) || !validIdentityQuery(query["source"]) || !validIdentityQuery(query["symbol"]) || !validUTCDate(query["date"]) || !validIdentityQuery(query["stream"]) || !validIdentityQuery(query["conversion"]) || (query["day_definition"] != "" && !validIdentityQuery(query["day_definition"])) {
 		h.writeError(w, http.StatusBadRequest, "INVALID_QUERY")
 		return
 	}
 	items, err := h.reader.ListReplaySnapshots(r.Context(), delivery.ReplayDayScope{
-		DatasetID: query["dataset"], CampaignID: query["campaign"], DayDefinitionID: query["day_definition"], Date: query["date"],
+		DatasetID: query["dataset"], ProviderID: query["source"], ExactSourceSymbol: query["symbol"], DayDefinitionID: query["day_definition"], Date: query["date"],
 		ReplayContractID: query["stream"], ConversionID: query["conversion"],
 	})
 	if err != nil {
@@ -263,7 +263,7 @@ func (h *Handler) listReplaySnapshots(w http.ResponseWriter, r *http.Request) {
 			previous = hash(*item.PreviousManifestSHA256)
 		}
 		result[index] = replaySnapshotItem{
-			DatasetID: item.DatasetID, CampaignID: item.CampaignID, DayDefinitionID: item.DayDefinitionID,
+			DatasetID: item.DatasetID, Source: item.ProviderID, Symbol: item.ExactSourceSymbol, DayDefinitionID: item.DayDefinitionID,
 			Date: item.Date, ReplayContractID: item.ReplayContractID, ConversionID: item.ConversionID,
 			Revision: item.Revision, ManifestKey: item.ManifestKey, ManifestSHA256: hash(item.ManifestSHA256),
 			PreviousManifestSHA256: previous, RawDayManifestKey: item.RawDayManifestKey,
@@ -593,12 +593,11 @@ type datasetItem struct {
 	DatasetID string `json:"dataset_id"`
 }
 
-type campaignItem struct {
+type scopeItem struct {
 	DatasetID               string `json:"dataset_id"`
-	CampaignID              string `json:"campaign_id"`
-	ProviderID              string `json:"provider_id"`
+	Source                  string `json:"source"`
 	StableFeedID            string `json:"stable_feed_id"`
-	ExactSourceSymbol       string `json:"exact_source_symbol"`
+	Symbol                  string `json:"symbol"`
 	BrokerServerFingerprint string `json:"broker_server_fingerprint"`
 	DayDefinitionID         string `json:"day_definition_id"`
 	PublisherID             string `json:"publisher_id"`
@@ -608,7 +607,8 @@ type campaignItem struct {
 
 type rawSnapshotItem struct {
 	DatasetID           string `json:"dataset_id"`
-	CampaignID          string `json:"campaign_id"`
+	Source              string `json:"source"`
+	Symbol              string `json:"symbol"`
 	DayDefinitionID     string `json:"day_definition_id"`
 	Date                string `json:"date"`
 	Revision            uint64 `json:"revision"`
@@ -626,7 +626,8 @@ type rawSnapshotItem struct {
 
 type replaySnapshotItem struct {
 	DatasetID                   string `json:"dataset_id"`
-	CampaignID                  string `json:"campaign_id"`
+	Source                      string `json:"source"`
+	Symbol                      string `json:"symbol"`
 	DayDefinitionID             string `json:"day_definition_id"`
 	Date                        string `json:"date"`
 	ReplayContractID            string `json:"replay_contract_id"`

@@ -55,7 +55,7 @@ func TestValidateRevisionSuccessorRequiresPrefixAndAllowsForwardExtension(t *tes
 	object := archive.RawObjectRange{Key: key, SHA256: [32]byte{1}, Bytes: 10, StartIngestSequence: 1, EndIngestSequence: 1, FirstRecordOrdinal: 0, LastRecordOrdinal: 0}
 	chain := archive.RawChainObject{Key: key, SHA256: [32]byte{1}, Bytes: 10, StartIngestSequence: 1, EndIngestSequence: 1}
 	previous := archive.RawDayManifest{
-		DatasetID: "dataset", CampaignID: "campaign", DayDefinitionID: "day", Date: "2024-03-09", PublisherID: "publisher", PublisherEpoch: 1, SettlePolicy: "settle", ConfigHash: [32]byte{1},
+		DatasetID: "dataset", DayDefinitionID: "day", Date: "2024-03-09", PublisherID: "publisher", PublisherEpoch: 1, SettlePolicy: "settle", ConfigHash: [32]byte{1},
 		Objects: []archive.RawObjectRange{object}, ChainObjects: []archive.RawChainObject{chain}, ChainSliceStartSequence: 1, ChainSliceStartRoot: [32]byte{2}, ChainSliceEndSequence: 1, ChainSliceEndRoot: [32]byte{3}, AcceptedRecordCount: 1, ObservedThroughSourceMSC: 1, ObservedThroughCaptureSeq: 1,
 	}
 	current := previous

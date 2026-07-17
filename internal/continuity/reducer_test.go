@@ -296,7 +296,7 @@ func TestOpenVerifiedReplaySourceRejectsTrustBoundaryFailures(t *testing.T) {
 		name   string
 		mutate func(*rawFixture)
 	}{
-		{name: "raw key mismatch", mutate: func(f *rawFixture) { f.bytes = append([]byte(nil), f.bytes...); f.scope.CampaignID = "other" }},
+		{name: "raw key mismatch", mutate: func(f *rawFixture) { f.bytes = append([]byte(nil), f.bytes...); f.scope.ProviderID = "other-source" }},
 		{name: "scope config mismatch", mutate: func(f *rawFixture) { f.scope.ProtocolLimits.MaxRecords = 1 }},
 		{name: "missing sealed object", mutate: func(f *rawFixture) { f.paths = map[string]string{} }},
 	}
@@ -791,7 +791,7 @@ func replayLimitsForManifest(manifest archive.RawDayManifest) archive.ReplayReso
 
 func testScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
-		DatasetID: "dataset-demo", CampaignID: "campaign-demo", ProviderID: "provider-demo", StableFeedID: "feed-demo",
+		DatasetID: "dataset-demo", ProviderID: "provider-demo", StableFeedID: "feed-demo",
 		ExactSourceSymbol: "EURUSD.raw", BrokerServerFingerprint: "server-fingerprint", GatewayBuildIdentity: "gateway-build-1",
 		ProducerBuildIdentity: "producer-build-1", DayDefinitionID: "utc-day-v1", SettlePolicy: "manual-v1",
 		PublisherID: "publisher-1", PublisherEpoch: 1, ProtocolLimits: archive.ProtocolLimits{MaxFrameBytes: protocol.MaxFrameBytes, MaxRecords: 4, MaxStringBytes: protocol.MaxStringBytes},
@@ -804,7 +804,7 @@ func batch(session string, sequence uint64, records ...protocol.RawMqlTickV1) pr
 		requestedFrom = records[0].TimeMSC
 	}
 	scope := testScope()
-	lease := protocol.DeriveSessionLeaseID(testProducerInstanceID, session, scope.CampaignID, scope.ProviderID, scope.StableFeedID, scope.BrokerServerFingerprint, scope.ExactSourceSymbol)
+	lease := protocol.DeriveSessionLeaseID(testProducerInstanceID, session, scope.ProviderID, scope.StableFeedID, scope.BrokerServerFingerprint, scope.ExactSourceSymbol)
 	return protocol.BatchFrameV1{SessionLeaseID: lease, ProducerSessionID: session, BatchSequence: sequence,
 		RequestedFromMSC: requestedFrom, RequestedCount: uint32(len(records)), FetchWallStartS: 1, FetchWallEndS: 1,
 		FetchMonotonicStartUS: sequence, FetchMonotonicEndUS: sequence + 1, ReturnedCount: int32(len(records)),

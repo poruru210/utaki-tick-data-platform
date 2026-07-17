@@ -34,7 +34,7 @@ func TestLoadReaderConfigIsVersionedStrictAndDoesNotEchoSecrets(t *testing.T) {
 
 func TestReaderConfigRejectsNonCanonicalRoots(t *testing.T) {
 	config := testReaderConfig(t.TempDir())
-	for _, root := range []string{"v1//campaign", "../v1", "C:/v1", `\\server\share`} {
+	for _, root := range []string{"v1//scope", "../v1", "C:/v1", `\\server\share`} {
 		config.ImmutableRoot = root
 		if err := config.Validate(); err == nil {
 			t.Fatalf("unsafe reader root %q was accepted", root)

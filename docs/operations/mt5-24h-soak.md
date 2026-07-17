@@ -55,7 +55,7 @@ disk free、goroutine/heap、R2 request failure、upload retry、API timeout、r
 ## Post-soak verification
 
 soak hostのcacheを再利用せず、別hostまたは空のcacheとread-only credentialだけで、
-raw/replay manifest、全参照sealed WAL object、campaign/replay/part chain、Parquet schema・
+raw/replay manifest、全参照sealed WAL object、scope/replay/part chain、Parquet schema・
 hash・row chain、HTTP fetch planを確認します。実際のselectorはrun recordに記録した digest
 から解決し、任意remote keyを直接指定しません。
 
@@ -63,7 +63,7 @@ hash・row chain、HTTP fetch planを確認します。実際のselectorはrun r
 
 ```text
 tick-verify day --config <read-only-config> --manifest <raw-manifest-digest-or-key>
-tick-verify campaign --config <read-only-config> --dataset <dataset> --campaign <campaign> --through-root <root>
+tick-verify scope --config <read-only-config> --dataset <dataset> --source <source> --symbol <symbol> --through-root <root>
 tick-verify replay-day --config <read-only-config> --manifest <replay-manifest-digest-or-key>
 tickctl fetch --config <read-only-config> --manifest <manifest-digest-or-key> --output <external-output-root>
 ```

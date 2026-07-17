@@ -21,7 +21,6 @@ heartbeat_idle_timeout_ms = 60000
 producer_instance_id = "producer"
 producer_build_id = "build"
 dataset_id = "dataset"
-campaign_id = "campaign"
 provider_id = "provider"
 stable_feed_id = "feed"
 broker_server_fingerprint = "broker"

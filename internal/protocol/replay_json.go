@@ -71,8 +71,8 @@ func stringArrayValue(object map[string]any, key string) ([]string, error) {
 }
 
 var partManifestKeys = map[string]bool{
-	"campaign_id": true, "canonical_row_bytes": true, "conversion_id": true,
-	"converter_build_id": true, "dataset_id": true, "date": true,
+	"canonical_row_bytes": true, "conversion_id": true, "converter_build_id": true,
+	"dataset_id": true, "date": true,
 	"day_definition_id": true, "dependency_lock_hash": true, "first_row_chain_hash": true,
 	"first_stream_sequence": true, "format_id": true, "last_row_chain_hash": true,
 	"last_stream_sequence": true, "manifest_version": true, "part_bytes": true,
@@ -128,10 +128,6 @@ func VerifyPartManifest(data []byte) (PartManifest, error) {
 	if err != nil {
 		return PartManifest{}, err
 	}
-	campaignID, err := stringValue(object, "campaign_id")
-	if err != nil {
-		return PartManifest{}, err
-	}
 	dayDefinitionID, err := stringValue(object, "day_definition_id")
 	if err != nil {
 		return PartManifest{}, err
@@ -183,7 +179,6 @@ func VerifyPartManifest(data []byte) (PartManifest, error) {
 	part := PartManifest{
 		ManifestVersion:         version,
 		DatasetID:               datasetID,
-		CampaignID:              campaignID,
 		DayDefinitionID:         dayDefinitionID,
 		Date:                    date,
 		ReplayContractID:        replayContractID,
@@ -237,8 +232,8 @@ func mustUint(object map[string]any, key string) uint64 {
 }
 
 var replayDayManifestM3Keys = map[string]bool{
-	"campaign_id": true, "canonical_stream_row_chain_root": true,
-	"completeness_status": true, "conversion_id": true, "converter_build_id": true,
+	"canonical_stream_row_chain_root": true, "completeness_status": true,
+	"conversion_id": true, "converter_build_id": true,
 	"dataset_id": true, "date": true, "day_definition_id": true,
 	"dependency_lock_hash": true, "format_id": true, "manifest_id": true,
 	"manifest_version": true, "part_manifest_keys": true, "part_set_root": true,
@@ -248,8 +243,8 @@ var replayDayManifestM3Keys = map[string]bool{
 }
 
 var replayDayManifestM0Keys = map[string]bool{
-	"campaign_id": true, "canonical_stream_row_chain_root": true,
-	"completeness_status": true, "conversion_id": true, "converter_build_id": true,
+	"canonical_stream_row_chain_root": true, "completeness_status": true,
+	"conversion_id": true, "converter_build_id": true,
 	"dataset_id": true, "date": true, "day_definition_id": true,
 	"dependency_lock_hash": true, "format_id": true, "manifest_id": true,
 	"manifest_version": true, "part_manifest_keys": true, "part_set_root": true,
@@ -334,8 +329,7 @@ func decodeReplayManifestCommon(object map[string]any) (ReplayDayManifest, error
 		return result, fmt.Errorf("invalid replay manifest version")
 	}
 	for key, target := range map[string]*string{
-		"manifest_id": &result.ManifestID, "dataset_id": &result.DatasetID,
-		"campaign_id": &result.CampaignID, "day_definition_id": &result.DayDefinitionID,
+		"manifest_id": &result.ManifestID, "dataset_id": &result.DatasetID, "day_definition_id": &result.DayDefinitionID,
 		"date": &result.Date, "replay_contract_id": &result.ReplayContractID,
 		"format_id": &result.FormatID, "conversion_id": &result.ConversionID,
 		"converter_build_id":       &result.ConverterBuildID,

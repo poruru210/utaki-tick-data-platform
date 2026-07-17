@@ -1,17 +1,16 @@
-//go:build real_r2_smoke
+//go:build r2_smoke
 
 package delivery
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/credentials"
@@ -20,48 +19,46 @@ import (
 )
 
 const (
-	realR2EnableEnv    = "TICK_M2_REAL_R2_SMOKE"
-	realR2ConfirmEnv   = "TICK_M2_REAL_R2_CONFIRM"
-	realR2BucketEnv    = "TICK_M2_REAL_R2_BUCKET"
-	realR2PrefixEnv    = "TICK_M2_REAL_R2_PREFIX"
-	realR2EndpointEnv  = "TICK_M2_REAL_R2_ENDPOINT"
-	realR2AccessEnv    = "AWS_ACCESS_KEY_ID"
-	realR2SecretEnv    = "AWS_SECRET_ACCESS_KEY"
-	realR2Confirmation = "I_UNDERSTAND_NO_OVERWRITE"
+	r2BucketEnv          = "TICK_R2_BUCKET"
+	r2ImmutableRootEnv   = "TICK_R2_IMMUTABLE_ROOT"
+	r2EndpointEnv        = "TICK_R2_ENDPOINT"
+	r2AccessKeyIDEnv     = "TICK_R2_ACCESS_KEY_ID"
+	r2SecretAccessKeyEnv = "TICK_R2_SECRET_ACCESS_KEY"
 )
 
-func TestOptionalRealR2Smoke(t *testing.T) {
-	if os.Getenv(realR2EnableEnv) != "1" {
-		t.Skipf("set %s=1 to enable the isolated real-R2 smoke", realR2EnableEnv)
-	}
-	if os.Getenv(realR2ConfirmEnv) != realR2Confirmation {
-		t.Skipf("set %s to the explicit no-overwrite confirmation", realR2ConfirmEnv)
+func TestR2Smoke(t *testing.T) {
+	r2Smoke(t, "EURUSD")
+}
+
+func TestR2SmokeSymbolWithHash(t *testing.T) {
+	r2Smoke(t, "EURUSD.pro#")
+}
+
+func r2Smoke(t *testing.T, exactSourceSymbol string) {
+	t.Helper()
+	if err := testsupport.LoadRepositoryEnvLocal(); err != nil {
+		t.Fatalf("load repository env.local: %v", err)
 	}
 	for _, name := range []string{
-		realR2BucketEnv, realR2PrefixEnv, realR2EndpointEnv, realR2AccessEnv, realR2SecretEnv,
+		r2BucketEnv, r2ImmutableRootEnv, r2EndpointEnv, r2AccessKeyIDEnv, r2SecretAccessKeyEnv,
 	} {
 		if strings.TrimSpace(os.Getenv(name)) == "" {
 			t.Skipf("required smoke variable %s is unavailable", name)
 		}
 	}
-	bucket := os.Getenv(realR2BucketEnv)
-	prefix := strings.Trim(os.Getenv(realR2PrefixEnv), "/")
-	if !strings.HasPrefix(prefix, "m2-smoke/") || strings.Contains(prefix, "..") || strings.ContainsAny(prefix, "\\\r\n") {
-		t.Skip("the smoke prefix must be an isolated m2-smoke/ prefix without traversal")
+	bucket := os.Getenv(r2BucketEnv)
+	immutableRoot := strings.Trim(os.Getenv(r2ImmutableRootEnv), "/")
+	if immutableRoot == "" || strings.HasPrefix(immutableRoot, "v1") || strings.Contains(immutableRoot, "..") || strings.ContainsAny(immutableRoot, "\\\r\n") {
+		t.Skip("the R2 immutable root for this test must be an isolated smoke/ namespace without traversal")
 	}
 
-	var suffixBytes [16]byte
-	if _, err := rand.Read(suffixBytes[:]); err != nil {
-		t.Fatal(err)
-	}
-	suffix := hex.EncodeToString(suffixBytes[:])
-	immutableRoot := prefix + "/run-" + suffix
-	scope := m2E2EScope()
-	scope.CampaignID = "real-r2-smoke-" + suffix
-	scope.PublisherID = "real-r2-smoke-publisher-" + suffix
+	scope := r2SmokeScope(exactSourceSymbol)
 	layout, err := r2.NewLayout(immutableRoot, scope)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(layout.ImmutableScopePrefix()+"/", "symbol="+r2SmokeExactPathComponent(exactSourceSymbol)+"/") {
+		t.Fatalf("R2 key prefix does not preserve exact symbol %q: %q", exactSourceSymbol, layout.ImmutableScopePrefix())
 	}
 	object, _ := m2E2ESealedObject(t)
 	manifest, err := archive.BuildRawDayManifest(archive.RawDayManifestInput{
@@ -75,9 +72,9 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := os.Getenv(realR2EndpointEnv)
+	endpoint := os.Getenv(r2EndpointEnv)
 	if err := r2.ValidateHTTPSHostEndpoint(endpoint); err != nil {
-		t.Fatalf("real R2 endpoint is invalid: %v", err)
+		t.Fatalf("R2 endpoint is invalid: %v", err)
 	}
 	credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
 	credentialsBody, err := json.Marshal(struct {
@@ -86,8 +83,8 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 		SecretAccessKey string `json:"secret_access_key"`
 	}{
 		FormatVersion:   1,
-		AccessKeyID:     os.Getenv(realR2AccessEnv),
-		SecretAccessKey: os.Getenv(realR2SecretEnv),
+		AccessKeyID:     os.Getenv(r2AccessKeyIDEnv),
+		SecretAccessKey: os.Getenv(r2SecretAccessKeyEnv),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +136,38 @@ func TestOptionalRealR2Smoke(t *testing.T) {
 	if _, err := reader.VerifyDay(context.Background(), SnapshotSelector{Manifest: manifestKey}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reader.VerifyCampaign(context.Background(), scope.DatasetID, scope.CampaignID, hex.EncodeToString(object.Segment.ChainRoot[:])); err != nil {
+	if _, err := reader.VerifyScope(context.Background(), RawScopeSelector{DatasetID: scope.DatasetID, ProviderID: scope.ProviderID, ExactSourceSymbol: scope.ExactSourceSymbol}, hex.EncodeToString(object.Segment.ChainRoot[:])); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func r2SmokeExactPathComponent(value string) string {
+	var encoded strings.Builder
+	for _, b := range []byte(value) {
+		if (b >= 'A' && b <= 'Z') ||
+			(b >= 'a' && b <= 'z') ||
+			(b >= '0' && b <= '9') ||
+			b == '-' || b == '_' || b == '.' ||
+			b == '*' || b == '\'' || b == '(' || b == ')' {
+			encoded.WriteByte(b)
+			continue
+		}
+		encoded.WriteString(fmt.Sprintf("!%02X", b))
+	}
+	return encoded.String()
+}
+
+func r2SmokeScope(exactSourceSymbol string) archive.ScopeConfig {
+	return archive.ScopeConfig{
+		DatasetID: "smoke", ProviderID: "smoke",
+		StableFeedID:            "tick",
+		ExactSourceSymbol:       exactSourceSymbol,
+		BrokerServerFingerprint: "smoke",
+		GatewayBuildIdentity:    "gateway",
+		ProducerBuildIdentity:   "producer",
+		DayDefinitionID:         "utc",
+		SettlePolicy:            "manual",
+		PublisherID:             "publisher",
+		PublisherEpoch:          1,
 	}
 }

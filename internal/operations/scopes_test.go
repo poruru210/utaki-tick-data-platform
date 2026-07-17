@@ -14,7 +14,6 @@ func testScopeProcessConfig(index int) ScopeProcessConfig {
 	return ScopeProcessConfig{
 		Scope: archive.ScopeConfig{
 			DatasetID:               "dataset-" + identity,
-			CampaignID:              "campaign-" + identity,
 			ProviderID:              "provider-" + identity,
 			StableFeedID:            "feed-" + identity,
 			ExactSourceSymbol:       "EURUSD.raw",
@@ -54,7 +53,8 @@ func TestValidateScopeInventoryRejectsSharedIdentityAndResources(t *testing.T) {
 			name: "scope key",
 			mutate: func(left, right ScopeProcessConfig) (ScopeProcessConfig, ScopeProcessConfig) {
 				right.Scope.DatasetID = left.Scope.DatasetID
-				right.Scope.CampaignID = left.Scope.CampaignID
+				right.Scope.ProviderID = left.Scope.ProviderID
+				right.Scope.ExactSourceSymbol = left.Scope.ExactSourceSymbol
 				return left, right
 			},
 		},

@@ -97,7 +97,6 @@ credentials_path = "unused-credentials.json"
 region = "auto"
 immutable_root = "v1"
 dataset_id = "%s"
-campaign_id = "%s"
 provider_id = "%s"
 stable_feed_id = "%s"
 exact_source_symbol = "%s"
@@ -113,7 +112,7 @@ max_records = %d
 max_string_bytes = %d
 date = "2024-03-09"
 grace_ms = 100
-`, scope.DatasetID, scope.CampaignID, scope.ProviderID, scope.StableFeedID, scope.ExactSourceSymbol,
+`, scope.DatasetID, scope.ProviderID, scope.StableFeedID, scope.ExactSourceSymbol,
 		scope.BrokerServerFingerprint, scope.GatewayBuildIdentity, scope.ProducerBuildIdentity,
 		scope.DayDefinitionID, scope.SettlePolicy, scope.PublisherID, protocol.MaxFrameBytes, protocol.MaxRecords, protocol.MaxStringBytes)
 	if err := os.WriteFile(retentionPath, []byte(retentionText), 0o600); err != nil {
@@ -125,8 +124,7 @@ grace_ms = 100
 		MaxFrameBytes: protocol.MaxFrameBytes, MaxRecords: protocol.MaxRecords, InitialBatchCount: 1,
 		MaximumBatchCount: 1, DenseBoundaryHardCap: 1, SessionLeaseTimeoutMS: 30000, HeartbeatIdleTimeoutMS: 60000,
 		DiskHighFreeBytes: 512 << 20, DiskCriticalFreeBytes: 256 << 20, DiskEmergencyFreeBytes: 64 << 20,
-		ProducerBuildID: scope.ProducerBuildIdentity, DatasetID: scope.DatasetID, CampaignID: scope.CampaignID,
-		ProviderID: scope.ProviderID, StableFeedID: scope.StableFeedID, BrokerServerFingerprint: scope.BrokerServerFingerprint,
+		ProducerBuildID: scope.ProducerBuildIdentity, DatasetID: scope.DatasetID, ProviderID: scope.ProviderID, StableFeedID: scope.StableFeedID, BrokerServerFingerprint: scope.BrokerServerFingerprint,
 		ExactSourceSymbol: scope.ExactSourceSymbol, GatewayBuildIdentity: scope.GatewayBuildIdentity,
 		DayDefinitionID: scope.DayDefinitionID, SettlePolicy: scope.SettlePolicy, PublisherID: scope.PublisherID, PublisherEpoch: scope.PublisherEpoch,
 		Credentials: appconfig.CredentialsConfig{Provider: "file", Path: "unused-credentials.json"},
@@ -392,7 +390,7 @@ func pruneTestCandidate(scope archive.ScopeConfig, sha [32]byte, limits retentio
 
 func pruneTestScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
-		DatasetID: "dataset-test", CampaignID: "campaign-test", ProviderID: "provider-test", StableFeedID: "feed-test",
+		DatasetID: "dataset-test", ProviderID: "provider-test", StableFeedID: "feed-test",
 		ExactSourceSymbol: "EURUSD", BrokerServerFingerprint: "broker-test", GatewayBuildIdentity: "gateway-test",
 		ProducerBuildIdentity: "producer-test", DayDefinitionID: "utc-day-v1", SettlePolicy: "manual-v1",
 		PublisherID: "publisher-test", PublisherEpoch: 1,

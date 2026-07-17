@@ -15,7 +15,7 @@ type tickVerifyReaderStub struct{}
 func (tickVerifyReaderStub) ListDatasets(context.Context) ([]delivery.DatasetDescriptor, error) {
 	return nil, errors.New("unused")
 }
-func (tickVerifyReaderStub) ListCampaigns(context.Context, string) ([]delivery.CampaignDescriptor, error) {
+func (tickVerifyReaderStub) ListScopes(context.Context, string) ([]delivery.ScopeDescriptor, error) {
 	return nil, errors.New("unused")
 }
 func (tickVerifyReaderStub) ListRawSnapshots(context.Context, delivery.RawDayScope) ([]delivery.SnapshotDescriptor, error) {
@@ -33,8 +33,8 @@ func (tickVerifyReaderStub) Fetch(context.Context, delivery.FetchPlan, string) (
 func (tickVerifyReaderStub) VerifyDay(context.Context, delivery.SnapshotSelector) (delivery.DayVerificationReport, error) {
 	return delivery.DayVerificationReport{VerificationScope: delivery.VerificationScopeAnchoredDay}, nil
 }
-func (tickVerifyReaderStub) VerifyCampaign(context.Context, string, string, string) (delivery.CampaignVerificationReport, error) {
-	return delivery.CampaignVerificationReport{GenesisVerified: true, VerificationScope: delivery.VerificationScopeCampaign}, nil
+func (tickVerifyReaderStub) VerifyScope(context.Context, delivery.RawScopeSelector, string) (delivery.ScopeVerificationReport, error) {
+	return delivery.ScopeVerificationReport{GenesisVerified: true, VerificationScope: delivery.VerificationScopeFullChain}, nil
 }
 func (tickVerifyReaderStub) ListReplaySnapshots(context.Context, delivery.ReplayDayScope) ([]delivery.ReplaySnapshotDescriptor, error) {
 	return nil, errors.New("unused")
@@ -52,7 +52,7 @@ func (tickVerifyReaderStub) VerifyReplayDay(context.Context, delivery.ReplaySnap
 	return delivery.ReplayDayVerificationReport{VerificationScope: delivery.VerificationScopeReplayAnchoredDay, RawBindingVerified: true}, nil
 }
 
-func TestTickVerifyDayAndCampaignUseExplicitVerificationScopes(t *testing.T) {
+func TestTickVerifyDayAndScopeUseExplicitVerificationScopes(t *testing.T) {
 	reader := tickVerifyReaderStub{}
 	var dayOutput, dayErrors bytes.Buffer
 	if code := runWithReader([]string{"day", "--manifest", "manifest"}, reader, &dayOutput, &dayErrors); code != 0 {
@@ -65,16 +65,16 @@ func TestTickVerifyDayAndCampaignUseExplicitVerificationScopes(t *testing.T) {
 	if day["genesis_verified"] != false || day["verification_scope"] != delivery.VerificationScopeAnchoredDay {
 		t.Fatalf("day output = %v", day)
 	}
-	var campaignOutput, campaignErrors bytes.Buffer
-	if code := runWithReader([]string{"campaign", "--config", "local/tick-reader.toml.example", "--dataset", "d", "--campaign", "c", "--through-root", "root"}, reader, &campaignOutput, &campaignErrors); code != 0 {
-		t.Fatalf("campaign exit=%d errors=%q", code, campaignErrors.String())
+	var scopeOutput, scopeErrors bytes.Buffer
+	if code := runWithReader([]string{"scope", "--config", "local/tick-reader.toml.example", "--dataset", "d", "--source", "s", "--symbol", "EURUSD", "--through-root", "root"}, reader, &scopeOutput, &scopeErrors); code != 0 {
+		t.Fatalf("scope exit=%d errors=%q", code, scopeErrors.String())
 	}
-	var campaign map[string]any
-	if err := json.Unmarshal(campaignOutput.Bytes(), &campaign); err != nil {
+	var scope map[string]any
+	if err := json.Unmarshal(scopeOutput.Bytes(), &scope); err != nil {
 		t.Fatal(err)
 	}
-	if campaign["genesis_verified"] != true || campaign["verification_scope"] != delivery.VerificationScopeCampaign {
-		t.Fatalf("campaign output = %v", campaign)
+	if scope["genesis_verified"] != true || scope["verification_scope"] != delivery.VerificationScopeFullChain {
+		t.Fatalf("scope output = %v", scope)
 	}
 }
 

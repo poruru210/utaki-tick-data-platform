@@ -6,7 +6,7 @@ absolute pathをrepositoryへ記録しません。
 
 ## 共通不変条件
 
-- scope key、campaign、exact symbol、publisher epochを起動前に確認する。
+- scope key、source、exact symbol、publisher epochを起動前に確認する。
 - WAL、journal、outbox、receipt、lock、cacheのrootを別scopeと共有しない。
 - remote objectはimmutableで、delete、move、sync、overwriteを通常手順に含めない。
 - ACK済みentryを証明なしに捨てない。disk pressureはavailability failureとして扱う。
@@ -106,7 +106,7 @@ restoreは空の別cacheとread-only credentialで開始する。soak hostのcac
 再利用してpassを作らない。
 
 1. reader configのstrict version、endpoint、bucket、credential bundle path、size limits、immutable rootを確認する。
-2. raw-day manifestとcampaign rootを`tick-verify`で検証する。
+2. raw-day manifestとscope rootを`tick-verify`で検証する。
 3. replay-day、part manifest、Parquet schema/hash/row chain、API fetch planを順に検証する。
 4. remote outage、metadata oversized、manifest conflict、client cancelはpartial successにせず、
    request IDとtyped errorだけを記録する。

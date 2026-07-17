@@ -79,7 +79,7 @@ func BuildPartManifest(input PartManifestInput, previous *protocol.PartManifest)
 	}
 	manifest := protocol.PartManifest{
 		ManifestVersion: protocol.PartManifestVersion,
-		DatasetID:       input.scope.DatasetID, CampaignID: input.scope.CampaignID, DayDefinitionID: input.scope.DayDefinitionID,
+		DatasetID:       input.scope.DatasetID, DayDefinitionID: input.scope.DayDefinitionID,
 		Date: input.scope.Date, ReplayContractID: input.scope.ReplayContractID, FormatID: input.conversion.FormatID,
 		ConversionID: input.conversion.ConversionID, ConverterBuildID: input.conversion.ConverterBuildID,
 		DependencyLockHash: input.conversion.DependencyLockHash, WriterConfigurationHash: input.conversion.WriterConfigurationHash,
@@ -126,7 +126,7 @@ func validateArtifactSummary(scope protocol.ReplayScope, artifact parquet.PartAr
 }
 
 func samePartBinding(part protocol.PartManifest, scope protocol.ReplayScope, conversion ConversionTuple) bool {
-	return part.DatasetID == scope.DatasetID && part.CampaignID == scope.CampaignID &&
+	return part.DatasetID == scope.DatasetID &&
 		part.DayDefinitionID == scope.DayDefinitionID && part.Date == scope.Date &&
 		part.ReplayContractID == scope.ReplayContractID && part.FormatID == conversion.FormatID &&
 		part.ConversionID == conversion.ConversionID && part.ConverterBuildID == conversion.ConverterBuildID &&
@@ -276,7 +276,7 @@ func BuildReplayDayManifest(input ReplayDayManifestInput) (protocol.ReplayDayMan
 	}
 	manifest := protocol.ReplayDayManifest{
 		ManifestVersion: protocol.ReplayDayManifestVersion, ManifestID: manifestID,
-		DatasetID: input.Scope.DatasetID, CampaignID: input.Scope.CampaignID,
+		DatasetID:       input.Scope.DatasetID,
 		DayDefinitionID: input.Scope.DayDefinitionID, Date: input.Scope.Date, Revision: revision,
 		RawDayManifestKey: input.Scope.RawDayManifestKey, RawDayManifestSHA256: input.Scope.RawDayManifestSHA256,
 		ReplayContractID: input.Conversion.ReplayContractID, FormatID: input.Conversion.FormatID,
@@ -358,8 +358,7 @@ func validatePartSet(parts []protocol.PartManifest, scope protocol.ReplayScope, 
 }
 
 func replayManifestID(scope protocol.ReplayScope, conversion ConversionTuple) (string, error) {
-	value, err := protocol.CanonicalJSON(map[string]any{
-		"campaign_id": scope.CampaignID, "conversion_id": conversion.ConversionID,
+	value, err := protocol.CanonicalJSON(map[string]any{"conversion_id": conversion.ConversionID,
 		"dataset_id": scope.DatasetID, "date": scope.Date, "day_definition_id": scope.DayDefinitionID,
 		"replay_contract_id": conversion.ReplayContractID, "format_id": conversion.FormatID,
 		"converter_build_id": conversion.ConverterBuildID, "dependency_lock_hash": hex.EncodeToString(conversion.DependencyLockHash[:]),
@@ -383,7 +382,7 @@ func verifyReplaySuccessor(scope protocol.ReplayScope, conversion ConversionTupl
 	if revision != 0 && revision != previous.Revision+1 {
 		return fmt.Errorf("replay revision must immediately follow predecessor")
 	}
-	if previous.DatasetID != scope.DatasetID || previous.CampaignID != scope.CampaignID || previous.DayDefinitionID != scope.DayDefinitionID || previous.Date != scope.Date || previous.ReplayContractID != conversion.ReplayContractID || previous.FormatID != conversion.FormatID || previous.ConversionID != conversion.ConversionID || previous.ConverterBuildID != conversion.ConverterBuildID || previous.DependencyLockHash != conversion.DependencyLockHash || previous.WriterConfigurationHash != conversion.WriterConfigurationHash || previous.TargetPlatformContract != conversion.TargetPlatformContract {
+	if previous.DatasetID != scope.DatasetID || previous.DayDefinitionID != scope.DayDefinitionID || previous.Date != scope.Date || previous.ReplayContractID != conversion.ReplayContractID || previous.FormatID != conversion.FormatID || previous.ConversionID != conversion.ConversionID || previous.ConverterBuildID != conversion.ConverterBuildID || previous.DependencyLockHash != conversion.DependencyLockHash || previous.WriterConfigurationHash != conversion.WriterConfigurationHash || previous.TargetPlatformContract != conversion.TargetPlatformContract {
 		return fmt.Errorf("replay revision changed scope or conversion identity")
 	}
 	if previous.RawDayManifestKey == scope.RawDayManifestKey || previous.RawDayManifestSHA256 == scope.RawDayManifestSHA256 {
@@ -435,7 +434,7 @@ func VerifyReplayDayManifestObject(data []byte, expectedKey string, expectedScop
 	if err := expectedScope.Validate(); err != nil {
 		return protocol.ReplayDayManifest{}, err
 	}
-	if manifest.DatasetID != expectedScope.DatasetID || manifest.CampaignID != expectedScope.CampaignID || manifest.DayDefinitionID != expectedScope.DayDefinitionID || manifest.Date != expectedScope.Date || manifest.ReplayContractID != expectedScope.ReplayContractID || manifest.RawDayManifestKey != expectedScope.RawDayManifestKey || manifest.RawDayManifestSHA256 != expectedScope.RawDayManifestSHA256 {
+	if manifest.DatasetID != expectedScope.DatasetID || manifest.DayDefinitionID != expectedScope.DayDefinitionID || manifest.Date != expectedScope.Date || manifest.ReplayContractID != expectedScope.ReplayContractID || manifest.RawDayManifestKey != expectedScope.RawDayManifestKey || manifest.RawDayManifestSHA256 != expectedScope.RawDayManifestSHA256 {
 		return protocol.ReplayDayManifest{}, fmt.Errorf("replay manifest scope or raw binding mismatch")
 	}
 	if err := validateConversionTuple(expectedScope, conversion); err != nil {

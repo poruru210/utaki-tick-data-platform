@@ -29,6 +29,7 @@ dist/
 .mise.local.*
 
 # Local configuration and secrets
+env.local
 .env
 .env.*
 !.env.example

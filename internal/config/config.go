@@ -60,7 +60,6 @@ type GatewayConfig struct {
 	ProducerInstanceID      string
 	ProducerBuildID         string
 	DatasetID               string
-	CampaignID              string
 	ProviderID              string
 	StableFeedID            string
 	BrokerServerFingerprint string
@@ -92,7 +91,6 @@ type Config struct {
 	ProducerInstanceID      string `toml:"producer_instance_id"`
 	ProducerBuildID         string `toml:"producer_build_id"`
 	DatasetID               string `toml:"dataset_id"`
-	CampaignID              string `toml:"campaign_id"`
 	ProviderID              string `toml:"provider_id"`
 	StableFeedID            string `toml:"stable_feed_id"`
 	BrokerServerFingerprint string `toml:"broker_server_fingerprint"`
@@ -143,7 +141,7 @@ func (c Config) Gateway() GatewayConfig {
 		DiskHighFreeBytes:    c.DiskHighFreeBytes, DiskCriticalFreeBytes: c.DiskCriticalFreeBytes,
 		DiskEmergencyFreeBytes: c.DiskEmergencyFreeBytes,
 		ProducerInstanceID:     c.ProducerInstanceID, ProducerBuildID: c.ProducerBuildID,
-		DatasetID: c.DatasetID, CampaignID: c.CampaignID, ProviderID: c.ProviderID,
+		DatasetID: c.DatasetID, ProviderID: c.ProviderID,
 		StableFeedID: c.StableFeedID, BrokerServerFingerprint: c.BrokerServerFingerprint,
 		ExactSourceSymbol: c.ExactSourceSymbol, GatewayBuildIdentity: c.GatewayBuildIdentity,
 		DayDefinitionID: c.DayDefinitionID, SettlePolicy: c.SettlePolicy,

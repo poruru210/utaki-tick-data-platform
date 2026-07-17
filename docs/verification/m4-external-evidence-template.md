@@ -102,7 +102,7 @@ independent_verification:
   read_only_credential_id_digest: ""
   raw_day_report_digest: ""
   sealed_wal_report_digest: ""
-  campaign_report_digest: ""
+  scope_report_digest: ""
   replay_report_digest: ""
   part_report_digest: ""
   parquet_report_digest: ""
@@ -127,7 +127,7 @@ final_audit:
 | `real_r2.raw_smoke` | Isolated synthetic prefix, fresh read, immutable retry and collision behavior | No production `v1/` scope; read verification and negative cases pass |
 | `real_r2.prune` | Strict config, complete scope binding, bounded read-only observation, frozen plan time | dry-run and execute bind to the same plan/proof; recovery is verified |
 | `mt5_soak` | One broker, one exact symbol, one Gateway, all scheduled faults, at least 24 hours | Every injected event has expected/observed/recovery evidence; no unexplained gap or loss |
-| `independent_verification` | Empty cache and separate read-only credential after soak | All raw, WAL, campaign, replay, part, Parquet, and API checks pass |
+| `independent_verification` | Empty cache and separate read-only credential after soak | All raw, WAL, scope, replay, part, Parquet, and API checks pass |
 | `final_audit` | Secret/scope/retention/runbook re-audit | every required field is evidenced and `required_action_count: 0` |
 
 The external gate record should link this summary by `summary_digest` and should remain

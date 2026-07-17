@@ -145,4 +145,4 @@ credential、実Tick、WAL runtime data、SQLite runtime data、Parquet、R2 obj
 
 size、entry count、時刻によるrotation条件は後続の運用設定で決めます。
 
-M2全体の完了には、private R2へのimmutable publication、publisher claim、raw-day manifest、remote byte verification、read-only fetch、day verifier、campaign verifierが必要です。
+M2全体の完了には、private R2へのimmutable publication、publisher claim、raw-day manifest、remote byte verification、read-only fetch、day verifier、scope verifierが必要です。

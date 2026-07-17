@@ -21,7 +21,6 @@ type VerifiedBatch struct {
 // session lease for every selected BatchFrameV1.
 type ProducerIdentity struct {
 	ProducerInstanceID      string
-	CampaignID              string
 	ProviderID              string
 	StableFeedID            string
 	BrokerServerFingerprint string

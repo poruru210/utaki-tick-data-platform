@@ -422,7 +422,6 @@ func (g *Gateway) startSession(hello protocol.HelloV1) (protocol.ResumeV1, strin
 	lease := protocol.DeriveSessionLeaseID(
 		hello.ProducerInstanceID,
 		hello.ProducerSessionID,
-		hello.CampaignID,
 		hello.ProviderID,
 		hello.StableFeedID,
 		hello.BrokerServerFingerprint,
@@ -479,7 +478,7 @@ func (g *Gateway) startSession(hello protocol.HelloV1) (protocol.ResumeV1, strin
 }
 
 func (g *Gateway) validateHello(hello protocol.HelloV1) error {
-	if hello.ProducerInstanceID == "" || hello.ProducerSessionID == "" || hello.CampaignID == "" || hello.ExactSourceSymbol == "" {
+	if hello.ProducerInstanceID == "" || hello.ProducerSessionID == "" || hello.ExactSourceSymbol == "" {
 		return protocolError(protocol.ErrInvalidField, "producer identity and exact source symbol are required")
 	}
 	if hello.SourceSchemaID != protocol.SourceSchemaMT5 {
@@ -492,7 +491,6 @@ func (g *Gateway) validateHello(hello protocol.HelloV1) error {
 	}{
 		{"producer_instance_id", hello.ProducerInstanceID, g.config.ProducerInstanceID},
 		{"producer_build_id", hello.ProducerBuildID, g.config.ProducerBuildID},
-		{"campaign_id", hello.CampaignID, g.config.CampaignID},
 		{"provider_id", hello.ProviderID, g.config.ProviderID},
 		{"stable_feed_id", hello.StableFeedID, g.config.StableFeedID},
 		{"broker_server_fingerprint", hello.BrokerServerFingerprint, g.config.BrokerServerFingerprint},

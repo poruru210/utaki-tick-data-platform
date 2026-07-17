@@ -211,7 +211,6 @@ def decode_message(frame: Frame) -> dict[str, Any]:
                 "terminal_build",
                 "os_contract",
                 "clock_api_id",
-                "campaign_id",
                 "provider_id",
                 "stable_feed_id",
                 "broker_server_fingerprint",
@@ -378,7 +377,6 @@ def _hash32(value: bytes) -> bytes:
 def _replay_common(scope: dict[str, Any], row: dict[str, Any], kind: int) -> bytearray:
     required_scope = {
         "dataset_id",
-        "campaign_id",
         "day_definition_id",
         "date",
         "replay_contract_id",
@@ -391,7 +389,6 @@ def _replay_common(scope: dict[str, Any], row: dict[str, Any], kind: int) -> byt
     result.extend(struct.pack("<BQ", kind, row["stream_sequence"]))
     for key in (
         "dataset_id",
-        "campaign_id",
         "day_definition_id",
         "date",
         "replay_contract_id",
@@ -469,7 +466,7 @@ def canonical_replay_marker_row(scope: dict[str, Any], row: dict[str, Any]) -> b
         "SOURCE_ERROR": "SOURCE_REPORTED_ERROR",
         "GAP": "WAL_SEQUENCE_GAP",
         "TIMESTAMP_REGRESSION": "TIME_MSC_REGRESSION",
-        "CAMPAIGN_BOUNDARY": "CAMPAIGN_CHANGED",
+        "SCOPE_BOUNDARY": "SCOPE_CHANGED",
     }
     if expected_reasons.get(row["marker_code"]) != row["reason"]:
         raise ProtocolError("INVALID_FIELD", "marker code/reason pair")
@@ -508,7 +505,6 @@ def segment_id(
     result = bytearray(CONTINUITY_SEGMENT_DOMAIN)
     for key in (
         "dataset_id",
-        "campaign_id",
         "day_definition_id",
         "date",
         "replay_contract_id",
@@ -532,7 +528,6 @@ def exact_identity_path_key(value: str) -> str:
 def replay_derivative_base_key(scope: dict[str, Any]) -> str:
     required = {
         "dataset_id",
-        "campaign_id",
         "day_definition_id",
         "date",
         "replay_contract_id",
@@ -575,7 +570,6 @@ def replay_part_object_key(part: dict[str, Any]) -> str:
 
 def part_manifest_value(part: dict[str, Any]) -> dict[str, Any]:
     required = {
-        "campaign_id",
         "manifest_version",
         "conversion_id",
         "converter_build_id",
@@ -610,7 +604,6 @@ def part_manifest_value(part: dict[str, Any]) -> dict[str, Any]:
         raise ProtocolError("INVALID_FIELD", "part manifest identity")
     for key in (
         "dataset_id",
-        "campaign_id",
         "day_definition_id",
         "date",
         "replay_contract_id",
@@ -725,7 +718,6 @@ def part_set_root(parts: list[dict[str, Any]]) -> bytes:
                 part[key] != previous[key]
                 for key in (
                     "dataset_id",
-                    "campaign_id",
                     "day_definition_id",
                     "date",
                     "replay_contract_id",
@@ -762,7 +754,6 @@ def replay_day_manifest_canonical_json(manifest: dict[str, Any]) -> bytes:
         "manifest_version",
         "manifest_id",
         "dataset_id",
-        "campaign_id",
         "day_definition_id",
         "date",
         "revision",
@@ -907,7 +898,6 @@ _REPLAY_PUBLICATION_MANIFEST_KEYS = {
 }
 _PUBLICATION_SCOPE_KEYS = {
     "broker_server_fingerprint",
-    "campaign_id",
     "dataset_id",
     "date",
     "day_definition_id",
@@ -948,7 +938,6 @@ _REPLAY_EDGE_KEYS = {
 }
 _PUBLISHER_CLAIM_KEYS = {
     "broker_server_fingerprint",
-    "campaign_id",
     "claim_version",
     "config_hash",
     "dataset_id",
@@ -1057,7 +1046,6 @@ def _validate_publication_scope(scope: Any) -> dict[str, Any]:
     scope = _publication_exact_object(scope, _PUBLICATION_SCOPE_KEYS)
     for key in (
         "broker_server_fingerprint",
-        "campaign_id",
         "dataset_id",
         "day_definition_id",
         "exact_source_symbol",
@@ -1100,7 +1088,6 @@ def _validate_publication_claim(claim: Any, scope: dict[str, Any]) -> dict[str, 
     )
     expected_strings = {
         "broker_server_fingerprint": scope["broker_server_fingerprint"],
-        "campaign_id": scope["campaign_id"],
         "claim_version": "publisher-claim-v1",
         "config_hash": scope["scope_config_hash"],
         "dataset_id": scope["dataset_id"],
@@ -1166,7 +1153,6 @@ def _validate_publication_limits(limits: Any) -> dict[str, Any]:
 def _publication_replay_scope(bundle: dict[str, Any]) -> dict[str, Any]:
     return {
         "dataset_id": bundle["scope"]["dataset_id"],
-        "campaign_id": bundle["scope"]["campaign_id"],
         "day_definition_id": bundle["scope"]["day_definition_id"],
         "date": bundle["scope"]["date"],
         "replay_contract_id": bundle["conversion"]["replay_contract_id"],
@@ -1471,7 +1457,6 @@ def final_observation_value(observation: Any, bundle: dict[str, Any]) -> dict[st
             manifest[key] != expected
             for key, expected in {
                 "dataset_id": scope["dataset_id"],
-                "campaign_id": scope["campaign_id"],
                 "day_definition_id": scope["day_definition_id"],
                 "date": scope["date"],
                 "replay_contract_id": conversion["replay_contract_id"],

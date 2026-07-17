@@ -144,7 +144,7 @@ func TestPartArtifactKeyBindsScopeAndExactRange(t *testing.T) {
 
 func replayManifestTestScope(rawRevision byte) protocol.ReplayScope {
 	return protocol.ReplayScope{
-		DatasetID: "dataset", CampaignID: "campaign", DayDefinitionID: "utc-day-v1", Date: "2026-07-15",
+		DatasetID: "dataset", DayDefinitionID: "utc-day-v1", Date: "2026-07-15",
 		ReplayContractID: "replay-v1", ConversionID: "conversion-v1", RawDayManifestKey: "snapshots/raw/day-" + string(rune('0'+rawRevision)) + ".json", RawDayManifestSHA256: testHash(rawRevision + 0x20),
 	}
 }
@@ -209,9 +209,9 @@ func TestReplayManifestRejectsMixedPartBindingsAndRowChainAnchors(t *testing.T) 
 	dayScope := baseScope
 	dayScope.Date = "2026-07-16"
 	rejectPart("cross-day", dayScope, baseConversion)
-	campaignScope := baseScope
-	campaignScope.CampaignID = "campaign-other"
-	rejectPart("cross-campaign", campaignScope, baseConversion)
+	dayDefinitionScope := baseScope
+	dayDefinitionScope.DayDefinitionID = "exchange-day-v1"
+	rejectPart("cross-day-definition", dayDefinitionScope, baseConversion)
 	conversionScope := baseScope
 	conversionScope.ConversionID = "conversion-v2"
 	conversion := baseConversion

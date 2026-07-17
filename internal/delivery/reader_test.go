@@ -113,7 +113,6 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 	t.Helper()
 	scope := archive.ScopeConfig{
 		DatasetID:               "dataset-reader",
-		CampaignID:              "campaign-reader",
 		ProviderID:              "provider-reader",
 		StableFeedID:            "feed-reader",
 		ExactSourceSymbol:       "EURUSD.raw",
@@ -283,14 +282,14 @@ func TestArchiveReaderDiscoveryFetchAndDayRestoration(t *testing.T) {
 	if len(datasets) != 1 || datasets[0].DatasetID != fixture.scope.DatasetID {
 		t.Fatalf("datasets = %+v", datasets)
 	}
-	campaigns, err := fixture.reader.ListCampaigns(ctx, fixture.scope.DatasetID)
+	scopes, err := fixture.reader.ListScopes(ctx, fixture.scope.DatasetID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(campaigns) != 1 || campaigns[0].CampaignID != fixture.scope.CampaignID {
-		t.Fatalf("campaigns = %+v", campaigns)
+	if len(scopes) != 1 || scopes[0].ProviderID != fixture.scope.ProviderID || scopes[0].ExactSourceSymbol != fixture.scope.ExactSourceSymbol {
+		t.Fatalf("scopes = %+v", scopes)
 	}
-	snapshots, err := fixture.reader.ListRawSnapshots(ctx, RawDayScope{DatasetID: fixture.scope.DatasetID, CampaignID: fixture.scope.CampaignID, Date: "2024-03-09"})
+	snapshots, err := fixture.reader.ListRawSnapshots(ctx, RawDayScope{DatasetID: fixture.scope.DatasetID, ProviderID: fixture.scope.ProviderID, ExactSourceSymbol: fixture.scope.ExactSourceSymbol, Date: "2024-03-09"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,23 +445,23 @@ func TestArchiveReaderDoesNotPersistCredentialValues(t *testing.T) {
 	}
 }
 
-func TestArchiveReaderCampaignProvesGenesisToRootAndRejectsMissingRoot(t *testing.T) {
+func TestArchiveReaderScopeProvesGenesisToRootAndRejectsMissingRoot(t *testing.T) {
 	fixture := newDeliveryFixture(t)
 	ctx := context.Background()
 	throughRoot := fixture.objects[2].Segment.ChainRoot
-	report, err := fixture.reader.VerifyCampaign(ctx, fixture.scope.DatasetID, fixture.scope.CampaignID, hexDigest(throughRoot))
+	report, err := fixture.reader.VerifyScope(ctx, RawScopeSelector{DatasetID: fixture.scope.DatasetID, ProviderID: fixture.scope.ProviderID, ExactSourceSymbol: fixture.scope.ExactSourceSymbol}, hexDigest(throughRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !report.GenesisVerified || report.VerificationScope != VerificationScopeCampaign || report.VerifiedThrough != 3 {
-		t.Fatalf("campaign report = %+v", report)
+	if !report.GenesisVerified || report.VerificationScope != VerificationScopeFullChain || report.VerifiedThrough != 3 {
+		t.Fatalf("scope report = %+v", report)
 	}
-	if _, err := fixture.reader.VerifyCampaign(ctx, fixture.scope.DatasetID, fixture.scope.CampaignID, strings.Repeat("f", 64)); !errors.Is(err, archive.ErrIntegrity) {
+	if _, err := fixture.reader.VerifyScope(ctx, RawScopeSelector{DatasetID: fixture.scope.DatasetID, ProviderID: fixture.scope.ProviderID, ExactSourceSymbol: fixture.scope.ExactSourceSymbol}, strings.Repeat("f", 64)); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("missing root error = %v, want ErrIntegrity", err)
 	}
 }
 
-func TestArchiveReaderCampaignRejectsCanonicalButSemanticallyMutatedManifest(t *testing.T) {
+func TestArchiveReaderScopeRejectsCanonicalButSemanticallyMutatedManifest(t *testing.T) {
 	fixture := newDeliveryFixture(t)
 	mutated := fixture.manifestA
 	mutated.Objects = append([]archive.RawObjectRange(nil), mutated.Objects...)
@@ -495,7 +494,7 @@ func TestArchiveReaderCampaignRejectsCanonicalButSemanticallyMutatedManifest(t *
 	delete(fixture.backend.objects, oldKey)
 	fixture.backend.objects[newKey] = body
 	throughRoot := fixture.objects[2].Segment.ChainRoot
-	if _, err := fixture.reader.VerifyCampaign(context.Background(), fixture.scope.DatasetID, fixture.scope.CampaignID, hexDigest(throughRoot)); !errors.Is(err, archive.ErrIntegrity) {
+	if _, err := fixture.reader.VerifyScope(context.Background(), RawScopeSelector{DatasetID: fixture.scope.DatasetID, ProviderID: fixture.scope.ProviderID, ExactSourceSymbol: fixture.scope.ExactSourceSymbol}, hexDigest(throughRoot)); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("semantic manifest mutation error = %v, want ErrIntegrity", err)
 	}
 }
@@ -533,7 +532,11 @@ func TestArchiveReaderRejectsMalformedSelectorAndRevisionBranch(t *testing.T) {
 		}
 		fixture.backend.objects[key] = body
 	}
-	if _, err := fixture.reader.ListRawSnapshots(ctx, RawDayScope{DatasetID: fixture.scope.DatasetID, CampaignID: fixture.scope.CampaignID}); !errors.Is(err, archive.ErrIntegrity) {
+	if _, err := fixture.reader.ListRawSnapshots(ctx, RawDayScope{
+		DatasetID:         fixture.scope.DatasetID,
+		ProviderID:        fixture.scope.ProviderID,
+		ExactSourceSymbol: fixture.scope.ExactSourceSymbol,
+	}); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("revision branch error = %v, want ErrIntegrity", err)
 	}
 }

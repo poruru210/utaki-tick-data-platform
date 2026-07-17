@@ -28,9 +28,9 @@ canonical一致は要求しません。
 | Method | Path | Reader method | Required query |
 | --- | --- | --- | --- |
 | GET | `/v1/datasets` | `ListDatasets` | none |
-| GET | `/v1/datasets/{dataset}/campaigns` | `ListCampaigns` | path `dataset` |
-| GET | `/v1/snapshots/raw` | `ListRawSnapshots` | `dataset`, `campaign`, optional `date` |
-| GET | `/v1/snapshots/replay` | `ListReplaySnapshots` | `dataset`, `campaign`, `date`, `stream`, `conversion`, optional `day_definition` |
+| GET | `/v1/datasets/{dataset}/scopes` | `ListScopes` | path `dataset` |
+| GET | `/v1/snapshots/raw` | `ListRawSnapshots` | `dataset`, `source`, `symbol`, optional `date` |
+| GET | `/v1/snapshots/replay` | `ListReplaySnapshots` | `dataset`, `source`, `symbol`, `date`, `stream`, `conversion`, optional `day_definition` |
 | GET | `/v1/manifests/{sha256}` | strict manifest selector | lowercase SHA-256 path parameter |
 | POST | `/v1/fetch-plans` | `Resolve*Snapshot`, `Build*FetchPlan` | bounded JSON body with `kind` and typed selector |
 | GET | `/v1/health` | bounded operator health | none |

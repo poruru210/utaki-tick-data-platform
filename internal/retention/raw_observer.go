@@ -20,7 +20,7 @@ import (
 const rawRetentionVerificationDomain = "tick-data-platform/retention-verification/v1\x00"
 
 // RawRetentionObserver proves one sealed WAL segment against a bounded,
-// read-only immutable campaign. It intentionally accepts only the narrowed R2
+// read-only immutable scope. It intentionally accepts only the narrowed R2
 // capability and a trusted Layout; neither a remote key nor a local path is a
 // supplied authority.
 type RawRetentionObserver struct {
@@ -32,7 +32,7 @@ type RawRetentionObserver struct {
 }
 
 // NewRawRetentionObserver constructs the raw-WAL observer for one immutable
-// campaign date. clock returns a durable wall-clock observation in Unix ms.
+// scope date. clock returns a durable wall-clock observation in Unix ms.
 func NewRawRetentionObserver(remote r2.ReplayRemoteReadBackend, layout r2.Layout, date string, clock func() uint64, graceMS uint64) (*RawRetentionObserver, error) {
 	if remote == nil || clock == nil || date == "" || graceMS == 0 {
 		return nil, fmt.Errorf("raw retention observer dependencies are incomplete")
@@ -376,7 +376,7 @@ func minUint64(left, right uint64) uint64 {
 
 func rawManifestMatchesScope(manifest archive.RawDayManifest, scope archive.ScopeConfig, date string) bool {
 	configHash, err := scope.ConfigHash()
-	return err == nil && manifest.ManifestVersion == archive.RawDayManifestVersion && manifest.DatasetID == scope.DatasetID && manifest.CampaignID == scope.CampaignID && manifest.DayDefinitionID == scope.DayDefinitionID && manifest.Date == date && manifest.PublisherID == scope.PublisherID && manifest.PublisherEpoch == scope.PublisherEpoch && manifest.ConfigHash == configHash && manifest.SettlePolicy == scope.SettlePolicy
+	return err == nil && manifest.ManifestVersion == archive.RawDayManifestVersion && manifest.DatasetID == scope.DatasetID && manifest.DayDefinitionID == scope.DayDefinitionID && manifest.Date == date && manifest.PublisherID == scope.PublisherID && manifest.PublisherEpoch == scope.PublisherEpoch && manifest.ConfigHash == configHash && manifest.SettlePolicy == scope.SettlePolicy
 }
 
 func findCoveringManifest(records []r2.ManifestRecord, artifact LocalArtifact, segment wal.VerifiedSegment, scope archive.ScopeConfig) (r2.ManifestRecord, archive.RawDaySegmentCoverage, bool) {
@@ -460,7 +460,7 @@ func rawVerificationReportDigest(layout r2.Layout, date, remoteKey string, artif
 	value := map[string]any{
 		"artifact_key":       remoteKey,
 		"artifact_sha256":    protocol.EncodeHashHex(artifact.ContentSHA256),
-		"campaign_prefix":    layout.ImmutableCampaignPrefix(),
+		"scope_prefix":       layout.ImmutableScopePrefix(),
 		"claim_digest":       protocol.EncodeHashHex(claimDigest),
 		"claim_key":          claimKey,
 		"covering_manifest":  covering.Key,

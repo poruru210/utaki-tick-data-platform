@@ -65,8 +65,9 @@ func (r *archiveReaderV1) VerifyReplayDay(ctx context.Context, selector ReplaySn
 	manifest := snapshot.Manifest
 	return ReplayDayVerificationReport{
 		GenesisVerified: false, VerificationScope: VerificationScopeReplayAnchoredDay,
-		DatasetID: manifest.DatasetID, CampaignID: manifest.CampaignID, DayDefinitionID: manifest.DayDefinitionID,
-		Date: manifest.Date, ReplayContractID: manifest.ReplayContractID, ConversionID: manifest.ConversionID,
+		DatasetID: manifest.DatasetID, ProviderID: snapshot.Scope.ProviderID, ExactSourceSymbol: snapshot.Scope.ExactSourceSymbol,
+		DayDefinitionID: manifest.DayDefinitionID,
+		Date:            manifest.Date, ReplayContractID: manifest.ReplayContractID, ConversionID: manifest.ConversionID,
 		Revision: manifest.Revision, ManifestKey: snapshot.ManifestKey, ManifestSHA256: snapshot.ManifestSHA256,
 		RawBindingVerified: true, RawDaySemanticsVerified: true, PartManifestChainVerified: true,
 		PartSetRootVerified: true, ParquetSchemaVerified: true, ParquetRowsVerified: true,

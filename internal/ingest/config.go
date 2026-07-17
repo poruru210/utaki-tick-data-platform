@@ -31,7 +31,6 @@ type Config struct {
 	ProducerInstanceID      string
 	ProducerBuildID         string
 	DatasetID               string
-	CampaignID              string
 	ProviderID              string
 	StableFeedID            string
 	BrokerServerFingerprint string
@@ -150,7 +149,7 @@ func ConfigFromGatewayConfig(values appconfig.GatewayConfig) Config {
 		DiskHighFreeBytes: values.DiskHighFreeBytes, DiskCriticalFreeBytes: values.DiskCriticalFreeBytes,
 		DiskEmergencyFreeBytes: values.DiskEmergencyFreeBytes,
 		ProducerInstanceID:     values.ProducerInstanceID, ProducerBuildID: values.ProducerBuildID,
-		DatasetID: values.DatasetID, CampaignID: values.CampaignID, ProviderID: values.ProviderID,
+		DatasetID: values.DatasetID, ProviderID: values.ProviderID,
 		StableFeedID: values.StableFeedID, BrokerServerFingerprint: values.BrokerServerFingerprint,
 		ExactSourceSymbol: values.ExactSourceSymbol, GatewayBuildIdentity: values.GatewayBuildIdentity,
 		DayDefinitionID: values.DayDefinitionID, SettlePolicy: values.SettlePolicy,

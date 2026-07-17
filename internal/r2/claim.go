@@ -18,7 +18,6 @@ type PublisherClaim struct {
 	ClaimVersion            string
 	ScopeKey                string
 	DatasetID               string
-	CampaignID              string
 	ProviderID              string
 	StableFeedID            string
 	ExactSourceSymbol       string
@@ -43,7 +42,6 @@ func NewPublisherClaim(scope archive.ScopeConfig) (PublisherClaim, error) {
 		ClaimVersion:            PublisherClaimVersion,
 		ScopeKey:                scopeKey,
 		DatasetID:               scope.DatasetID,
-		CampaignID:              scope.CampaignID,
 		ProviderID:              scope.ProviderID,
 		StableFeedID:            scope.StableFeedID,
 		ExactSourceSymbol:       scope.ExactSourceSymbol,
@@ -59,7 +57,6 @@ func NewPublisherClaim(scope archive.ScopeConfig) (PublisherClaim, error) {
 func (c PublisherClaim) Value() map[string]any {
 	return map[string]any{
 		"broker_server_fingerprint": c.BrokerServerFingerprint,
-		"campaign_id":               c.CampaignID,
 		"claim_version":             c.ClaimVersion,
 		"config_hash":               hex.EncodeToString(c.ConfigHash[:]),
 		"dataset_id":                c.DatasetID,
@@ -75,7 +72,7 @@ func (c PublisherClaim) Value() map[string]any {
 }
 
 func (c PublisherClaim) CanonicalJSON() ([]byte, error) {
-	if c.ClaimVersion != PublisherClaimVersion || c.PublisherID == "" || c.CampaignID == "" || c.ScopeKey == "" {
+	if c.ClaimVersion != PublisherClaimVersion || c.PublisherID == "" || c.ScopeKey == "" {
 		return nil, fmt.Errorf("publisher claim identity is incomplete")
 	}
 	return protocol.CanonicalJSON(c.Value())

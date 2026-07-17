@@ -1,4 +1,4 @@
-// Package protocol implements Protocol V1 wire and message codecs.
+// Package protocol implements the current tick wire and message codecs.
 package protocol
 
 import (
@@ -67,12 +67,11 @@ type ProtocolError struct {
 }
 
 // DeriveSessionLeaseID is the single authoritative implementation of the
-// existing M2 lease algorithm. Its field order and NUL separators are wire
-// compatible with the original Gateway implementation.
+// session lease algorithm. Its field order and NUL separators define the
+// current wire identity.
 func DeriveSessionLeaseID(
 	producerInstanceID string,
 	producerSessionID string,
-	campaignID string,
 	providerID string,
 	stableFeedID string,
 	brokerServerFingerprint string,
@@ -82,7 +81,6 @@ func DeriveSessionLeaseID(
 		"tick-data-platform/lease/v1",
 		producerInstanceID,
 		producerSessionID,
-		campaignID,
 		providerID,
 		stableFeedID,
 		brokerServerFingerprint,
@@ -219,7 +217,6 @@ type HelloV1 struct {
 	TerminalBuild           string
 	OSContract              string
 	ClockAPIID              string
-	CampaignID              string
 	ProviderID              string
 	StableFeedID            string
 	BrokerServerFingerprint string
@@ -423,7 +420,7 @@ func encodePayload(message Message) ([]byte, error) {
 		fields := []string{
 			value.ProducerInstanceID, value.ProducerSessionID, value.ProducerBuildID,
 			value.MQLCompilerBuild, value.TerminalBuild, value.OSContract, value.ClockAPIID,
-			value.CampaignID, value.ProviderID, value.StableFeedID,
+			value.ProviderID, value.StableFeedID,
 			value.BrokerServerFingerprint, value.ExactSourceSymbol, value.SourceSchemaID,
 		}
 		for _, field := range fields {
@@ -585,7 +582,7 @@ func decodeHello(r *reader) (HelloV1, error) {
 	fields := []*string{
 		&value.ProducerInstanceID, &value.ProducerSessionID, &value.ProducerBuildID,
 		&value.MQLCompilerBuild, &value.TerminalBuild, &value.OSContract, &value.ClockAPIID,
-		&value.CampaignID, &value.ProviderID, &value.StableFeedID,
+		&value.ProviderID, &value.StableFeedID,
 		&value.BrokerServerFingerprint, &value.ExactSourceSymbol, &value.SourceSchemaID,
 	}
 	for _, field := range fields {

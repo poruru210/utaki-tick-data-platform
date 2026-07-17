@@ -7,7 +7,6 @@ region = "auto"
 immutable_root = "v1"
 
 dataset_id = "dataset-local-01"
-campaign_id = "campaign-local-01"
 provider_id = "broker-provider"
 stable_feed_id = "broker-feed-01"
 exact_source_symbol = "EURUSD"

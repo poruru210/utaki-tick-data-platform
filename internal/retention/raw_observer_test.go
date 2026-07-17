@@ -66,7 +66,7 @@ func TestRawRetentionObserverChargesBytesBeforeClassifyingOversizedRead(t *testi
 
 func observerScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
-		DatasetID: "dataset", CampaignID: "campaign", ProviderID: "provider", StableFeedID: "feed", ExactSourceSymbol: "EURUSD",
+		DatasetID: "dataset", ProviderID: "provider", StableFeedID: "feed", ExactSourceSymbol: "EURUSD",
 		BrokerServerFingerprint: "broker", GatewayBuildIdentity: "gateway", ProducerBuildIdentity: "producer", DayDefinitionID: "day", SettlePolicy: "settle", PublisherID: "publisher", PublisherEpoch: 1,
 		ProtocolVersion: protocol.ProtocolVersion, ProtocolLimits: archive.ProtocolLimits{MaxFrameBytes: protocol.MaxFrameBytes, MaxRecords: protocol.MaxRecords, MaxStringBytes: protocol.MaxStringBytes},
 	}
@@ -212,7 +212,7 @@ func TestRawRetentionObserverVerifiesFullRemoteSnapshotSemantics(t *testing.T) {
 		t.Fatalf("valid completion scope was rejected: %v", err)
 	}
 	otherScope := scope
-	otherScope.CampaignID = "other-campaign"
+	otherScope.ProviderID = "other-source"
 	otherLayout, err := r2.NewLayout("immutable-root", otherScope)
 	if err != nil {
 		t.Fatal(err)

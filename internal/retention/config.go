@@ -29,7 +29,6 @@ type Config struct {
 	ImmutableRoot         string `toml:"immutable_root"`
 
 	DatasetID               string `toml:"dataset_id"`
-	CampaignID              string `toml:"campaign_id"`
 	ProviderID              string `toml:"provider_id"`
 	StableFeedID            string `toml:"stable_feed_id"`
 	ExactSourceSymbol       string `toml:"exact_source_symbol"`
@@ -114,7 +113,7 @@ func (c Config) Validate() error {
 
 func (c Config) Scope() (archive.ScopeConfig, error) {
 	scope := archive.ScopeConfig{
-		DatasetID: c.DatasetID, CampaignID: c.CampaignID, ProviderID: c.ProviderID,
+		DatasetID: c.DatasetID, ProviderID: c.ProviderID,
 		StableFeedID: c.StableFeedID, ExactSourceSymbol: c.ExactSourceSymbol,
 		BrokerServerFingerprint: c.BrokerServerFingerprint, GatewayBuildIdentity: c.GatewayBuildIdentity,
 		ProducerBuildIdentity: c.ProducerBuildIdentity, DayDefinitionID: c.DayDefinitionID,

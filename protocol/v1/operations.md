@@ -22,7 +22,7 @@ wal_range
 観測時刻より前にできません。proof limitsは`max_proof_objects`、`max_proof_bytes`、
 `max_manifest_nodes`を持ち、全てzeroまたは実装上限超過を拒否します。
 
-WAL identityはstart/end sequenceとchain root、replay identityはdataset、campaign、UTC date、
+WAL identityはstart/end sequenceとchain root、replay identityはdataset、source、symbol、UTC date、
 manifest key/digest、part-set root、canonical row-chain rootを持ちます。
 `scope_config_hash`はpublisher epoch、settle policy、protocol limitsを含むtrusted scopeの
 canonical hashであり、recovered raw completionを別scopeへ再利用しません。

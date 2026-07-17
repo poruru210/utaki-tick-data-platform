@@ -349,7 +349,7 @@ func publishCanonical(path string, canonical []byte) error {
 }
 
 func manifestSelectionChanged(previous, current archive.RawDayManifest) bool {
-	if previous.Date != current.Date || previous.DatasetID != current.DatasetID || previous.CampaignID != current.CampaignID || previous.DayDefinitionID != current.DayDefinitionID {
+	if previous.Date != current.Date || previous.DatasetID != current.DatasetID || previous.DayDefinitionID != current.DayDefinitionID {
 		return true
 	}
 	if previous.AcceptedRecordCount != current.AcceptedRecordCount || previous.ErrorCount != current.ErrorCount ||

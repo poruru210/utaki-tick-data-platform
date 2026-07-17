@@ -29,7 +29,7 @@ func newReplayDeliveryFixture(t *testing.T) replayDeliveryFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := protocol.ReplayScope{DatasetID: base.scope.DatasetID, CampaignID: base.scope.CampaignID, DayDefinitionID: base.scope.DayDefinitionID, Date: base.manifestA.Date, ReplayContractID: "replay-reader-v1", ConversionID: "conversion-reader-v1", RawDayManifestKey: rawRelative, RawDayManifestSHA256: base.manifestA.ManifestSHA256}
+	scope := protocol.ReplayScope{DatasetID: base.scope.DatasetID, DayDefinitionID: base.scope.DayDefinitionID, Date: base.manifestA.Date, ReplayContractID: "replay-reader-v1", ConversionID: "conversion-reader-v1", RawDayManifestKey: rawRelative, RawDayManifestSHA256: base.manifestA.ManifestSHA256}
 	spec, err := parquet.NewConversionSpec(scope.ReplayContractID, scope.ConversionID, "reader-build-v1", "windows-amd64-go1.24.13", 10, 1<<20, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +82,14 @@ func newReplayDeliveryFixture(t *testing.T) replayDeliveryFixture {
 }
 
 func (f replayDeliveryFixture) selector() ReplaySnapshotSelector {
-	return ReplaySnapshotSelector{ReplayDayScope: ReplayDayScope{DatasetID: f.scope.DatasetID, CampaignID: f.scope.CampaignID, Date: f.scope.Date, ReplayContractID: f.scope.ReplayContractID, ConversionID: f.scope.ConversionID}}
+	return ReplaySnapshotSelector{ReplayDayScope: ReplayDayScope{
+		DatasetID:         f.scope.DatasetID,
+		ProviderID:        f.deliveryFixture.scope.ProviderID,
+		ExactSourceSymbol: f.deliveryFixture.scope.ExactSourceSymbol,
+		Date:              f.scope.Date,
+		ReplayContractID:  f.scope.ReplayContractID,
+		ConversionID:      f.scope.ConversionID,
+	}}
 }
 
 func TestReplayDeliveryListResolveFetchAndVerify(t *testing.T) {

@@ -186,7 +186,7 @@ func newReplayPublicationFixture(t *testing.T, empty bool) *replayPublicationFix
 		t.Fatal(err)
 	}
 	replayScope := protocol.ReplayScope{
-		DatasetID: scope.DatasetID, CampaignID: scope.CampaignID, DayDefinitionID: scope.DayDefinitionID, Date: manifest.Date,
+		DatasetID: scope.DatasetID, DayDefinitionID: scope.DayDefinitionID, Date: manifest.Date,
 		ReplayContractID: spec.ReplayContractID, ConversionID: spec.ConversionID,
 		RawDayManifestKey: rawRelative, RawDayManifestSHA256: manifest.ManifestSHA256,
 	}
@@ -282,7 +282,7 @@ func (f *replayPublicationFixture) sealedBundle(t *testing.T) ReplayPublicationB
 	return bundle
 }
 
-func TestNewReplayPublisherDerivesCampaignEpochLockFromRoot(t *testing.T) {
+func TestNewReplayPublisherDerivesScopeEpochLockFromRoot(t *testing.T) {
 	fixture := newReplayPublicationFixture(t, true)
 	root := filepath.Dir(fixture.publisher.lockPath)
 	want, err := PublicationLockPath(root, fixture.layout.Scope)
@@ -292,7 +292,7 @@ func TestNewReplayPublisherDerivesCampaignEpochLockFromRoot(t *testing.T) {
 	if fixture.publisher.lockPath != want {
 		t.Fatalf("lock path = %q, want canonical %q", fixture.publisher.lockPath, want)
 	}
-	if fixture.publisher.lockPath == filepath.Join(root, "campaign.lock") {
+	if fixture.publisher.lockPath == filepath.Join(root, "publication.lock") {
 		t.Fatal("publisher retained an arbitrary lock filename")
 	}
 }
@@ -512,7 +512,7 @@ func TestReplayPublisherRejectsInsufficientRoundsBeforeLock(t *testing.T) {
 		t.Fatalf("round error = %v", err)
 	}
 	if lockAcquired {
-		t.Fatal("insufficient round budget acquired the campaign lock")
+		t.Fatal("insufficient round budget acquired the publication lock")
 	}
 	if _, err := os.Stat(fixture.receipt); !os.IsNotExist(err) {
 		t.Fatalf("receipt exists after round stop: %v", err)
@@ -531,7 +531,7 @@ func TestReplayPublisherPreLockBudgetFailureDoesNotAcquireLock(t *testing.T) {
 		t.Fatalf("pre-lock budget failure = %v, want ErrResourceLimit", err)
 	}
 	if lockAcquired {
-		t.Fatal("campaign lock was acquired after pre-lock budget failure")
+		t.Fatal("publication lock was acquired after pre-lock budget failure")
 	}
 }
 
@@ -546,7 +546,7 @@ func (s *lockCheckingReceiptStore) SaveNoClobber(_ context.Context, path string,
 		_ = second.Close()
 	}
 	if !errors.Is(err, ErrPublicationLock) {
-		return fmt.Errorf("receipt save occurred without held campaign lock: %v", err)
+		return fmt.Errorf("receipt save occurred without held publication lock: %v", err)
 	}
 	s.saved = true
 	return SaveReplayVerificationReceipt(path, receipt)

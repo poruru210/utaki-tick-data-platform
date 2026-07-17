@@ -240,18 +240,18 @@ func TestM2RawOffhostDeliveryEndToEndFake(t *testing.T) {
 	if dayReport.GenesisVerified || dayReport.VerificationScope != VerificationScopeAnchoredDay {
 		t.Fatalf("day report = %+v", dayReport)
 	}
-	campaignReport, err := reader.VerifyCampaign(context.Background(), scope.DatasetID, scope.CampaignID, hex.EncodeToString(object.Segment.ChainRoot[:]))
+	scopeReport, err := reader.VerifyScope(context.Background(), RawScopeSelector{DatasetID: scope.DatasetID, ProviderID: scope.ProviderID, ExactSourceSymbol: scope.ExactSourceSymbol}, hex.EncodeToString(object.Segment.ChainRoot[:]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !campaignReport.GenesisVerified || campaignReport.VerificationScope != VerificationScopeCampaign || campaignReport.VerifiedThrough != 2 {
-		t.Fatalf("campaign report = %+v", campaignReport)
+	if !scopeReport.GenesisVerified || scopeReport.VerificationScope != VerificationScopeFullChain || scopeReport.VerifiedThrough != 2 {
+		t.Fatalf("scope report = %+v", scopeReport)
 	}
 }
 
 func m2E2EScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
-		DatasetID: "m2-e2e-dataset", CampaignID: "m2-e2e-campaign", ProviderID: "m2-e2e-provider",
+		DatasetID: "m2-e2e-dataset", ProviderID: "m2-e2e-provider",
 		StableFeedID: "m2-e2e-feed", ExactSourceSymbol: "EURUSD.raw", BrokerServerFingerprint: "m2-e2e-server",
 		GatewayBuildIdentity: "m2-e2e-gateway", ProducerBuildIdentity: "m2-e2e-producer", DayDefinitionID: "utc-day-v1",
 		SettlePolicy: "manual-v1", PublisherID: "m2-e2e-publisher", PublisherEpoch: 1,

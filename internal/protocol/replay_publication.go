@@ -45,7 +45,6 @@ const (
 // verifies that every full key is under the exact prefix.
 type ReplayPublicationScope struct {
 	BrokerServerFingerprint string `json:"broker_server_fingerprint"`
-	CampaignID              string `json:"campaign_id"`
 	DatasetID               string `json:"dataset_id"`
 	Date                    string `json:"date"`
 	DayDefinitionID         string `json:"day_definition_id"`
@@ -704,13 +703,12 @@ func replayManifestMatchesPublicationScope(manifest ReplayDayManifest, bundle Re
 	if err != nil {
 		return false
 	}
-	return manifest.DatasetID == bundle.Scope.DatasetID && manifest.CampaignID == bundle.Scope.CampaignID && manifest.DayDefinitionID == bundle.Scope.DayDefinitionID && manifest.Date == bundle.Scope.Date && manifest.ReplayContractID == bundle.Conversion.ReplayContractID && manifest.FormatID == bundle.Conversion.FormatID && manifest.ConversionID == bundle.Conversion.ConversionID && manifest.ConverterBuildID == bundle.Conversion.ConverterBuildID && manifest.DependencyLockHash == dependency && manifest.WriterConfigurationHash == writer && manifest.TargetPlatformContract == bundle.Conversion.TargetPlatformContract
+	return manifest.DatasetID == bundle.Scope.DatasetID && manifest.DayDefinitionID == bundle.Scope.DayDefinitionID && manifest.Date == bundle.Scope.Date && manifest.ReplayContractID == bundle.Conversion.ReplayContractID && manifest.FormatID == bundle.Conversion.FormatID && manifest.ConversionID == bundle.Conversion.ConversionID && manifest.ConverterBuildID == bundle.Conversion.ConverterBuildID && manifest.DependencyLockHash == dependency && manifest.WriterConfigurationHash == writer && manifest.TargetPlatformContract == bundle.Conversion.TargetPlatformContract
 }
 
 func (scope ReplayPublicationScope) validate() error {
 	for name, value := range map[string]string{
 		"broker_server_fingerprint": scope.BrokerServerFingerprint,
-		"campaign_id":               scope.CampaignID,
 		"dataset_id":                scope.DatasetID,
 		"day_definition_id":         scope.DayDefinitionID,
 		"exact_source_symbol":       scope.ExactSourceSymbol,
@@ -762,7 +760,6 @@ func (claim ReplayPublicationClaim) validate(scope ReplayPublicationScope) error
 	}
 	stringsToMatch := map[string]string{
 		"broker_server_fingerprint": scope.BrokerServerFingerprint,
-		"campaign_id":               scope.CampaignID,
 		"claim_version":             PublisherClaimVersion,
 		"config_hash":               scope.ScopeConfigHash,
 		"dataset_id":                scope.DatasetID,
@@ -939,7 +936,7 @@ func (manifest ReplayPublicationReplayManifest) validate(bundle ReplayPublicatio
 func (bundle ReplayPublicationBundle) replayScope() ReplayScope {
 	manifestHash, _ := ParseHashHex(bundle.RawManifest.DomainDigest)
 	return ReplayScope{
-		DatasetID: bundle.Scope.DatasetID, CampaignID: bundle.Scope.CampaignID,
+		DatasetID:       bundle.Scope.DatasetID,
 		DayDefinitionID: bundle.Scope.DayDefinitionID, Date: bundle.Scope.Date,
 		ReplayContractID: bundle.Conversion.ReplayContractID, ConversionID: bundle.Conversion.ConversionID,
 		RawDayManifestKey: bundle.RawManifest.RelativeKey, RawDayManifestSHA256: manifestHash,
@@ -1179,11 +1176,11 @@ var (
 	parquetObjectKeys           = keySet("bytes", "first_stream_sequence", "full_key", "last_stream_sequence", "object_id", "relative_key", "sha256")
 	partManifestPublicationKeys = keySet("bytes", "domain_digest", "full_key", "object_id", "part_sequence", "relative_key")
 	replayManifestKeys          = keySet("bytes", "domain_digest", "full_key", "relative_key", "revision")
-	scopeKeys                   = keySet("broker_server_fingerprint", "campaign_id", "dataset_id", "date", "day_definition_id", "exact_source_symbol", "immutable_prefix", "provider_id", "publisher_epoch", "publisher_id", "scope_config_hash", "scope_key", "settle_policy", "stable_feed_id")
+	scopeKeys                   = keySet("broker_server_fingerprint", "dataset_id", "date", "day_definition_id", "exact_source_symbol", "immutable_prefix", "provider_id", "publisher_epoch", "publisher_id", "scope_config_hash", "scope_key", "settle_policy", "stable_feed_id")
 	finalObservationKeys        = keySet("bundle_digest", "claim", "complete", "derivative_objects", "observation_bytes", "observation_requests", "observation_version", "raw_manifest", "raw_objects", "replay_edges")
 	observedRawManifestKeys     = keySet("bytes", "domain_digest", "full_key")
 	observedRawObjectKeys       = keySet("bytes", "full_key", "sha256")
 	observedDerivativeKeys      = keySet("bytes", "digest", "digest_domain", "full_key", "kind")
 	replayEdgeKeys              = keySet("canonical_json", "canonical_stream_row_chain_root", "full_key", "manifest_digest", "part_count", "part_set_root", "previous_manifest_digest", "revision")
-	publisherClaimKeys          = keySet("broker_server_fingerprint", "campaign_id", "claim_version", "config_hash", "dataset_id", "day_definition_id", "exact_source_symbol", "provider_id", "publisher_epoch", "publisher_id", "scope_key", "settle_policy", "stable_feed_id")
+	publisherClaimKeys          = keySet("broker_server_fingerprint", "claim_version", "config_hash", "dataset_id", "day_definition_id", "exact_source_symbol", "provider_id", "publisher_epoch", "publisher_id", "scope_key", "settle_policy", "stable_feed_id")
 )

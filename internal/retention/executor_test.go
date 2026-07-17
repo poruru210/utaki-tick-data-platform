@@ -142,7 +142,7 @@ func TestPruneExecutorRejectsReplayOutboxActionUntilKindPolicyExists(t *testing.
 	artifact := LocalArtifact{
 		Kind: ArtifactReplayOutbox, TrustedPath: "objects/raw.bin", Bytes: uint64(len(body)), ContentSHA256: digest,
 		Replay: &ReplayIdentity{
-			DatasetID: "dataset", CampaignID: "campaign", Date: "2024-03-09", ManifestKey: "remote/manifest.json",
+			DatasetID: "dataset", Date: "2024-03-09", ManifestKey: "remote/manifest.json",
 			ManifestSHA256: plannerHash('m'), PartSetRoot: plannerHash('p'), CanonicalStreamRowChainRoot: plannerHash('r'),
 		},
 	}

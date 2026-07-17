@@ -108,7 +108,7 @@ func TestGeneratorRejectsOversizedCanonicalRowAndWrongScope(t *testing.T) {
 		t.Fatal("oversized canonical row was accepted")
 	}
 	wrongScope := scope
-	wrongScope.CampaignID = "other-campaign"
+	wrongScope.DayDefinitionID = "exchange-day-v1"
 	if err := generator.WriteRow(testDataRow(wrongScope, 0, 1, 2)); err == nil {
 		t.Fatal("wrong scope was accepted")
 	}
@@ -167,7 +167,7 @@ func testParquetScope() protocol.ReplayScope {
 	var rawHash [32]byte
 	rawHash[0] = 0x44
 	return protocol.ReplayScope{
-		DatasetID: "dataset", CampaignID: "campaign", DayDefinitionID: "utc-day-v1", Date: "2026-07-15",
+		DatasetID: "dataset", DayDefinitionID: "utc-day-v1", Date: "2026-07-15",
 		ReplayContractID: "replay-v1", ConversionID: "conversion-v1", RawDayManifestKey: "snapshots/raw/day.json", RawDayManifestSHA256: rawHash,
 	}
 }

@@ -551,9 +551,7 @@ func appendPublicationBatch(t *testing.T, store *wal.Store, timestamp time.Time,
 
 func testScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
-		DatasetID:               "dataset-test",
-		CampaignID:              "campaign-test",
-		ProviderID:              "provider-test",
+		DatasetID: "dataset-test", ProviderID: "provider-test",
 		StableFeedID:            "feed-test",
 		ExactSourceSymbol:       "EURUSD",
 		BrokerServerFingerprint: "broker-test",

@@ -81,7 +81,7 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 		return ReplayPublicationBundle{}, err
 	}
 	replayScope := protocol.ReplayScope{
-		DatasetID: input.Layout.Scope.DatasetID, CampaignID: input.Layout.Scope.CampaignID,
+		DatasetID:       input.Layout.Scope.DatasetID,
 		DayDefinitionID: input.Layout.Scope.DayDefinitionID, Date: rawManifest.Date,
 		ReplayContractID: input.Conversion.ReplayContractID, ConversionID: input.Conversion.ConversionID,
 		RawDayManifestKey: rawRelative, RawDayManifestSHA256: rawManifest.ManifestSHA256,
@@ -300,10 +300,10 @@ func SealReplayPublicationBundle(input ReplayPublicationBundleInput) (ReplayPubl
 		},
 		Scope: protocol.ReplayPublicationScope{
 			BrokerServerFingerprint: input.Layout.Scope.BrokerServerFingerprint,
-			CampaignID:              input.Layout.Scope.CampaignID, DatasetID: input.Layout.Scope.DatasetID,
-			Date: rawManifest.Date, DayDefinitionID: input.Layout.Scope.DayDefinitionID,
+			DatasetID:               input.Layout.Scope.DatasetID,
+			Date:                    rawManifest.Date, DayDefinitionID: input.Layout.Scope.DayDefinitionID,
 			ExactSourceSymbol: input.Layout.Scope.ExactSourceSymbol,
-			ImmutablePrefix:   input.Layout.ImmutableCampaignPrefix(), ProviderID: input.Layout.Scope.ProviderID,
+			ImmutablePrefix:   input.Layout.ImmutableScopePrefix(), ProviderID: input.Layout.Scope.ProviderID,
 			PublisherEpoch: input.Layout.Scope.PublisherEpoch, PublisherID: input.Layout.Scope.PublisherID,
 			ScopeConfigHash: hex.EncodeToString(configHash[:]),
 			ScopeKey:        claim.ScopeKey, SettlePolicy: input.Layout.Scope.SettlePolicy, StableFeedID: input.Layout.Scope.StableFeedID,

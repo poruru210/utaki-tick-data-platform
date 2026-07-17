@@ -340,7 +340,7 @@ func TestPublisherRejectsPublisherConflictAndLockConflict(t *testing.T) {
 	}
 
 	second := newPublicationFixture(t)
-	lockPath := filepath.Join(filepath.Dir(second.journal.Path()), "campaign.lock")
+	lockPath := filepath.Join(filepath.Dir(second.journal.Path()), "publication.lock")
 	owner, err := AcquirePublicationLock(lockPath)
 	if err != nil {
 		t.Fatal(err)
@@ -578,7 +578,7 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 
 func (f *publicationFixture) publisher(t *testing.T, afterStage func(string) error) *Publisher {
 	t.Helper()
-	publisher, err := NewPublisher(f.layout, f.backend, f.journal, filepath.Join(filepath.Dir(f.journal.Path()), "campaign.lock"), time.Now)
+	publisher, err := NewPublisher(f.layout, f.backend, f.journal, filepath.Join(filepath.Dir(f.journal.Path()), "publication.lock"), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

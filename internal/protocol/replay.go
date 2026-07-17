@@ -35,7 +35,7 @@ const (
 	MarkerSourceError          = "SOURCE_ERROR"
 	MarkerGap                  = "GAP"
 	MarkerTimestampRegression  = "TIMESTAMP_REGRESSION"
-	MarkerCampaignBoundary     = "CAMPAIGN_BOUNDARY"
+	MarkerScopeBoundary        = "SCOPE_BOUNDARY"
 
 	ReasonInitial             = "INITIAL"
 	ReasonNoUniqueOverlap     = "NO_UNIQUE_OVERLAP"
@@ -43,7 +43,7 @@ const (
 	ReasonSourceReportedError = "SOURCE_REPORTED_ERROR"
 	ReasonWALSequenceGap      = "WAL_SEQUENCE_GAP"
 	ReasonTimeMSCRegression   = "TIME_MSC_REGRESSION"
-	ReasonCampaignChanged     = "CAMPAIGN_CHANGED"
+	ReasonScopeChanged        = "SCOPE_CHANGED"
 )
 
 var markerReasons = map[string]string{
@@ -53,14 +53,13 @@ var markerReasons = map[string]string{
 	MarkerSourceError:          ReasonSourceReportedError,
 	MarkerGap:                  ReasonWALSequenceGap,
 	MarkerTimestampRegression:  ReasonTimeMSCRegression,
-	MarkerCampaignBoundary:     ReasonCampaignChanged,
+	MarkerScopeBoundary:        ReasonScopeChanged,
 }
 
 // ReplayScope is the immutable input binding for one replay stream.
 // RawDayManifestKey and RawDayManifestSHA256 are always checked together.
 type ReplayScope struct {
 	DatasetID            string
-	CampaignID           string
 	DayDefinitionID      string
 	Date                 string
 	ReplayContractID     string
@@ -72,7 +71,6 @@ type ReplayScope struct {
 func (s ReplayScope) Validate() error {
 	for name, value := range map[string]string{
 		"dataset_id":           s.DatasetID,
-		"campaign_id":          s.CampaignID,
 		"day_definition_id":    s.DayDefinitionID,
 		"date":                 s.Date,
 		"replay_contract_id":   s.ReplayContractID,
@@ -275,7 +273,7 @@ func writePath(w *writer, value string) error {
 }
 
 func writeScope(w *writer, scope ReplayScope, segmentID string) error {
-	for _, value := range []string{scope.DatasetID, scope.CampaignID, scope.DayDefinitionID, scope.Date, scope.ReplayContractID, scope.ConversionID, segmentID} {
+	for _, value := range []string{scope.DatasetID, scope.DayDefinitionID, scope.Date, scope.ReplayContractID, scope.ConversionID, segmentID} {
 		if err := writeLP(w, value); err != nil {
 			return err
 		}
@@ -348,7 +346,7 @@ func SegmentID(scope ReplayScope, gatewaySequence uint64, recordOrdinal uint32, 
 	}
 	var w writer
 	w.WriteString(ContinuitySegmentDomain)
-	for _, value := range []string{scope.DatasetID, scope.CampaignID, scope.DayDefinitionID, scope.Date, scope.ReplayContractID, scope.ConversionID, scope.RawDayManifestKey} {
+	for _, value := range []string{scope.DatasetID, scope.DayDefinitionID, scope.Date, scope.ReplayContractID, scope.ConversionID, scope.RawDayManifestKey} {
 		if err := writeLP(&w, value); err != nil {
 			return "", err
 		}
@@ -393,7 +391,6 @@ func RowChainRoot(rows []ReplayRow) ([32]byte, error) {
 type PartManifest struct {
 	ManifestVersion         string
 	DatasetID               string
-	CampaignID              string
 	DayDefinitionID         string
 	Date                    string
 	ReplayContractID        string
@@ -428,7 +425,7 @@ func (p PartManifest) Validate() error {
 		return fmt.Errorf("part key is not a Protocol V1 path")
 	}
 	scope := ReplayScope{
-		DatasetID: p.DatasetID, CampaignID: p.CampaignID, DayDefinitionID: p.DayDefinitionID,
+		DatasetID: p.DatasetID, DayDefinitionID: p.DayDefinitionID,
 		Date: p.Date, ReplayContractID: p.ReplayContractID, ConversionID: p.ConversionID,
 		RawDayManifestKey: p.RawDayManifestKey, RawDayManifestSHA256: p.RawDayManifestSHA256,
 	}
@@ -470,7 +467,6 @@ func (p PartManifest) Validate() error {
 
 func (p PartManifest) canonicalValue() map[string]any {
 	value := map[string]any{
-		"campaign_id":               p.CampaignID,
 		"canonical_row_bytes":       p.CanonicalRowBytes,
 		"conversion_id":             p.ConversionID,
 		"converter_build_id":        p.ConverterBuildID,
@@ -526,7 +522,7 @@ func ExactIdentityPathKey(value string) string {
 	return hex.EncodeToString(digest[:])
 }
 
-// ReplayDerivativeBaseKey returns the campaign-relative, date-local physical
+// ReplayDerivativeBaseKey returns the scope-relative, date-local physical
 // key prefix shared by every M3 derivative for one exact replay scope.
 func ReplayDerivativeBaseKey(scope ReplayScope) (string, error) {
 	if err := scope.Validate(); err != nil {
@@ -553,7 +549,7 @@ func replayPartObjectKey(scope ReplayScope, firstStreamSequence, lastStreamSeque
 	return fmt.Sprintf("%s/parquet/%d-%d-%x.parquet", base, firstStreamSequence, lastStreamSequence, partSHA256), nil
 }
 
-// ReplayPartObjectKey derives the exact campaign-relative Parquet key from
+// ReplayPartObjectKey derives the exact scope-relative Parquet key from
 // the verified replay scope, row range, and content hash.
 func ReplayPartObjectKey(scope ReplayScope, firstStreamSequence, lastStreamSequence uint64, partSHA256 [32]byte) (string, error) {
 	return replayPartObjectKey(scope, firstStreamSequence, lastStreamSequence, partSHA256)
@@ -561,7 +557,7 @@ func ReplayPartObjectKey(scope ReplayScope, firstStreamSequence, lastStreamSeque
 
 func partManifestKeyFromDigest(part PartManifest, digest [32]byte) (string, error) {
 	scope := ReplayScope{
-		DatasetID: part.DatasetID, CampaignID: part.CampaignID, DayDefinitionID: part.DayDefinitionID,
+		DatasetID: part.DatasetID, DayDefinitionID: part.DayDefinitionID,
 		Date: part.Date, ReplayContractID: part.ReplayContractID, ConversionID: part.ConversionID,
 		RawDayManifestKey: part.RawDayManifestKey, RawDayManifestSHA256: part.RawDayManifestSHA256,
 	}
@@ -599,7 +595,7 @@ func ReplayDayManifestKey(m ReplayDayManifest) (string, error) {
 		return "", err
 	}
 	scope := ReplayScope{
-		DatasetID: m.DatasetID, CampaignID: m.CampaignID, DayDefinitionID: m.DayDefinitionID,
+		DatasetID: m.DatasetID, DayDefinitionID: m.DayDefinitionID,
 		Date: m.Date, ReplayContractID: m.ReplayContractID, ConversionID: m.ConversionID,
 		RawDayManifestKey: m.RawDayManifestKey, RawDayManifestSHA256: m.RawDayManifestSHA256,
 	}
@@ -661,8 +657,7 @@ func PartSetRoot(parts []PartManifest) ([32]byte, error) {
 }
 
 func samePartBinding(left, right PartManifest) bool {
-	return left.DatasetID == right.DatasetID && left.CampaignID == right.CampaignID &&
-		left.DayDefinitionID == right.DayDefinitionID && left.Date == right.Date &&
+	return left.DatasetID == right.DatasetID && left.DayDefinitionID == right.DayDefinitionID && left.Date == right.Date &&
 		left.ReplayContractID == right.ReplayContractID && left.FormatID == right.FormatID &&
 		left.ConversionID == right.ConversionID && left.ConverterBuildID == right.ConverterBuildID &&
 		left.DependencyLockHash == right.DependencyLockHash &&
@@ -676,7 +671,6 @@ type ReplayDayManifest struct {
 	ManifestVersion             string
 	ManifestID                  string
 	DatasetID                   string
-	CampaignID                  string
 	DayDefinitionID             string
 	Date                        string
 	Revision                    uint64
@@ -724,7 +718,7 @@ func (m ReplayDayManifest) Validate() error {
 		return fmt.Errorf("invalid replay format or completeness")
 	}
 	for name, value := range map[string]string{
-		"dataset_id": m.DatasetID, "campaign_id": m.CampaignID, "day_definition_id": m.DayDefinitionID,
+		"dataset_id": m.DatasetID, "day_definition_id": m.DayDefinitionID,
 		"date": m.Date, "replay_contract_id": m.ReplayContractID, "conversion_id": m.ConversionID,
 		"converter_build_id": m.ConverterBuildID, "target_platform_contract": m.TargetPlatformContract,
 	} {
@@ -747,7 +741,7 @@ func (m ReplayDayManifest) Validate() error {
 		return fmt.Errorf("non-empty replay manifest must have nonzero roots")
 	}
 	scope := ReplayScope{
-		DatasetID: m.DatasetID, CampaignID: m.CampaignID, DayDefinitionID: m.DayDefinitionID,
+		DatasetID: m.DatasetID, DayDefinitionID: m.DayDefinitionID,
 		Date: m.Date, ReplayContractID: m.ReplayContractID, ConversionID: m.ConversionID,
 		RawDayManifestKey: m.RawDayManifestKey, RawDayManifestSHA256: m.RawDayManifestSHA256,
 	}
@@ -788,7 +782,6 @@ func validPartManifestKeyShape(base, key string) bool {
 
 func (m ReplayDayManifest) canonicalValue() map[string]any {
 	value := map[string]any{
-		"campaign_id":                     m.CampaignID,
 		"canonical_stream_row_chain_root": hex.EncodeToString(m.CanonicalStreamRowChainRoot[:]),
 		"completeness_status":             m.CompletenessStatus,
 		"conversion_id":                   m.ConversionID,

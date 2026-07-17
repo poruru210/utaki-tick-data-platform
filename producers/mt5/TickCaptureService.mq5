@@ -30,7 +30,6 @@ input string InpProducerBuildID="tick-capture-mt5-v1";
 input string InpMQLCompilerBuild="metaeditor-build";
 input string InpOSContract="windows-loopback-tcp";
 input string InpClockAPIID="TimeGMT+GetMicrosecondCount";
-input string InpCampaignID="campaign-local-01";
 input string InpProviderID="broker-provider";
 input string InpStableFeedID="broker-feed-01";
 input string InpBrokerServerFingerprint="broker-server-local-01";
@@ -203,7 +202,6 @@ bool EncodeHelloFrameV1(string producer_instance_id,
                         string terminal_build,
                         string os_contract,
                         string clock_api_id,
-                        string campaign_id,
                         string provider_id,
                         string stable_feed_id,
                         string broker_server_fingerprint,
@@ -214,8 +212,8 @@ bool EncodeHelloFrameV1(string producer_instance_id,
                         uchar &frame[])
   {
    uchar payload[];
-   string fields[12]={producer_instance_id,producer_session_id,producer_build_id,
-      mql_compiler_build,terminal_build,os_contract,clock_api_id,campaign_id,
+   string fields[11]={producer_instance_id,producer_session_id,producer_build_id,
+      mql_compiler_build,terminal_build,os_contract,clock_api_id,
       provider_id,stable_feed_id,broker_server_fingerprint,exact_source_symbol};
    for(int i=0;i<ArraySize(fields);i++)
       if(!AppendString(payload,fields[i]))
@@ -444,7 +442,7 @@ bool SendHelloAndReadResume(int socket,string producer_session_id,string &sessio
    uchar hello[];
    string terminal_build=IntegerToString((long)TerminalInfoInteger(TERMINAL_BUILD));
    if(!EncodeHelloFrameV1(InpProducerInstanceID,producer_session_id,InpProducerBuildID,
-      InpMQLCompilerBuild,terminal_build,InpOSContract,InpClockAPIID,InpCampaignID,
+      InpMQLCompilerBuild,terminal_build,InpOSContract,InpClockAPIID,
       InpProviderID,InpStableFeedID,InpBrokerServerFingerprint,InpExactSourceSymbol,
       1,InpInitialFromMSC,0,hello))
       return false;

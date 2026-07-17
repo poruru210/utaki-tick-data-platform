@@ -121,8 +121,7 @@ func OpenVerifiedReplaySource(input ReplaySourceInput) (continuity.VerifiedBatch
 		return nil, fmt.Errorf("%w: replay contract and conversion are required", ErrIntegrity)
 	}
 	scope := protocol.ReplayScope{
-		DatasetID: input.Scope.DatasetID, CampaignID: input.Scope.CampaignID,
-		DayDefinitionID: input.Scope.DayDefinitionID, Date: manifest.Date,
+		DatasetID: input.Scope.DatasetID, DayDefinitionID: input.Scope.DayDefinitionID, Date: manifest.Date,
 		ReplayContractID: input.ReplayContractID, ConversionID: input.ConversionID,
 		RawDayManifestKey: relativeManifestKey, RawDayManifestSHA256: manifest.ManifestSHA256,
 	}
@@ -162,8 +161,8 @@ func OpenVerifiedReplaySource(input ReplaySourceInput) (continuity.VerifiedBatch
 	return &verifiedReplaySource{
 		scope: scope, maxRecords: input.Scope.ProtocolLimits.MaxRecords,
 		producerIdentity: continuity.ProducerIdentity{
-			ProducerInstanceID: input.ProducerInstanceID,
-			CampaignID:         input.Scope.CampaignID, ProviderID: input.Scope.ProviderID,
+			ProducerInstanceID:      input.ProducerInstanceID,
+			ProviderID:              input.Scope.ProviderID,
 			StableFeedID:            input.Scope.StableFeedID,
 			BrokerServerFingerprint: input.Scope.BrokerServerFingerprint,
 			ExactSourceSymbol:       input.Scope.ExactSourceSymbol,
@@ -442,7 +441,7 @@ func verifyReplaySnapshot(manifest, expanded RawDayManifest, objectPaths map[str
 	if err != nil {
 		return fmt.Errorf("%w: scope config hash cannot be computed: %v", ErrIntegrity, err)
 	}
-	if manifest.DatasetID != normalizedScope.DatasetID || manifest.CampaignID != normalizedScope.CampaignID ||
+	if manifest.DatasetID != normalizedScope.DatasetID ||
 		manifest.DayDefinitionID != normalizedScope.DayDefinitionID || manifest.PublisherID != normalizedScope.PublisherID ||
 		manifest.PublisherEpoch != normalizedScope.PublisherEpoch || manifest.SettlePolicy != normalizedScope.SettlePolicy ||
 		manifest.ConfigHash != configHash {
@@ -524,7 +523,7 @@ func preflightReplayObjectFiles(manifest RawDayManifest, objectPaths map[string]
 func canonicalRawDayManifest(input RawDayManifest, selection daySelection, objects []RawObject) (RawDayManifest, error) {
 	canonical := RawDayManifest{
 		ManifestVersion: input.ManifestVersion, ManifestID: input.ManifestID,
-		DatasetID: input.DatasetID, CampaignID: input.CampaignID, DayDefinitionID: input.DayDefinitionID,
+		DatasetID: input.DatasetID, DayDefinitionID: input.DayDefinitionID,
 		Date: input.Date, Revision: input.Revision, PublisherID: input.PublisherID, PublisherEpoch: input.PublisherEpoch,
 		ConfigHash: input.ConfigHash, ProtocolVersion: input.ProtocolVersion, SourceSchemaID: input.SourceSchemaID,
 		WALSchemaID: input.WALSchemaID, TerminalSyncStatus: input.TerminalSyncStatus, SettlePolicy: input.SettlePolicy,

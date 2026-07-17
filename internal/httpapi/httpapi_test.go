@@ -18,7 +18,7 @@ import (
 type stubReader struct {
 	datasets         []delivery.DatasetDescriptor
 	listDatasetsFn   func(context.Context) ([]delivery.DatasetDescriptor, error)
-	campaigns        []delivery.CampaignDescriptor
+	scopes           []delivery.ScopeDescriptor
 	rawSnapshots     []delivery.SnapshotDescriptor
 	replay           []delivery.ReplaySnapshotDescriptor
 	resolvedRaw      delivery.ResolvedSnapshot
@@ -39,8 +39,8 @@ func (s *stubReader) ListDatasets(ctx context.Context) ([]delivery.DatasetDescri
 	}
 	return s.datasets, nil
 }
-func (s *stubReader) ListCampaigns(context.Context, string) ([]delivery.CampaignDescriptor, error) {
-	return s.campaigns, nil
+func (s *stubReader) ListScopes(context.Context, string) ([]delivery.ScopeDescriptor, error) {
+	return s.scopes, nil
 }
 func (s *stubReader) ListRawSnapshots(context.Context, delivery.RawDayScope) ([]delivery.SnapshotDescriptor, error) {
 	return s.rawSnapshots, nil
@@ -62,8 +62,8 @@ func (s *stubReader) Fetch(context.Context, delivery.FetchPlan, string) (deliver
 func (s *stubReader) VerifyDay(context.Context, delivery.SnapshotSelector) (delivery.DayVerificationReport, error) {
 	return delivery.DayVerificationReport{}, nil
 }
-func (s *stubReader) VerifyCampaign(context.Context, string, string, string) (delivery.CampaignVerificationReport, error) {
-	return delivery.CampaignVerificationReport{}, nil
+func (s *stubReader) VerifyScope(context.Context, delivery.RawScopeSelector, string) (delivery.ScopeVerificationReport, error) {
+	return delivery.ScopeVerificationReport{}, nil
 }
 func (s *stubReader) ListReplaySnapshots(context.Context, delivery.ReplayDayScope) ([]delivery.ReplaySnapshotDescriptor, error) {
 	return s.replay, nil
@@ -91,9 +91,9 @@ func newHTTPAPIStub() *stubReader {
 	digest[0] = 1
 	return &stubReader{
 		datasets:       []delivery.DatasetDescriptor{{DatasetID: "dataset-1"}},
-		campaigns:      []delivery.CampaignDescriptor{{DatasetID: "dataset-1", CampaignID: "campaign-1", ProviderID: "provider-1", StableFeedID: "feed-1", ExactSourceSymbol: "EURUSD.raw", BrokerServerFingerprint: "broker-1", DayDefinitionID: "utc-day-v1", PublisherID: "publisher-1", PublisherEpoch: 1, ConfigHash: digest}},
-		rawSnapshots:   []delivery.SnapshotDescriptor{{DatasetID: "dataset-1", CampaignID: "campaign-1", DayDefinitionID: "utc-day-v1", Date: "2024-01-01", Revision: 1, PublisherID: "publisher-1", PublisherEpoch: 1, ManifestKey: "v1/raw-manifest", ManifestSHA256: digest, ChainSliceStart: 1, ChainSliceStartRoot: digest, ChainSliceEnd: 1, ChainSliceEndRoot: digest, AcceptedRecordCount: 2}},
-		replay:         []delivery.ReplaySnapshotDescriptor{{DatasetID: "dataset-1", CampaignID: "campaign-1", DayDefinitionID: "utc-day-v1", Date: "2024-01-01", ReplayContractID: "replay-v1", ConversionID: "conversion-v1", Revision: 1, ManifestKey: "v1/replay-manifest", ManifestSHA256: digest, RawDayManifestKey: "v1/raw-manifest", RawDayManifestSHA256: digest, PartSetRoot: digest, CanonicalStreamRowChainRoot: digest, PartCount: 1}},
+		scopes:         []delivery.ScopeDescriptor{{DatasetID: "dataset-1", ProviderID: "source-1", StableFeedID: "feed-1", ExactSourceSymbol: "EURUSD.raw", BrokerServerFingerprint: "broker-1", DayDefinitionID: "utc-day-v1", PublisherID: "publisher-1", PublisherEpoch: 1, ConfigHash: digest}},
+		rawSnapshots:   []delivery.SnapshotDescriptor{{DatasetID: "dataset-1", ProviderID: "source-1", ExactSourceSymbol: "EURUSD.raw", DayDefinitionID: "utc-day-v1", Date: "2024-01-01", Revision: 1, PublisherID: "publisher-1", PublisherEpoch: 1, ManifestKey: "v1/raw-manifest", ManifestSHA256: digest, ChainSliceStart: 1, ChainSliceStartRoot: digest, ChainSliceEnd: 1, ChainSliceEndRoot: digest, AcceptedRecordCount: 2}},
+		replay:         []delivery.ReplaySnapshotDescriptor{{DatasetID: "dataset-1", ProviderID: "source-1", ExactSourceSymbol: "EURUSD.raw", DayDefinitionID: "utc-day-v1", Date: "2024-01-01", ReplayContractID: "replay-v1", ConversionID: "conversion-v1", Revision: 1, ManifestKey: "v1/replay-manifest", ManifestSHA256: digest, RawDayManifestKey: "v1/raw-manifest", RawDayManifestSHA256: digest, PartSetRoot: digest, CanonicalStreamRowChainRoot: digest, PartCount: 1}},
 		resolvedRaw:    delivery.ResolvedSnapshot{Manifest: archive.RawDayManifest{Revision: 1, Date: "2024-01-01"}, ManifestKey: "v1/raw-manifest", ManifestBytes: []byte(`{"manifest":"raw"}`), ManifestSHA256: digest},
 		rawPlan:        delivery.FetchPlan{ManifestKey: "v1/raw-manifest", ManifestSHA256: digest, ManifestBytes: []byte(`{"manifest":"raw"}`), Objects: []delivery.FetchObject{{Key: "raw/object", SHA256: digest, Bytes: 12}}},
 		resolvedReplay: delivery.ResolvedReplaySnapshot{Manifest: protocol.ReplayDayManifest{Revision: 1, Date: "2024-01-01"}, ManifestKey: "v1/replay-manifest", ManifestBytes: []byte(`{"manifest":"replay"}`), ManifestSHA256: digest},
@@ -129,9 +129,9 @@ func TestHTTPAPIMapsReaderAndPlanContracts(t *testing.T) {
 		body   string
 	}{
 		{name: "datasets", method: http.MethodGet, path: "/v1/datasets"},
-		{name: "campaigns", method: http.MethodGet, path: "/v1/datasets/dataset-1/campaigns"},
-		{name: "raw snapshots", method: http.MethodGet, path: "/v1/snapshots/raw?dataset=dataset-1&campaign=campaign-1&date=2024-01-01"},
-		{name: "replay snapshots", method: http.MethodGet, path: "/v1/snapshots/replay?dataset=dataset-1&campaign=campaign-1&date=2024-01-01&stream=replay-v1&conversion=conversion-v1"},
+		{name: "scopes", method: http.MethodGet, path: "/v1/datasets/dataset-1/scopes"},
+		{name: "raw snapshots", method: http.MethodGet, path: "/v1/snapshots/raw?dataset=dataset-1&source=source-1&symbol=EURUSD.raw&date=2024-01-01"},
+		{name: "replay snapshots", method: http.MethodGet, path: "/v1/snapshots/replay?dataset=dataset-1&source=source-1&symbol=EURUSD.raw&date=2024-01-01&stream=replay-v1&conversion=conversion-v1"},
 		{name: "manifest", method: http.MethodGet, path: "/v1/manifests/0100000000000000000000000000000000000000000000000000000000000000"},
 		{name: "health", method: http.MethodGet, path: "/v1/health"},
 	} {
@@ -184,7 +184,7 @@ func TestHTTPAPIMapsReaderAndPlanContracts(t *testing.T) {
 func TestHTTPAPIRejectsUnboundedAndUnsafeRequests(t *testing.T) {
 	reader := newHTTPAPIStub()
 	limits := operations.DefaultResourceLimits
-	limits.MaxAPIRequestBytes = 64
+	limits.MaxAPIRequestBytes = 128
 	handler, err := NewHandler(reader, Config{Version: APIConfigVersion, ReaderConfig: "reader.toml", ListenAddress: "127.0.0.1:17002", Limits: limits})
 	if err != nil {
 		t.Fatal(err)
@@ -192,10 +192,10 @@ func TestHTTPAPIRejectsUnboundedAndUnsafeRequests(t *testing.T) {
 	if response := request(t, handler, http.MethodGet, "/v1/datasets?unexpected=x", ""); response.Code != http.StatusBadRequest {
 		t.Fatalf("unknown query status=%d", response.Code)
 	}
-	if response := request(t, handler, http.MethodGet, "/v1/snapshots/raw?dataset=dataset-1&campaign=campaign-1&date=2024-02-30", ""); response.Code != http.StatusBadRequest {
+	if response := request(t, handler, http.MethodGet, "/v1/snapshots/raw?dataset=dataset-1&source=source-1&symbol=EURUSD.raw&date=2024-02-30", ""); response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid date status=%d", response.Code)
 	}
-	if response := request(t, handler, http.MethodGet, "/v1/snapshots/raw?dataset=a%2Fb&campaign=c", ""); response.Code != http.StatusBadRequest {
+	if response := request(t, handler, http.MethodGet, "/v1/snapshots/raw?dataset=a%2Fb&source=s&symbol=EURUSD", ""); response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid identity status=%d", response.Code)
 	}
 	if response := request(t, handler, http.MethodPost, "/v1/fetch-plans", strings.Repeat("x", 128)); response.Code != http.StatusRequestEntityTooLarge && response.Code != http.StatusBadRequest {

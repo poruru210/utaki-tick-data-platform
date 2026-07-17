@@ -206,7 +206,6 @@ def test_replay_v1_conformance_matches_golden() -> None:
     manifest = fixture["replay_manifest"]
     for key in (
         "dataset_id",
-        "campaign_id",
         "day_definition_id",
         "date",
         "replay_contract_id",
@@ -377,7 +376,7 @@ def test_python_part_manifest_rejects_zero_bytes_and_successor_zero_predecessor(
     ("key", "value"),
     (
         ("date", "2024-03-10"),
-        ("campaign_id", "campaign-other"),
+        ("day_definition_id", "utc-day-v2"),
         ("conversion_id", "conversion-v2"),
         (
             "raw_day_manifest_key",

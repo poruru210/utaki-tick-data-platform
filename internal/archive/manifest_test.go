@@ -157,20 +157,20 @@ func TestBuildRawDayManifestRevisionChainAndScopeDescriptor(t *testing.T) {
 	}
 
 	descriptorRoot := t.TempDir()
-	if _, err := archive.EnsureCampaignScopeDescriptor(descriptorRoot, scope); err != nil {
+	if _, err := archive.EnsureScopeDescriptor(descriptorRoot, scope); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := archive.EnsureCampaignScopeDescriptor(descriptorRoot, scope); err != nil {
+	if _, err := archive.EnsureScopeDescriptor(descriptorRoot, scope); err != nil {
 		t.Fatal(err)
 	}
 	different := scope
-	different.ExactSourceSymbol = "EURUSD"
-	if _, err := archive.EnsureCampaignScopeDescriptor(descriptorRoot, different); !errors.Is(err, archive.ErrIntegrity) {
+	different.PublisherID = "publisher-other"
+	if _, err := archive.EnsureScopeDescriptor(descriptorRoot, different); !errors.Is(err, archive.ErrIntegrity) {
 		t.Fatalf("different scope content error = %v, want ErrIntegrity", err)
 	}
 }
 
-func TestBuildRawDayManifestRejectsDiscontinuousCampaignSegments(t *testing.T) {
+func TestBuildRawDayManifestRejectsDiscontinuousScopeSegments(t *testing.T) {
 	first := promoteTestObject(t, testFrame(t, time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli(), 1), nil)
 	second := promoteTestObject(t, testFrame(t, time.Date(2024, 3, 9, 0, 0, 2, 0, time.UTC).UnixMilli(), 2), nil)
 	input := archive.RawDayManifestInput{
@@ -182,14 +182,14 @@ func TestBuildRawDayManifestRejectsDiscontinuousCampaignSegments(t *testing.T) {
 		LogicalCloseTimeS:  1710003600,
 	}
 	if _, err := archive.BuildRawDayManifest(input); !errors.Is(err, archive.ErrIntegrity) {
-		t.Fatalf("discontinuous campaign error = %v, want ErrIntegrity", err)
+		t.Fatalf("discontinuous scope error = %v, want ErrIntegrity", err)
 	}
 }
 
 func TestRawDayManifestChainObjectsContainCrossDayMiddleObject(t *testing.T) {
 	dayA := time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli()
 	dayB := time.Date(2024, 3, 10, 0, 0, 1, 0, time.UTC).UnixMilli()
-	objects := promoteCampaignObjects(t, []int64{dayA, dayB, dayA})
+	objects := promoteScopeObjects(t, []int64{dayA, dayB, dayA})
 	input := archive.RawDayManifestInput{
 		Scope:              testScope(),
 		Date:               "2024-03-09",
@@ -243,7 +243,7 @@ func TestRawDayManifestChainObjectsContainCrossDayMiddleObject(t *testing.T) {
 
 func TestVerifyRawDaySnapshotRejectsMissingTamperedFalseBoundaryAndCrossArray(t *testing.T) {
 	day := time.Date(2024, 3, 9, 0, 0, 1, 0, time.UTC).UnixMilli()
-	objects := promoteCampaignObjects(t, []int64{day, day + 1000, day})
+	objects := promoteScopeObjects(t, []int64{day, day + 1000, day})
 	input := archive.RawDayManifestInput{
 		Scope:              testScope(),
 		Date:               "2024-03-09",
@@ -387,9 +387,7 @@ func TestVerifyGoldenRawDayManifest(t *testing.T) {
 
 func testScope() archive.ScopeConfig {
 	return archive.ScopeConfig{
-		DatasetID:               "dataset-demo",
-		CampaignID:              "campaign-demo",
-		ProviderID:              "provider-demo",
+		DatasetID: "dataset-demo", ProviderID: "provider-demo",
 		StableFeedID:            "feed-demo",
 		ExactSourceSymbol:       "EURUSD.raw",
 		BrokerServerFingerprint: "server-fingerprint",
@@ -411,7 +409,7 @@ func inputForObjects(base archive.RawDayManifestInput, objects []archive.RawObje
 	return base
 }
 
-func promoteCampaignObjects(t *testing.T, times []int64) []archive.RawObject {
+func promoteScopeObjects(t *testing.T, times []int64) []archive.RawObject {
 	t.Helper()
 	root := t.TempDir()
 	outbox := t.TempDir()

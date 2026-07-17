@@ -33,7 +33,6 @@ type WALRange struct {
 
 type ReplayIdentity struct {
 	DatasetID                   string
-	CampaignID                  string
 	Date                        string
 	ManifestKey                 string
 	ManifestSHA256              [32]byte
@@ -102,7 +101,6 @@ func (w WALRange) value() map[string]any {
 
 func (r ReplayIdentity) value() map[string]any {
 	return map[string]any{
-		"campaign_id":                     r.CampaignID,
 		"canonical_stream_row_chain_root": protocol.EncodeHashHex(r.CanonicalStreamRowChainRoot),
 		"dataset_id":                      r.DatasetID,
 		"date":                            r.Date,
@@ -195,7 +193,7 @@ func (r RetentionProof) Validate() error {
 		}
 	}
 	if r.Replay != nil {
-		for name, value := range map[string]string{"dataset_id": r.Replay.DatasetID, "campaign_id": r.Replay.CampaignID, "date": r.Replay.Date, "manifest_key": r.Replay.ManifestKey} {
+		for name, value := range map[string]string{"dataset_id": r.Replay.DatasetID, "date": r.Replay.Date, "manifest_key": r.Replay.ManifestKey} {
 			if value == "" {
 				return fmt.Errorf("replay %s is required", name)
 			}
@@ -393,7 +391,7 @@ var walRangeKeys = map[string]bool{
 }
 
 var replayIdentityKeys = map[string]bool{
-	"campaign_id": true, "canonical_stream_row_chain_root": true, "dataset_id": true,
+	"canonical_stream_row_chain_root": true, "dataset_id": true,
 	"date": true, "manifest_key": true, "manifest_sha256": true, "part_set_root": true,
 }
 
@@ -504,9 +502,6 @@ func DecodeRetentionProof(data []byte) (RetentionProof, error) {
 		}
 		result.Replay = &ReplayIdentity{}
 		if result.Replay.DatasetID, err = stringField(replayObject, "dataset_id"); err != nil {
-			return RetentionProof{}, err
-		}
-		if result.Replay.CampaignID, err = stringField(replayObject, "campaign_id"); err != nil {
 			return RetentionProof{}, err
 		}
 		if result.Replay.Date, err = stringField(replayObject, "date"); err != nil {

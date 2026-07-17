@@ -1,278 +1,277 @@
 {
-    "fixture_version": "tick-data-platform.fixture.v1",
-    "fixture_id": "replay-publication-v1-conformance",
-    "expected_result": "accepted",
-    "bundle": {
-        "bundle_version": "replay-publication-bundle-v1",
+  "bundle": {
+    "bundle_version": "replay-publication-bundle-v1",
+    "canonical_stream_row_chain_root": "9999999999999999999999999999999999999999999999999999999999999999",
+    "claim": {
+      "canonical_json": "{\"broker_server_fingerprint\":\"b\",\"claim_version\":\"publisher-claim-v1\",\"config_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"dataset_id\":\"d\",\"day_definition_id\":\"u\",\"exact_source_symbol\":\"X\",\"provider_id\":\"p\",\"publisher_epoch\":7,\"publisher_id\":\"w\",\"scope_key\":\"s\",\"settle_policy\":\"z\",\"stable_feed_id\":\"f\"}",
+      "domain_digest": "f06cb6b4aaabd25e92b4990da082fe3b99979d7f067fccdfb2a57823ac9da84f",
+      "full_key": "i/publisher-claims/epoch=7.json"
+    },
+    "conversion": {
+      "conversion_id": "v",
+      "converter_build_id": "build",
+      "dependency_lock_hash": "6666666666666666666666666666666666666666666666666666666666666666",
+      "format_id": "ticks-parquet-v1",
+      "max_canonical_bytes_per_part": 1048576,
+      "max_rows_per_part": 10000,
+      "max_rows_per_row_group": 1000,
+      "replay_contract_id": "r",
+      "target_platform_contract": "linux-amd64",
+      "writer_configuration_hash": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    "limits": {
+      "max_graph_nodes": 50000,
+      "max_list_objects": 50000,
+      "max_metadata_object_bytes": 16777216,
+      "max_observation_bytes": 70368744177664,
+      "max_observation_requests": 100000,
+      "max_parquet_object_bytes": 1099511627776,
+      "max_parts": 10000,
+      "max_publication_rounds": 8,
+      "max_total_metadata_bytes": 268435456,
+      "max_total_parquet_bytes": 17592186044416
+    },
+    "parquet_objects": [
+      {
+        "bytes": 3000,
+        "first_stream_sequence": 0,
+        "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/parquet/0-9-2222222222222222222222222222222222222222222222222222222222222222.parquet",
+        "last_stream_sequence": 9,
+        "object_id": "q",
+        "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/parquet/0-9-2222222222222222222222222222222222222222222222222222222222222222.parquet",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    ],
+    "part_manifests": [
+      {
+        "bytes": 400,
+        "domain_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json",
+        "object_id": "m",
+        "part_sequence": 0,
+        "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json"
+      }
+    ],
+    "part_set_root": "8888888888888888888888888888888888888888888888888888888888888888",
+    "raw_manifest": {
+      "bytes": 1000,
+      "domain_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+      "full_key": "i/raw.json",
+      "relative_key": "raw.json",
+      "revision": 1
+    },
+    "raw_objects": [
+      {
+        "bytes": 2000,
+        "full_key": "i/objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
+        "relative_key": "objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    ],
+    "replay_manifest": {
+      "bytes": 1269,
+      "domain_digest": "e1b54bf3b4d8f980c32f3bcb85f5d055e5a4d8f5e4143f387f9945f6427d3436",
+      "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-e1b54bf3b4d8f980c32f3bcb85f5d055e5a4d8f5e4143f387f9945f6427d3436.json",
+      "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-e1b54bf3b4d8f980c32f3bcb85f5d055e5a4d8f5e4143f387f9945f6427d3436.json",
+      "revision": 1
+    },
+    "scope": {
+      "broker_server_fingerprint": "b",
+      "dataset_id": "d",
+      "date": "2024-03-09",
+      "day_definition_id": "u",
+      "exact_source_symbol": "X",
+      "immutable_prefix": "i",
+      "provider_id": "p",
+      "publisher_epoch": 7,
+      "publisher_id": "w",
+      "scope_config_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scope_key": "s",
+      "settle_policy": "z",
+      "stable_feed_id": "f"
+    }
+  },
+  "expected_result": "accepted",
+  "final_observation": {
+    "bundle_digest": "7ff8326a1b9825cc46fec627598d654b293b164c0aaa264c51fd073440b23dc9",
+    "claim": {
+      "canonical_json": "{\"broker_server_fingerprint\":\"b\",\"claim_version\":\"publisher-claim-v1\",\"config_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"dataset_id\":\"d\",\"day_definition_id\":\"u\",\"exact_source_symbol\":\"X\",\"provider_id\":\"p\",\"publisher_epoch\":7,\"publisher_id\":\"w\",\"scope_key\":\"s\",\"settle_policy\":\"z\",\"stable_feed_id\":\"f\"}",
+      "domain_digest": "f06cb6b4aaabd25e92b4990da082fe3b99979d7f067fccdfb2a57823ac9da84f",
+      "full_key": "i/publisher-claims/epoch=7.json"
+    },
+    "complete": true,
+    "derivative_objects": [
+      {
+        "bytes": 400,
+        "digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "digest_domain": "part-manifest-v1",
+        "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json",
+        "kind": "part_manifest"
+      },
+      {
+        "bytes": 3000,
+        "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "digest_domain": "sha256",
+        "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/parquet/0-9-2222222222222222222222222222222222222222222222222222222222222222.parquet",
+        "kind": "parquet"
+      },
+      {
+        "bytes": 1269,
+        "digest": "e1b54bf3b4d8f980c32f3bcb85f5d055e5a4d8f5e4143f387f9945f6427d3436",
+        "digest_domain": "replay-day-manifest-v1",
+        "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-e1b54bf3b4d8f980c32f3bcb85f5d055e5a4d8f5e4143f387f9945f6427d3436.json",
+        "kind": "replay_manifest"
+      }
+    ],
+    "observation_bytes": 20000,
+    "observation_requests": 8,
+    "observation_version": "replay-publication-final-observation-v1",
+    "raw_manifest": {
+      "bytes": 1000,
+      "domain_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+      "full_key": "i/raw.json"
+    },
+    "raw_objects": [
+      {
+        "bytes": 2000,
+        "full_key": "i/objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    ],
+    "replay_edges": [
+      {
+        "canonical_json": "{\"canonical_stream_row_chain_root\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"completeness_status\":\"settled_snapshot\",\"conversion_id\":\"v\",\"converter_build_id\":\"build\",\"dataset_id\":\"d\",\"date\":\"2024-03-09\",\"day_definition_id\":\"u\",\"dependency_lock_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"format_id\":\"ticks-parquet-v1\",\"manifest_id\":\"publication-fixture\",\"manifest_version\":\"replay-day-manifest-v1\",\"part_manifest_keys\":[\"derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json\"],\"part_set_root\":\"8888888888888888888888888888888888888888888888888888888888888888\",\"previous_manifest_sha256\":null,\"raw_day_manifest_key\":\"raw.json\",\"raw_day_manifest_sha256\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"replay_contract_id\":\"r\",\"revision\":1,\"target_platform_contract\":\"linux-amd64\",\"writer_configuration_hash\":\"7777777777777777777777777777777777777777777777777777777777777777\"}",
         "canonical_stream_row_chain_root": "9999999999999999999999999999999999999999999999999999999999999999",
-        "claim": {
-            "canonical_json": "{\"broker_server_fingerprint\":\"b\",\"campaign_id\":\"c\",\"claim_version\":\"publisher-claim-v1\",\"config_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"dataset_id\":\"d\",\"day_definition_id\":\"u\",\"exact_source_symbol\":\"X\",\"provider_id\":\"p\",\"publisher_epoch\":7,\"publisher_id\":\"w\",\"scope_key\":\"s\",\"settle_policy\":\"z\",\"stable_feed_id\":\"f\"}",
-            "domain_digest": "528b1f0c098bbab6a3804116159c6bbb8e3b7b9fc43c8c4d59289d8544b56cf7",
-            "full_key": "i/publisher-claims/epoch=7.json"
-        },
-        "conversion": {
-            "conversion_id": "v",
-            "converter_build_id": "build",
-            "dependency_lock_hash": "6666666666666666666666666666666666666666666666666666666666666666",
-            "format_id": "ticks-parquet-v1",
-            "max_canonical_bytes_per_part": 1048576,
-            "max_rows_per_part": 10000,
-            "max_rows_per_row_group": 1000,
-            "replay_contract_id": "r",
-            "target_platform_contract": "linux-amd64",
-            "writer_configuration_hash": "7777777777777777777777777777777777777777777777777777777777777777"
-        },
-        "limits": {
-            "max_graph_nodes": 50000,
-            "max_list_objects": 50000,
-            "max_metadata_object_bytes": 16777216,
-            "max_observation_bytes": 70368744177664,
-            "max_observation_requests": 100000,
-            "max_parquet_object_bytes": 1099511627776,
-            "max_parts": 10000,
-            "max_publication_rounds": 8,
-            "max_total_metadata_bytes": 268435456,
-            "max_total_parquet_bytes": 17592186044416
-        },
-        "parquet_objects": [
-            {
-                "bytes": 3000,
-                "first_stream_sequence": 0,
-                "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/parquet/0-9-2222222222222222222222222222222222222222222222222222222222222222.parquet",
-                "last_stream_sequence": 9,
-                "object_id": "q",
-                "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/parquet/0-9-2222222222222222222222222222222222222222222222222222222222222222.parquet",
-                "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            }
-        ],
-        "part_manifests": [
-            {
-                "bytes": 400,
-                "domain_digest": "3333333333333333333333333333333333333333333333333333333333333333",
-                "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json",
-                "object_id": "m",
-                "part_sequence": 0,
-                "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json"
-            }
-        ],
+        "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-e1b54bf3b4d8f980c32f3bcb85f5d055e5a4d8f5e4143f387f9945f6427d3436.json",
+        "manifest_digest": "e1b54bf3b4d8f980c32f3bcb85f5d055e5a4d8f5e4143f387f9945f6427d3436",
+        "part_count": 1,
         "part_set_root": "8888888888888888888888888888888888888888888888888888888888888888",
-        "raw_manifest": {
-            "bytes": 1000,
-            "domain_digest": "5555555555555555555555555555555555555555555555555555555555555555",
-            "full_key": "i/raw.json",
-            "relative_key": "raw.json",
-            "revision": 1
-        },
-        "raw_objects": [
-            {
-                "bytes": 2000,
-                "full_key": "i/objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
-                "relative_key": "objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
-                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
-            }
-        ],
-        "replay_manifest": {
-            "bytes": 1287,
-            "domain_digest": "275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0",
-            "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0.json",
-            "relative_key": "derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0.json",
-            "revision": 1
-        },
-        "scope": {
-            "broker_server_fingerprint": "b",
-            "campaign_id": "c",
-            "dataset_id": "d",
-            "date": "2024-03-09",
-            "day_definition_id": "u",
-            "exact_source_symbol": "X",
-            "immutable_prefix": "i",
-            "provider_id": "p",
-            "publisher_epoch": 7,
-            "publisher_id": "w",
-            "scope_config_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "scope_key": "s",
-            "settle_policy": "z",
-            "stable_feed_id": "f"
-        }
-    },
-    "publication_bundle_digest": "a62c5aad1ea054b435e2467f4a3fdca1a7d12033f45ff2049655d173fe598db8",
-    "final_observation": {
-        "bundle_digest": "a62c5aad1ea054b435e2467f4a3fdca1a7d12033f45ff2049655d173fe598db8",
-        "claim": {
-            "canonical_json": "{\"broker_server_fingerprint\":\"b\",\"campaign_id\":\"c\",\"claim_version\":\"publisher-claim-v1\",\"config_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"dataset_id\":\"d\",\"day_definition_id\":\"u\",\"exact_source_symbol\":\"X\",\"provider_id\":\"p\",\"publisher_epoch\":7,\"publisher_id\":\"w\",\"scope_key\":\"s\",\"settle_policy\":\"z\",\"stable_feed_id\":\"f\"}",
-            "domain_digest": "528b1f0c098bbab6a3804116159c6bbb8e3b7b9fc43c8c4d59289d8544b56cf7",
-            "full_key": "i/publisher-claims/epoch=7.json"
-        },
-        "complete": true,
-        "derivative_objects": [
-            {
-                "bytes": 400,
-                "digest": "3333333333333333333333333333333333333333333333333333333333333333",
-                "digest_domain": "part-manifest-v1",
-                "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json",
-                "kind": "part_manifest"
-            },
-            {
-                "bytes": 3000,
-                "digest": "2222222222222222222222222222222222222222222222222222222222222222",
-                "digest_domain": "sha256",
-                "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/parquet/0-9-2222222222222222222222222222222222222222222222222222222222222222.parquet",
-                "kind": "parquet"
-            },
-            {
-                "bytes": 1287,
-                "digest": "275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0",
-                "digest_domain": "replay-day-manifest-v1",
-                "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0.json",
-                "kind": "replay_manifest"
-            }
-        ],
-        "observation_bytes": 20000,
-        "observation_requests": 8,
-        "observation_version": "replay-publication-final-observation-v1",
-        "raw_manifest": {
-            "bytes": 1000,
-            "domain_digest": "5555555555555555555555555555555555555555555555555555555555555555",
-            "full_key": "i/raw.json"
-        },
-        "raw_objects": [
-            {
-                "bytes": 2000,
-                "full_key": "i/objects/raw/wal-1111111111111111111111111111111111111111111111111111111111111111.rtw",
-                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
-            }
-        ],
-        "replay_edges": [
-            {
-                "canonical_json": "{\"campaign_id\":\"c\",\"canonical_stream_row_chain_root\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"completeness_status\":\"settled_snapshot\",\"conversion_id\":\"v\",\"converter_build_id\":\"build\",\"dataset_id\":\"d\",\"date\":\"2024-03-09\",\"day_definition_id\":\"u\",\"dependency_lock_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"format_id\":\"ticks-parquet-v1\",\"manifest_id\":\"publication-fixture\",\"manifest_version\":\"replay-day-manifest-v1\",\"part_manifest_keys\":[\"derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/manifests/part-00000000-3333333333333333333333333333333333333333333333333333333333333333.json\"],\"part_set_root\":\"8888888888888888888888888888888888888888888888888888888888888888\",\"previous_manifest_sha256\":null,\"raw_day_manifest_key\":\"raw.json\",\"raw_day_manifest_sha256\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"replay_contract_id\":\"r\",\"revision\":1,\"target_platform_contract\":\"linux-amd64\",\"writer_configuration_hash\":\"7777777777777777777777777777777777777777777777777777777777777777\"}",
-                "canonical_stream_row_chain_root": "9999999999999999999999999999999999999999999999999999999999999999",
-                "full_key": "i/derivatives/stream=454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1/format=ticks-parquet-v1/conversion=4c94485e0c21ae6c41ce1dfe7b6bfaceea5ab68e40a2476f50208e526f506080/day-definition=0bfe935e70c321c7ca3afc75ce0d0ca2f98b5422e008bb31c00c6d7f1f1c0ad6/date=2024-03-09/replay-day-1-275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0.json",
-                "manifest_digest": "275e44e13abf958b82badd5c5c7a6af260da7fa37d59d590431ef4b69aa512d0",
-                "part_count": 1,
-                "part_set_root": "8888888888888888888888888888888888888888888888888888888888888888",
-                "previous_manifest_digest": null,
-                "revision": 1
-            }
-        ]
-    },
-    "final_observation_digest": "1c7e2f9f149a67b6ba61d16a8522eb7e56bac834d352be68dbb0d756400554ff",
-    "negative_cases": [
-        {
-            "case_id": "unknown_key",
-            "target": "bundle",
-            "expected_error": "UNKNOWN_FIELD"
-        },
-        {
-            "case_id": "duplicate_key",
-            "target": "bundle",
-            "expected_error": "DUPLICATE_FIELD"
-        },
-        {
-            "case_id": "zero_digest",
-            "target": "bundle",
-            "expected_error": "ZERO_DIGEST"
-        },
-        {
-            "case_id": "wrong_domain",
-            "target": "bundle",
-            "expected_error": "WRONG_DOMAIN"
-        },
-        {
-            "case_id": "wrong_key",
-            "target": "bundle",
-            "expected_error": "WRONG_KEY"
-        },
-        {
-            "case_id": "scope_collision",
-            "target": "bundle",
-            "expected_error": "SCOPE_COLLISION"
-        },
-        {
-            "case_id": "raw_claim_missing",
-            "target": "bundle",
-            "expected_error": "RAW_CLAIM_MISSING"
-        },
-        {
-            "case_id": "oversized_aggregate",
-            "target": "bundle",
-            "expected_error": "RESOURCE_LIMIT"
-        },
-        {
-            "case_id": "noncanonical_bytes",
-            "target": "bundle",
-            "expected_error": "INVALID_CANONICAL_JSON"
-        },
-        {
-            "case_id": "invalid_utf8",
-            "target": "raw",
-            "expected_error": "INVALID_CANONICAL_JSON",
-            "raw_hex": "7b2262756e646c655f76657273696f6e223a22ff227d"
-        },
-        {
-            "case_id": "noncanonical_integer",
-            "target": "raw",
-            "expected_error": "INVALID_CANONICAL_JSON",
-            "raw_hex": "7b22636c61696d223a7b7d2c227075626c69736865725f65706f6368223a30317d"
-        },
-        {
-            "case_id": "incomplete_observation",
-            "target": "observation",
-            "expected_error": "INCOMPLETE_OBSERVATION"
-        },
-        {
-            "case_id": "missing_derivative",
-            "target": "observation",
-            "expected_error": "INCOMPLETE_OBSERVATION"
-        },
-        {
-            "case_id": "missing_edge_manifest",
-            "target": "observation",
-            "expected_error": "INCOMPLETE_OBSERVATION"
-        },
-        {
-            "case_id": "invalid_edge_manifest",
-            "target": "observation",
-            "expected_error": "INVALID_FIELD"
-        },
-        {
-            "case_id": "noncanonical_edge_manifest",
-            "target": "observation",
-            "expected_error": "INVALID_FIELD"
-        },
-        {
-            "case_id": "edge_key_mismatch",
-            "target": "observation",
-            "expected_error": "WRONG_KEY"
-        },
-        {
-            "case_id": "edge_digest_mismatch",
-            "target": "observation",
-            "expected_error": "WRONG_DOMAIN"
-        },
-        {
-            "case_id": "edge_revision_mismatch",
-            "target": "observation",
-            "expected_error": "INCOMPLETE_OBSERVATION"
-        },
-        {
-            "case_id": "edge_root_mismatch",
-            "target": "observation",
-            "expected_error": "INCOMPLETE_OBSERVATION"
-        },
-        {
-            "case_id": "terminal_shape_mismatch",
-            "target": "observation",
-            "expected_error": "INCOMPLETE_OBSERVATION"
-        },
-        {
-            "case_id": "nonempty_zero_roots",
-            "target": "observation",
-            "expected_error": "INVALID_FIELD"
-        },
-        {
-            "case_id": "mixed_root",
-            "target": "observation",
-            "expected_error": "INVALID_FIELD"
-        }
+        "previous_manifest_digest": null,
+        "revision": 1
+      }
     ]
+  },
+  "final_observation_digest": "0d796fbda645437852cf864480292da4d7eb357bac8c143efc82a4900703010d",
+  "fixture_id": "replay-publication-v1-conformance",
+  "fixture_version": "tick-data-platform.fixture.v1",
+  "negative_cases": [
+    {
+      "case_id": "unknown_key",
+      "expected_error": "UNKNOWN_FIELD",
+      "target": "bundle"
+    },
+    {
+      "case_id": "duplicate_key",
+      "expected_error": "DUPLICATE_FIELD",
+      "target": "bundle"
+    },
+    {
+      "case_id": "zero_digest",
+      "expected_error": "ZERO_DIGEST",
+      "target": "bundle"
+    },
+    {
+      "case_id": "wrong_domain",
+      "expected_error": "WRONG_DOMAIN",
+      "target": "bundle"
+    },
+    {
+      "case_id": "wrong_key",
+      "expected_error": "WRONG_KEY",
+      "target": "bundle"
+    },
+    {
+      "case_id": "scope_collision",
+      "expected_error": "SCOPE_COLLISION",
+      "target": "bundle"
+    },
+    {
+      "case_id": "raw_claim_missing",
+      "expected_error": "RAW_CLAIM_MISSING",
+      "target": "bundle"
+    },
+    {
+      "case_id": "oversized_aggregate",
+      "expected_error": "RESOURCE_LIMIT",
+      "target": "bundle"
+    },
+    {
+      "case_id": "noncanonical_bytes",
+      "expected_error": "INVALID_CANONICAL_JSON",
+      "target": "bundle"
+    },
+    {
+      "case_id": "invalid_utf8",
+      "expected_error": "INVALID_CANONICAL_JSON",
+      "raw_hex": "7b2262756e646c655f76657273696f6e223a22ff227d",
+      "target": "raw"
+    },
+    {
+      "case_id": "noncanonical_integer",
+      "expected_error": "INVALID_CANONICAL_JSON",
+      "raw_hex": "7b22636c61696d223a7b7d2c227075626c69736865725f65706f6368223a30317d",
+      "target": "raw"
+    },
+    {
+      "case_id": "incomplete_observation",
+      "expected_error": "INCOMPLETE_OBSERVATION",
+      "target": "observation"
+    },
+    {
+      "case_id": "missing_derivative",
+      "expected_error": "INCOMPLETE_OBSERVATION",
+      "target": "observation"
+    },
+    {
+      "case_id": "missing_edge_manifest",
+      "expected_error": "INCOMPLETE_OBSERVATION",
+      "target": "observation"
+    },
+    {
+      "case_id": "invalid_edge_manifest",
+      "expected_error": "INVALID_FIELD",
+      "target": "observation"
+    },
+    {
+      "case_id": "noncanonical_edge_manifest",
+      "expected_error": "INVALID_FIELD",
+      "target": "observation"
+    },
+    {
+      "case_id": "edge_key_mismatch",
+      "expected_error": "WRONG_KEY",
+      "target": "observation"
+    },
+    {
+      "case_id": "edge_digest_mismatch",
+      "expected_error": "WRONG_DOMAIN",
+      "target": "observation"
+    },
+    {
+      "case_id": "edge_revision_mismatch",
+      "expected_error": "INCOMPLETE_OBSERVATION",
+      "target": "observation"
+    },
+    {
+      "case_id": "edge_root_mismatch",
+      "expected_error": "INCOMPLETE_OBSERVATION",
+      "target": "observation"
+    },
+    {
+      "case_id": "terminal_shape_mismatch",
+      "expected_error": "INCOMPLETE_OBSERVATION",
+      "target": "observation"
+    },
+    {
+      "case_id": "nonempty_zero_roots",
+      "expected_error": "INVALID_FIELD",
+      "target": "observation"
+    },
+    {
+      "case_id": "mixed_root",
+      "expected_error": "INVALID_FIELD",
+      "target": "observation"
+    }
+  ],
+  "publication_bundle_digest": "7ff8326a1b9825cc46fec627598d654b293b164c0aaa264c51fd073440b23dc9"
 }

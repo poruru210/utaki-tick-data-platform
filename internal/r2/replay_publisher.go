@@ -82,7 +82,7 @@ func NewReplayPublisher(
 
 func (p *ReplayPublisher) Publish(ctx context.Context, input ReplayPublicationInput) (ReplayVerificationReceipt, error) {
 	// Static/local verification and Protocol budget feasibility occur before
-	// the campaign lock. No remote capability is available to the sealer.
+	// the publication lock. No remote capability is available to the sealer.
 	bundle, err := SealReplayPublicationBundle(ReplayPublicationBundleInput{
 		Layout: p.layout, Conversion: input.Conversion, Limits: input.Limits,
 		RawManifest: input.RawManifestBytes, RawObjectPaths: cloneStringMap(input.RawObjectPaths),
@@ -241,14 +241,14 @@ func verifyReplayLocalSources(bundle ReplayPublicationBundle) error {
 }
 
 type publisherObservationGuard struct {
-	lock         *CampaignLock
+	lock         *PublicationLock
 	bundleDigest [32]byte
 	released     bool
 }
 
 func (g *publisherObservationGuard) AssertHeld(bundle ReplayPublicationBundle) error {
 	if g == nil || g.released || g.lock == nil || !g.lock.Held() || bundle.Digest != g.bundleDigest {
-		return fmt.Errorf("replay publication campaign lock is not held")
+		return fmt.Errorf("replay publication lock is not held")
 	}
 	return nil
 }

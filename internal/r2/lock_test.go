@@ -7,7 +7,7 @@ import (
 )
 
 func TestPublicationLockRejectsSecondOwner(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "campaign.lock")
+	path := filepath.Join(t.TempDir(), "publication.lock")
 	first, err := AcquirePublicationLock(path)
 	if err != nil {
 		t.Fatal(err)

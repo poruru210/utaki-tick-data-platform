@@ -35,12 +35,9 @@ func Reduce(reader VerifiedBatchReader, sink RowSink) (Result, error) {
 		return Result{}, fmt.Errorf("replay scope: %w", err)
 	}
 	identity := reader.ProducerIdentity()
-	if identity.ProducerInstanceID == "" || identity.CampaignID == "" || identity.ProviderID == "" ||
+	if identity.ProducerInstanceID == "" || identity.ProviderID == "" ||
 		identity.StableFeedID == "" || identity.BrokerServerFingerprint == "" || identity.ExactSourceSymbol == "" {
 		return Result{}, fmt.Errorf("verified producer identity is incomplete")
-	}
-	if identity.CampaignID != scope.CampaignID {
-		return Result{}, fmt.Errorf("verified producer identity campaign mismatch")
 	}
 	maxRecords := reader.MaxRecords()
 	if maxRecords == 0 || maxRecords > protocol.MaxRecords {
@@ -144,7 +141,7 @@ func Reduce(reader VerifiedBatchReader, sink RowSink) (Result, error) {
 			return Result{}, fmt.Errorf("WAL sequence %d has no producer session identity", batch.GatewayIngestSequence)
 		}
 		wantLease := protocol.DeriveSessionLeaseID(
-			identity.ProducerInstanceID, sourceBatch.ProducerSessionID, identity.CampaignID,
+			identity.ProducerInstanceID, sourceBatch.ProducerSessionID,
 			identity.ProviderID, identity.StableFeedID, identity.BrokerServerFingerprint, identity.ExactSourceSymbol,
 		)
 		if sourceBatch.SessionLeaseID != wantLease {

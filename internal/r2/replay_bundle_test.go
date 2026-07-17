@@ -91,7 +91,7 @@ func TestSealReplayPublicationBundleDerivesAllRemoteKeysFromLayout(t *testing.T)
 			t.Fatalf("raw full key = %q, want %q, err=%v", object.FullKey, want, err)
 		}
 	}
-	if !strings.HasPrefix(sealed.Contract.ReplayManifest.FullKey, fixture.layout.ImmutableCampaignPrefix()+"/") {
+	if !strings.HasPrefix(sealed.Contract.ReplayManifest.FullKey, fixture.layout.ImmutableScopePrefix()+"/") {
 		t.Fatal("replay manifest key is not under trusted Layout prefix")
 	}
 }

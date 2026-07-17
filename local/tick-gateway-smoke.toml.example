@@ -14,7 +14,6 @@ heartbeat_idle_timeout_ms = 60000
 producer_instance_id = "mt5-r2-smoke-01"
 producer_build_id = "tick-capture-mt5-v1"
 dataset_id = "dataset-r2-smoke"
-campaign_id = "campaign-r2-smoke-01"
 provider_id = "broker-provider"
 stable_feed_id = "broker-feed-01"
 broker_server_fingerprint = "broker-server-smoke"

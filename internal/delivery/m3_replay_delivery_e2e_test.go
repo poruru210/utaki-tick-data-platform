@@ -194,7 +194,7 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	producerInstanceID := "m3-e2e-producer"
 	scope := archive.ScopeConfig{
-		DatasetID: "m3-e2e-dataset", CampaignID: "m3-e2e-campaign", ProviderID: "m3-e2e-provider",
+		DatasetID: "m3-e2e-dataset", ProviderID: "m3-e2e-provider",
 		StableFeedID: "m3-e2e-feed", ExactSourceSymbol: "EURUSD.e2e", BrokerServerFingerprint: "m3-e2e-server",
 		GatewayBuildIdentity: "m3-e2e-gateway", ProducerBuildIdentity: "m3-e2e-producer-build",
 		DayDefinitionID: "utc-day-v1", SettlePolicy: "manual-v1", PublisherID: "m3-e2e-publisher", PublisherEpoch: 1,
@@ -448,7 +448,14 @@ func TestM3ReplayDeliveryNetworkFreeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	readerWrites := backend.writeCount()
-	replayDayScope := ReplayDayScope{DatasetID: scope.DatasetID, CampaignID: scope.CampaignID, Date: manifest.Date, ReplayContractID: spec.ReplayContractID, ConversionID: spec.ConversionID}
+	replayDayScope := ReplayDayScope{
+		DatasetID:         scope.DatasetID,
+		ProviderID:        scope.ProviderID,
+		ExactSourceSymbol: scope.ExactSourceSymbol,
+		Date:              manifest.Date,
+		ReplayContractID:  spec.ReplayContractID,
+		ConversionID:      spec.ConversionID,
+	}
 	snapshots, err := reader.ListReplaySnapshots(ctx, replayDayScope)
 	if err != nil || len(snapshots) != 1 {
 		t.Fatalf("replay list = %+v err=%v", snapshots, err)
@@ -514,7 +521,7 @@ func buildM3E2ERawTruth(t *testing.T, scope archive.ScopeConfig, producerInstanc
 	batch.RequestedFromMSC = time.Date(2024, 3, 9, 0, 0, 0, 0, time.UTC).UnixMilli()
 	batch.Records[0].TimeMSC = batch.RequestedFromMSC + 100
 	batch.Records[0].CaptureSequence = 1
-	batch.SessionLeaseID = protocol.DeriveSessionLeaseID(producerInstanceID, batch.ProducerSessionID, scope.CampaignID, scope.ProviderID, scope.StableFeedID, scope.BrokerServerFingerprint, scope.ExactSourceSymbol)
+	batch.SessionLeaseID = protocol.DeriveSessionLeaseID(producerInstanceID, batch.ProducerSessionID, scope.ProviderID, scope.StableFeedID, scope.BrokerServerFingerprint, scope.ExactSourceSymbol)
 	encoded, err := protocol.EncodeMessage(batch)
 	if err != nil {
 		t.Fatal(err)

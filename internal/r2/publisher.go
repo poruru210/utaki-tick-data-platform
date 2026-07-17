@@ -394,7 +394,7 @@ func manifestMatchesScope(manifest archive.RawDayManifest, scope archive.ScopeCo
 	if err != nil {
 		return err
 	}
-	if manifest.DatasetID != scope.DatasetID || manifest.CampaignID != scope.CampaignID ||
+	if manifest.DatasetID != scope.DatasetID ||
 		manifest.DayDefinitionID != scope.DayDefinitionID || manifest.PublisherID != scope.PublisherID ||
 		manifest.PublisherEpoch != scope.PublisherEpoch || manifest.SettlePolicy != scope.SettlePolicy ||
 		manifest.ConfigHash != configHash {

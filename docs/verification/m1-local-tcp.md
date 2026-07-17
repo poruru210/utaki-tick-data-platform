@@ -2,7 +2,7 @@
 
 実施日は2026-07-15です。
 
-対象は、1つのproducer instance、1つのcampaign、1つのbroker feed、1つのexact symbolを固定したGo GatewayとMT5 Serviceのlocalhost TCP経路です。
+対象は、1つのproducer instance、1つのsource、1つのexact symbolを固定したGo GatewayとMT5 Serviceのlocalhost TCP経路です。
 
 R2、Parquet、HTTP delivery、local pruning、複数producer、24時間soakは対象外です。
 

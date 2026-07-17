@@ -280,7 +280,7 @@ func (r *archiveReaderV1) cacheReplayParquetPath(digest [32]byte) string {
 }
 
 func replayProtocolScope(manifest protocol.ReplayDayManifest) protocol.ReplayScope {
-	return protocol.ReplayScope{DatasetID: manifest.DatasetID, CampaignID: manifest.CampaignID, DayDefinitionID: manifest.DayDefinitionID, Date: manifest.Date, ReplayContractID: manifest.ReplayContractID, ConversionID: manifest.ConversionID, RawDayManifestKey: manifest.RawDayManifestKey, RawDayManifestSHA256: manifest.RawDayManifestSHA256}
+	return protocol.ReplayScope{DatasetID: manifest.DatasetID, DayDefinitionID: manifest.DayDefinitionID, Date: manifest.Date, ReplayContractID: manifest.ReplayContractID, ConversionID: manifest.ConversionID, RawDayManifestKey: manifest.RawDayManifestKey, RawDayManifestSHA256: manifest.RawDayManifestSHA256}
 }
 
 func replayConversion(manifest protocol.ReplayDayManifest) archive.ConversionTuple {

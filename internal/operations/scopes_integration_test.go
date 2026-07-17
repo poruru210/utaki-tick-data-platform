@@ -25,9 +25,7 @@ func integrationScopeConfig(t *testing.T, index int) operations.ScopeProcessConf
 	identity := string(rune('0' + index))
 	return operations.ScopeProcessConfig{
 		Scope: archive.ScopeConfig{
-			DatasetID:               "dataset-integration-" + identity,
-			CampaignID:              "campaign-integration-" + identity,
-			ProviderID:              "provider-integration-" + identity,
+			DatasetID: "dataset-integration-" + identity, ProviderID: "provider-integration-" + identity,
 			StableFeedID:            "feed-integration-" + identity,
 			ExactSourceSymbol:       "EURUSD.raw",
 			BrokerServerFingerprint: "broker-integration-" + identity,
@@ -62,20 +60,18 @@ type integrationGateway struct {
 func openIntegrationGateway(t *testing.T, scope operations.ScopeProcessConfig) integrationGateway {
 	t.Helper()
 	config := ingest.Config{
-		ListenAddress:           scope.ListenAddress,
-		GatewayInstanceID:       scope.GatewayInstanceID,
-		WALRoot:                 scope.WALRoot,
-		JournalPath:             scope.JournalPath,
-		MaxRecords:              4,
-		InitialBatchCount:       1,
-		MaximumBatchCount:       4,
-		DenseBoundaryHardCap:    4,
-		SessionLeaseTimeout:     5 * time.Second,
-		HeartbeatIdleTimeout:    5 * time.Second,
-		ProducerInstanceID:      "producer-" + scope.GatewayInstanceID,
-		ProducerBuildID:         "producer-build-1",
-		CampaignID:              scope.Scope.CampaignID,
-		ProviderID:              scope.Scope.ProviderID,
+		ListenAddress:        scope.ListenAddress,
+		GatewayInstanceID:    scope.GatewayInstanceID,
+		WALRoot:              scope.WALRoot,
+		JournalPath:          scope.JournalPath,
+		MaxRecords:           4,
+		InitialBatchCount:    1,
+		MaximumBatchCount:    4,
+		DenseBoundaryHardCap: 4,
+		SessionLeaseTimeout:  5 * time.Second,
+		HeartbeatIdleTimeout: 5 * time.Second,
+		ProducerInstanceID:   "producer-" + scope.GatewayInstanceID,
+		ProducerBuildID:      "producer-build-1", ProviderID: scope.Scope.ProviderID,
 		StableFeedID:            scope.Scope.StableFeedID,
 		BrokerServerFingerprint: scope.Scope.BrokerServerFingerprint,
 		ExactSourceSymbol:       scope.Scope.ExactSourceSymbol,
@@ -93,15 +89,13 @@ func openIntegrationGateway(t *testing.T, scope operations.ScopeProcessConfig) i
 	done := make(chan error, 1)
 	go func() { done <- gateway.HandleConn(ctx, server) }()
 	client, err := fake.New(clientConn, protocolv1.HelloV1{
-		ProducerInstanceID:      config.ProducerInstanceID,
-		ProducerSessionID:       "session-" + scope.GatewayInstanceID,
-		ProducerBuildID:         config.ProducerBuildID,
-		MQLCompilerBuild:        "fake",
-		TerminalBuild:           "fake",
-		OSContract:              "windows-test",
-		ClockAPIID:              "test-clock",
-		CampaignID:              config.CampaignID,
-		ProviderID:              config.ProviderID,
+		ProducerInstanceID: config.ProducerInstanceID,
+		ProducerSessionID:  "session-" + scope.GatewayInstanceID,
+		ProducerBuildID:    config.ProducerBuildID,
+		MQLCompilerBuild:   "fake",
+		TerminalBuild:      "fake",
+		OSContract:         "windows-test",
+		ClockAPIID:         "test-clock", ProviderID: config.ProviderID,
 		StableFeedID:            config.StableFeedID,
 		BrokerServerFingerprint: config.BrokerServerFingerprint,
 		ExactSourceSymbol:       config.ExactSourceSymbol,
@@ -162,8 +156,8 @@ func TestMultiScopeFailureDoesNotBlockOtherACKPath(t *testing.T) {
 	if err := os.MkdirAll(right.LockRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	leftLock := flock.New(filepath.Join(left.LockRoot, "campaign.lock"))
-	rightLock := flock.New(filepath.Join(right.LockRoot, "campaign.lock"))
+	leftLock := flock.New(filepath.Join(left.LockRoot, "publication.lock"))
+	rightLock := flock.New(filepath.Join(right.LockRoot, "publication.lock"))
 	leftLocked, err := leftLock.TryLock()
 	if err != nil || !leftLocked {
 		t.Fatalf("could not acquire left scope lock: locked=%v err=%v", leftLocked, err)

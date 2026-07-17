@@ -332,7 +332,6 @@ func toArchiveScope(configValue appconfig.Config) archive.ScopeConfig {
 	values := configValue.Gateway()
 	return archive.ScopeConfig{
 		DatasetID:               values.DatasetID,
-		CampaignID:              values.CampaignID,
 		ProviderID:              values.ProviderID,
 		StableFeedID:            values.StableFeedID,
 		ExactSourceSymbol:       values.ExactSourceSymbol,

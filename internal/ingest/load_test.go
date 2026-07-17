@@ -163,7 +163,6 @@ func loadGateConfig(t *testing.T) ingest.Config {
 	config.DenseBoundaryHardCap = 1
 	config.ProducerInstanceID = "producer-load-01"
 	config.ProducerBuildID = "producer-load-v1"
-	config.CampaignID = "campaign-load-01"
 	config.ProviderID = "provider-load"
 	config.StableFeedID = "feed-load"
 	config.BrokerServerFingerprint = "broker-load"
@@ -173,15 +172,13 @@ func loadGateConfig(t *testing.T) ingest.Config {
 
 func loadHello(config ingest.Config) protocolv1.HelloV1 {
 	return protocolv1.HelloV1{
-		ProducerInstanceID:      config.ProducerInstanceID,
-		ProducerSessionID:       "session-load-01",
-		ProducerBuildID:         config.ProducerBuildID,
-		MQLCompilerBuild:        "fake",
-		TerminalBuild:           "fake",
-		OSContract:              "linux-test",
-		ClockAPIID:              "load-test-clock",
-		CampaignID:              config.CampaignID,
-		ProviderID:              config.ProviderID,
+		ProducerInstanceID: config.ProducerInstanceID,
+		ProducerSessionID:  "session-load-01",
+		ProducerBuildID:    config.ProducerBuildID,
+		MQLCompilerBuild:   "fake",
+		TerminalBuild:      "fake",
+		OSContract:         "linux-test",
+		ClockAPIID:         "load-test-clock", ProviderID: config.ProviderID,
 		StableFeedID:            config.StableFeedID,
 		BrokerServerFingerprint: config.BrokerServerFingerprint,
 		ExactSourceSymbol:       config.ExactSourceSymbol,
