@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -224,8 +225,8 @@ func NewS3ReadBackendWithCredentials(ctx context.Context, settings S3ReadBackend
 		return nil, fmt.Errorf("load read-only S3 configuration")
 	}
 	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
-		options.UsePathStyle = true
 		options.BaseEndpoint = aws.String(settings.Endpoint)
+		options.UsePathStyle = usePathStyleEndpoint(settings.Endpoint)
 	})
 	return &S3ReadBackend{client: client, bucket: settings.Bucket, maxMetadataBytes: settings.MaxMetadataBytes}, nil
 }
@@ -342,12 +343,21 @@ func newS3BackendFromConfig(awsConfig aws.Config, settings S3BackendConfig) *S3B
 		awsConfig.HTTPClient = settings.HTTPClient
 	}
 	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
-		options.UsePathStyle = true
 		if settings.Endpoint != "" {
 			options.BaseEndpoint = aws.String(settings.Endpoint)
 		}
+		options.UsePathStyle = usePathStyleEndpoint(settings.Endpoint)
 	})
 	return &S3Backend{client: client, bucket: settings.Bucket}
+}
+
+func usePathStyleEndpoint(endpoint string) bool {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	return host == "localhost" || net.ParseIP(host) != nil
 }
 
 func (b *S3Backend) PutIfAbsent(ctx context.Context, key string, body []byte) error {
@@ -658,28 +668,28 @@ func classifyRemoteError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("remote object operation canceled or timed out: %w", err)
 	}
-	var statusError interface{ HTTPStatusCode() int }
-	if errors.As(err, &statusError) {
-		switch statusError.HTTPStatusCode() {
-		case 404:
-			return ErrObjectNotFound
-		case 409, 412:
-			return ErrObjectExists
-		case 401, 403:
-			return ErrRemotePermission
-		}
-	}
 	var apiError smithy.APIError
 	if errors.As(err, &apiError) {
 		switch apiError.ErrorCode() {
 		case "NoSuchKey", "NotFound":
-			return ErrObjectNotFound
+			return fmt.Errorf("%w: %s", ErrObjectNotFound, apiError.ErrorCode())
 		case "PreconditionFailed", "ConditionalRequestConflict", "Conflict":
-			return ErrObjectExists
+			return fmt.Errorf("%w: %s", ErrObjectExists, apiError.ErrorCode())
 		case "AccessDenied", "Unauthorized", "Forbidden", "InvalidAccessKeyId", "InvalidClientTokenId", "InvalidToken", "ExpiredToken", "MissingAuthenticationToken", "SignatureDoesNotMatch":
-			return ErrRemotePermission
+			return fmt.Errorf("%w: %s", ErrRemotePermission, apiError.ErrorCode())
 		default:
 			return fmt.Errorf("remote object operation failed with code %s", apiError.ErrorCode())
+		}
+	}
+	var statusError interface{ HTTPStatusCode() int }
+	if errors.As(err, &statusError) {
+		switch statusError.HTTPStatusCode() {
+		case 404:
+			return fmt.Errorf("%w: http status 404", ErrObjectNotFound)
+		case 409, 412:
+			return fmt.Errorf("%w: http status %d", ErrObjectExists, statusError.HTTPStatusCode())
+		case 401, 403:
+			return fmt.Errorf("%w: http status %d", ErrRemotePermission, statusError.HTTPStatusCode())
 		}
 	}
 	return fmt.Errorf("remote object operation failed")

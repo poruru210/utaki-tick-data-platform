@@ -30,14 +30,24 @@ ci_verification_pr: 5
 - 2026-07-17にignoredなrepository-local `env.local`からR2環境変数を読み込み、`go test -tags r2_smoke ./internal/delivery -run TestR2Smoke -count=1 -json`を実行した。
   初回はbucket設定不一致によりサンドボックス外で`remote permission denied`だったが、bucket修正後の再実行は
   `2026-07-17T15:42:03+09:00`開始、`2026-07-17T15:42:08+09:00`終了でpassした。
-  その後、二重run階層削除と短いsmoke専用scopeへの変更を行い、現在コードを`smoke/gateway=<gateway-id>/run=<UTC-based-run-id>`階層で
+  その後、二重run階層削除と短いsmoke専用scopeへの変更を行い、当時のコードを`smoke/gateway=<gateway-id>/run=<UTC-based-run-id>`階層で
   `2026-07-17T15:47:41+09:00`開始、`2026-07-17T15:47:45+09:00`終了で再実行してpassした。
   v1のR2物理階層を`source=<source>/symbol=<symbol>`へ変更した後の再実行は、
   `2026-07-17T16:11:38+09:00`に`remote permission denied`で失敗した。
   `EURUSD.pro#`による`#`保持検証も`2026-07-17T16:23:35+09:00`に同じ`remote permission denied`で失敗し、
   通常の`EURUSD`も`2026-07-17T16:23:47+09:00`に同じ失敗だったため、`#`固有のR2 key問題ではなく
   現在のbucket/token scope問題である。
-  bucket/token scope確認後に再実行が必要である。
+  その後、R2 SDKのvirtual-host-style requestへtest doubleを追従し、smoke buildを通常checkへ追加した。
+  `env.local`で`TICK_R2_SECRET_ACCESS_KEY`と`TICK_GATEWAY_INSTANCE_ID`が同一行に連結されていたため、
+  R2署名が`SignatureDoesNotMatch`で失敗した。
+  `env.local`の改行修正後、`2026-07-17T18:08:37+09:00`までに
+  `go test -tags r2_smoke ./internal/delivery -run TestR2Smoke -count=1 -v`を再実行し、
+  `TestR2Smoke`と`TestR2SmokeSymbolWithHash`の両方がpassした。
+  ただしroot側に`smoke` path segmentを置くのは誤りであるため、現在コードでは通常のimmutable rootの下に
+  `gateway=<gateway-id>/run=<UTC-based-run-id>/source=smoke/...`を生成する。
+  この修正後、本番appのlayout生成も同じ`gateway=<gateway-id>/run=<UTC-based-run-id>` helperを通すように変更した。
+  `env.local`の`TICK_R2_IMMUTABLE_ROOT`を`v1`へ更新し、
+  `2026-07-17T18:21:47+09:00`までに同じ実R2 smokeを通常コマンドで再実行してpassした。
   Gateway IDは実行主体として固定し、run IDはUTC時刻ベースで毎回一意にする。
   credential value、endpoint、bucket名、object keyは記録していない。
   raw JSONのrepository外長期保存とdigest記録はfinal auditまでに実施する。

@@ -25,6 +25,7 @@ const (
 	r2EndpointEnv        = "TICK_R2_ENDPOINT"
 	r2AccessKeyIDEnv     = "TICK_R2_ACCESS_KEY_ID"
 	r2SecretAccessKeyEnv = "TICK_R2_SECRET_ACCESS_KEY"
+	r2GatewayIDEnv       = "TICK_GATEWAY_INSTANCE_ID"
 )
 
 func TestR2Smoke(t *testing.T) {
@@ -41,17 +42,17 @@ func r2Smoke(t *testing.T, exactSourceSymbol string) {
 		t.Fatalf("load repository env.local: %v", err)
 	}
 	for _, name := range []string{
-		r2BucketEnv, r2ImmutableRootEnv, r2EndpointEnv, r2AccessKeyIDEnv, r2SecretAccessKeyEnv,
+		r2BucketEnv, r2ImmutableRootEnv, r2EndpointEnv, r2AccessKeyIDEnv, r2SecretAccessKeyEnv, r2GatewayIDEnv,
 	} {
 		if strings.TrimSpace(os.Getenv(name)) == "" {
 			t.Skipf("required smoke variable %s is unavailable", name)
 		}
 	}
-	bucket := os.Getenv(r2BucketEnv)
-	immutableRoot := strings.Trim(os.Getenv(r2ImmutableRootEnv), "/")
-	if immutableRoot == "" || strings.HasPrefix(immutableRoot, "v1") || strings.Contains(immutableRoot, "..") || strings.ContainsAny(immutableRoot, "\\\r\n") {
-		t.Skip("the R2 immutable root for this test must be an isolated smoke/ namespace without traversal")
+	if !r2SmokeLooksLikeR2SecretAccessKey(os.Getenv(r2SecretAccessKeyEnv)) {
+		t.Fatalf("%s must be the R2 S3 Secret Access Key, not the Cloudflare API token value", r2SecretAccessKeyEnv)
 	}
+	bucket := os.Getenv(r2BucketEnv)
+	immutableRoot := r2SmokePublicationRoot(t, os.Getenv(r2ImmutableRootEnv), os.Getenv(r2GatewayIDEnv), time.Now().UTC())
 
 	scope := r2SmokeScope(exactSourceSymbol)
 	layout, err := r2.NewLayout(immutableRoot, scope)
@@ -119,7 +120,7 @@ func r2Smoke(t *testing.T, exactSourceSymbol string) {
 	if _, err := publisher.Publish(context.Background(), r2.PublicationInput{
 		Manifest: manifest, ManifestBytes: manifestBytes, ObjectPaths: map[string]string{object.Key: object.Path},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publish smoke objects to R2: %v", err)
 	}
 	reader, err := NewArchiveReaderV1(context.Background(), ReaderConfig{
 		Version: ReaderConfigVersion, Endpoint: endpoint,
@@ -128,18 +129,50 @@ func r2Smoke(t *testing.T, exactSourceSymbol string) {
 		MaxMetadataBytes: 1 << 20, MaxRawObjectBytes: 1 << 30,
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("open archive reader from R2: %v", err)
 	}
 	manifestKey, err := layout.ManifestKey(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := reader.VerifyDay(context.Background(), SnapshotSelector{Manifest: manifestKey}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("verify smoke raw day from R2: %v", err)
 	}
 	if _, err := reader.VerifyScope(context.Background(), RawScopeSelector{DatasetID: scope.DatasetID, ProviderID: scope.ProviderID, ExactSourceSymbol: scope.ExactSourceSymbol}, hex.EncodeToString(object.Segment.ChainRoot[:])); err != nil {
-		t.Fatal(err)
+		t.Fatalf("verify smoke scope from R2: %v", err)
 	}
+}
+
+func r2SmokePublicationRoot(t *testing.T, baseRoot, gatewayID string, now time.Time) string {
+	t.Helper()
+	baseRoot = strings.TrimRight(strings.TrimSpace(baseRoot), "/")
+	if baseRoot == "" || strings.Contains(baseRoot, "..") || strings.ContainsAny(baseRoot, "\\\r\n") {
+		t.Fatalf("%s must be a normal immutable root without traversal", r2ImmutableRootEnv)
+	}
+	for _, part := range strings.Split(baseRoot, "/") {
+		if part == "smoke" {
+			t.Fatalf("%s must not contain a smoke path segment; smoke is encoded as source=smoke", r2ImmutableRootEnv)
+		}
+	}
+	publicationRoot, err := r2.PublicationRunRoot(baseRoot, gatewayID, r2.PublicationRunID(now))
+	if err != nil {
+		t.Fatalf("derive R2 publication root: %v", err)
+	}
+	return publicationRoot
+}
+
+func r2SmokeLooksLikeR2SecretAccessKey(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 64 {
+		return false
+	}
+	for _, b := range []byte(value) {
+		if (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func r2SmokeExactPathComponent(value string) string {

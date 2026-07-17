@@ -63,11 +63,20 @@ smoke testは`-tags r2_smoke`でだけbuildされ、合成WAL bytesをisolated R
 
 smoke testはisolated `TICK_R2_BUCKET`、`TICK_R2_IMMUTABLE_ROOT`、`TICK_R2_ENDPOINT`、`TICK_R2_ACCESS_KEY_ID`、`TICK_R2_SECRET_ACCESS_KEY`、`TICK_GATEWAY_INSTANCE_ID`を要求します。
 
-smoke用immutable rootは`smoke`または`smoke/`から始まり、その下に`gateway=<gateway-id>/run=<UTC-based-run-id>`を自動生成します。
+smoke testは通常のimmutable rootの下に`gateway=<gateway-id>/run=<UTC-based-run-id>`を自動生成し、
+その下の共通R2 layoutで`source=smoke`を使います。
 
 smoke testはremote objectをdelete、move、sync、overwriteせず、credentialの値をログ、error、artifact、tracked configへ書き込みません。
 
-現在の環境では必要なR2 envとcredentialを満たしていないため、R2 smokeは未実施です。
+2026-07-17の実R2 smokeでは、`env.local`で`TICK_R2_SECRET_ACCESS_KEY`と
+`TICK_GATEWAY_INSTANCE_ID`が同一行に連結されていた状態ではR2署名が`SignatureDoesNotMatch`で失敗しました。
+`env.local`の改行修正後、`go test -tags r2_smoke ./internal/delivery -run TestR2Smoke -count=1 -v`を
+再実行し、通常symbolと`#`を含むsymbolの両方でpassしました。
+その後、root側に`smoke` path segmentを置く誤りを修正し、本番appのlayout生成も同じ
+`gateway=<gateway-id>/run=<UTC-based-run-id>` helperを通すように変更しました。
+`env.local`の`TICK_R2_IMMUTABLE_ROOT`を`v1`へ更新して通常コマンドで再実行しました。
+修正後の実R2 smokeは、通常のimmutable root配下の
+`gateway=<gateway-id>/run=<UTC-based-run-id>/source=smoke/...`階層でpassしました。
 
 ## 証跡と残存境界
 

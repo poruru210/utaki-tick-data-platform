@@ -76,7 +76,7 @@ func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (Verifi
 		return VerificationReceipt{}, err
 	}
 	if err := p.putPublisherClaim(ctx, intent.ClaimKey, claimBytes); err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("put publisher claim: %w", err)
 	}
 	if err := p.advanceStage(intent.ManifestKey, StageClaimed); err != nil {
 		return VerificationReceipt{}, err
@@ -86,38 +86,38 @@ func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (Verifi
 		return VerificationReceipt{}, err
 	}
 	if err := p.copyPathWithResume(ctx, intent.ScopeDescriptorPath, intent.ScopeDescriptorKey, intent.ScopeDescriptorSHA256, intent.ScopeDescriptorBytes); err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("publish scope descriptor: %w", err)
 	}
 
 	stage := record.Stage
 	if publicationStageRank(stage) < publicationStageRank(StageObjectsCopied) {
 		for _, object := range intent.Objects {
 			if err := p.copyWithResume(ctx, intent.ManifestKey, object); err != nil {
-				return VerificationReceipt{}, err
+				return VerificationReceipt{}, fmt.Errorf("publish raw object %q: %w", object.Key, err)
 			}
 		}
 		if err := p.advanceStage(intent.ManifestKey, StageObjectsCopied); err != nil {
 			return VerificationReceipt{}, err
 		}
 	} else if err := p.recheckOrRepairObjects(ctx, intent.ManifestKey, intent.Objects); err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("recheck or repair raw objects: %w", err)
 	}
 	if err := p.checkObjects(ctx, intent.ManifestKey, intent.Objects); err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("verify raw objects: %w", err)
 	}
 	if err := p.advanceStage(intent.ManifestKey, StageObjectsVerified); err != nil {
 		return VerificationReceipt{}, err
 	}
 
 	if err := p.checkObjects(ctx, intent.ManifestKey, intent.Objects); err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("verify raw objects before manifest: %w", err)
 	}
 	if _, err := p.backend.VerifyFile(ctx, intent.ScopeDescriptorKey, intent.ScopeDescriptorPath, intent.ScopeDescriptorSHA256, intent.ScopeDescriptorBytes); err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("verify scope descriptor: %w", err)
 	}
 	existing, err := LoadManifestRecords(ctx, p.backend, p.layout, intent.Manifest.Date)
 	if err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("load existing manifest records: %w", err)
 	}
 	same, err := ValidateRevisionGraph(intent.Manifest, intent.ManifestBytes, existing)
 	if err != nil {
@@ -127,18 +127,18 @@ func (p *Publisher) Publish(ctx context.Context, input PublicationInput) (Verifi
 	manifestBytes := uint64(len(intent.ManifestBytes))
 	if same {
 		if _, err := p.backend.VerifyFile(ctx, intent.ManifestKey, intent.ManifestPath, manifestContentSHA256, manifestBytes); err != nil {
-			return VerificationReceipt{}, err
+			return VerificationReceipt{}, fmt.Errorf("verify existing manifest: %w", err)
 		}
 	} else {
 		if err := p.copyManifestWithResume(ctx, intent.ManifestPath, intent.ManifestKey, manifestContentSHA256, manifestBytes, intent.ManifestBytes); err != nil {
-			return VerificationReceipt{}, err
+			return VerificationReceipt{}, fmt.Errorf("publish manifest: %w", err)
 		}
 	}
 	if err := p.advanceStage(intent.ManifestKey, StageManifestCopied); err != nil {
 		return VerificationReceipt{}, err
 	}
 	if _, err := p.backend.VerifyFile(ctx, intent.ManifestKey, intent.ManifestPath, manifestContentSHA256, manifestBytes); err != nil {
-		return VerificationReceipt{}, err
+		return VerificationReceipt{}, fmt.Errorf("verify manifest: %w", err)
 	}
 	if err := p.advanceStage(intent.ManifestKey, StageManifestVerified); err != nil {
 		return VerificationReceipt{}, err

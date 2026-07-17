@@ -35,6 +35,36 @@ func ScopePrefix(scope archive.ScopeConfig) string {
 	return scopePrefix(scope)
 }
 
+func PublicationRunID(now time.Time) string {
+	return now.UTC().Format("20060102T150405.000000000Z")
+}
+
+func PublicationRunRoot(immutableRoot, gatewayID, runID string) (string, error) {
+	immutableRoot = strings.TrimRight(immutableRoot, "/")
+	gatewayID = strings.TrimSpace(gatewayID)
+	runID = strings.TrimSpace(runID)
+	if err := validateRemoteRoot(immutableRoot); err != nil {
+		return "", err
+	}
+	if gatewayID == "" {
+		return "", fmt.Errorf("gateway id is empty")
+	}
+	if runID == "" {
+		return "", fmt.Errorf("publication run id is empty")
+	}
+	for _, part := range strings.Split(immutableRoot, "/") {
+		if strings.HasPrefix(part, "gateway=") || strings.HasPrefix(part, "run=") ||
+			strings.HasPrefix(part, "source=") || strings.HasPrefix(part, "symbol=") {
+			return "", fmt.Errorf("immutable root must not contain generated publication path segments")
+		}
+	}
+	return path.Join(
+		immutableRoot,
+		"gateway="+exactPathComponent(gatewayID),
+		"run="+exactPathComponent(runID),
+	), nil
+}
+
 func scopePrefix(scope archive.ScopeConfig) string {
 	return path.Join(
 		"source="+exactPathComponent(scope.ProviderID),

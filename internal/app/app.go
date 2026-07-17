@@ -45,7 +45,7 @@ func TestOptionsWithRemoteBackend(configValue appconfig.Config, provider credent
 	return fx.Options(
 		fx.Supply(configValue),
 		CoreOptions(),
-		fx.Provide(newCredentialBackend, newPublicationJournal, newLayout),
+		fx.Provide(newCredentialBackend, newPublicationJournal, newPublicationRunID, newLayout),
 		fx.Supply(fx.Annotate(provider, fx.As(new(credentials.Provider)))),
 		fx.Supply(fx.Annotate(backend, fx.As(new(r2.WriteBackend)))),
 	)
@@ -86,7 +86,7 @@ var StorageModule = fx.Module(
 
 var RemoteModule = fx.Module(
 	"remote",
-	fx.Provide(newRemoteBackend, newPublicationJournal, newLayout),
+	fx.Provide(newRemoteBackend, newPublicationJournal, newPublicationRunID, newLayout),
 )
 
 var PublicationModule = fx.Module(
@@ -200,8 +200,18 @@ func newPublicationJournal(configValue appconfig.Config) (*r2.PublicationJournal
 	return r2.NewPublicationJournal(configValue.Publication.RemoteJournalPath)
 }
 
-func newLayout(configValue appconfig.Config) (r2.Layout, error) {
-	return r2.NewLayout(configValue.R2.ImmutableRoot, toArchiveScope(configValue))
+type publicationRunID string
+
+func newPublicationRunID() publicationRunID {
+	return publicationRunID(r2.PublicationRunID(time.Now()))
+}
+
+func newLayout(configValue appconfig.Config, runID publicationRunID) (r2.Layout, error) {
+	root, err := r2.PublicationRunRoot(configValue.R2.ImmutableRoot, configValue.GatewayInstanceID, string(runID))
+	if err != nil {
+		return r2.Layout{}, err
+	}
+	return r2.NewLayout(root, toArchiveScope(configValue))
 }
 
 func newPublisher(configValue appconfig.Config, layout r2.Layout, backend r2.WriteBackend, journal *r2.PublicationJournal) (*r2.Publisher, error) {

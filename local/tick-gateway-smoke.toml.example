@@ -33,7 +33,7 @@ protection = "native-acl"
 endpoint = "https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
 bucket = "replace-with-isolated-r2-bucket"
 region = "auto"
-immutable_root = "g6-smoke/replace-with-run-id"
+immutable_root = "v1"
 
 [publication]
 catalog_path = "./smoke/journal/catalog.sqlite"

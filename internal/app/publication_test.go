@@ -169,6 +169,8 @@ type appManualTicker struct {
 func (t *appManualTicker) C() <-chan time.Time { return t.ticks }
 func (t *appManualTicker) Stop()               { t.once.Do(func() { close(t.stopped) }) }
 
+const appTestPublicationRunID publicationRunID = "20260717T000000.000000000Z"
+
 func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 	config := testConfig(t)
 	config.Publication.SealMaxBytes = 1
@@ -182,7 +184,7 @@ func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 	config.ListenAddress = listener.Addr().String()
 	_ = listener.Close()
 
-	transport := newAppFakeS3Transport()
+	transport := newAppFakeS3Transport(config.R2.Bucket)
 	client := &http.Client{Transport: transport}
 	provider := &staticProvider{accessKey: "app-g4-access", secret: "app-g4-secret-canary"}
 	var catalog *publication.Catalog
@@ -264,10 +266,7 @@ func TestFakeR2PublicationThroughFxApplication(t *testing.T) {
 			if verifyErr != nil {
 				t.Fatal(verifyErr)
 			}
-			layout, layoutErr := r2.NewLayout(config.R2.ImmutableRoot, toArchiveScope(config))
-			if layoutErr != nil {
-				t.Fatal(layoutErr)
-			}
+			layout := appTestR2Layout(t, config)
 			manifestKey, keyErr := layout.ManifestKey(manifest)
 			if keyErr != nil {
 				t.Fatal(keyErr)
@@ -329,11 +328,8 @@ func TestFxApplicationDoesNotLeakCredentialSecretOnRemoteFailure(t *testing.T) {
 	_ = listener.Close()
 
 	secret := "app-g4-error-secret-canary"
-	transport := newAppFakeS3Transport()
-	layout, err := r2.NewLayout(config.R2.ImmutableRoot, toArchiveScope(config))
-	if err != nil {
-		t.Fatal(err)
-	}
+	transport := newAppFakeS3Transport(config.R2.Bucket)
+	layout := appTestR2Layout(t, config)
 	claimKey, err := layout.ClaimKey(config.PublisherEpoch)
 	if err != nil {
 		t.Fatal(err)
@@ -450,6 +446,7 @@ func removeEventually(t *testing.T, path string) {
 func testOptionsWithSDKRemoteBackend(configValue appconfig.Config, provider credentials.Provider, httpClient *http.Client) fx.Option {
 	return fx.Options(
 		fx.Supply(configValue),
+		fx.Supply(appTestPublicationRunID),
 		CoreOptions(),
 		fx.Provide(
 			func(configValue appconfig.Config, provider credentials.Provider) (remoteBackendResult, error) {
@@ -467,6 +464,19 @@ func testOptionsWithSDKRemoteBackend(configValue appconfig.Config, provider cred
 		),
 		fx.Supply(fx.Annotate(provider, fx.As(new(credentials.Provider)))),
 	)
+}
+
+func appTestR2Layout(t *testing.T, config appconfig.Config) r2.Layout {
+	t.Helper()
+	root, err := r2.PublicationRunRoot(config.R2.ImmutableRoot, config.GatewayInstanceID, string(appTestPublicationRunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := r2.NewLayout(root, toArchiveScope(config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return layout
 }
 
 type appFxEventLogger struct {
@@ -493,14 +503,15 @@ func (l *appFxEventLogger) contains(value string) bool {
 
 type appFakeS3Transport struct {
 	mu            sync.Mutex
+	bucket        string
 	objects       map[string][]byte
 	failPutCount  int
 	failureStatus int
 	failureBody   []byte
 }
 
-func newAppFakeS3Transport() *appFakeS3Transport {
-	return &appFakeS3Transport{objects: make(map[string][]byte)}
+func newAppFakeS3Transport(bucket string) *appFakeS3Transport {
+	return &appFakeS3Transport{bucket: bucket, objects: make(map[string][]byte)}
 }
 
 func (s *appFakeS3Transport) failPuts(count int, body []byte) {
@@ -528,7 +539,7 @@ func (s *appFakeS3Transport) RoundTrip(request *http.Request) (*http.Response, e
 	if request.Method == http.MethodGet && request.URL.Query().Get("list-type") == "2" {
 		return s.listResponse(request, request.URL.Query().Get("prefix")), nil
 	}
-	key, ok := appFakeS3ObjectKey(request.URL.Path)
+	key, ok := appFakeS3ObjectKey(request, s.bucket)
 	if !ok {
 		return appFakeS3Error(request, http.StatusBadRequest, "InvalidURI"), nil
 	}
@@ -542,14 +553,18 @@ func (s *appFakeS3Transport) RoundTrip(request *http.Request) (*http.Response, e
 	}
 }
 
-func appFakeS3ObjectKey(requestPath string) (string, bool) {
-	trimmed := strings.TrimPrefix(requestPath, "/")
+func appFakeS3ObjectKey(request *http.Request, bucket string) (string, bool) {
+	trimmed := strings.TrimPrefix(request.URL.Path, "/")
 	parts := strings.SplitN(trimmed, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", false
+	if len(parts) == 2 && parts[0] == bucket && parts[1] != "" {
+		key, err := url.PathUnescape(parts[1])
+		return key, err == nil && key != ""
 	}
-	key, err := url.PathUnescape(parts[1])
-	return key, err == nil && key != ""
+	if strings.HasPrefix(request.URL.Host, bucket+".") && trimmed != "" {
+		key, err := url.PathUnescape(trimmed)
+		return key, err == nil && key != ""
+	}
+	return "", false
 }
 
 func (s *appFakeS3Transport) putResponse(request *http.Request, key string) *http.Response {

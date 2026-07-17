@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"tick-data-platform/internal/archive"
 	"tick-data-platform/internal/protocol"
@@ -67,6 +68,32 @@ func TestLayoutPhysicalPrefixUsesExactPathComponents(t *testing.T) {
 	other.ProviderID = "oanda japan"
 	if ScopePrefix(other) == prefix {
 		t.Fatalf("case-distinct source identities collided: %q", prefix)
+	}
+}
+
+func TestPublicationRunRootUsesGatewayAndRunBeforeScope(t *testing.T) {
+	runID := PublicationRunID(time.Date(2026, 7, 17, 9, 8, 16, 866795970, time.UTC))
+	root, err := PublicationRunRoot("v1", "gateway-r2-smoke-01", runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := layoutTestScope()
+	scope.ProviderID = "smoke"
+	layout, err := NewLayout(root, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "v1/gateway=gateway-r2-smoke-01/run=20260717T090816.866795970Z/source=smoke/symbol=" + exactPathComponent(scope.ExactSourceSymbol)
+	if layout.ImmutableScopePrefix() != want {
+		t.Fatalf("immutable scope prefix = %q want %q", layout.ImmutableScopePrefix(), want)
+	}
+}
+
+func TestPublicationRunRootRejectsGeneratedSegmentsInBaseRoot(t *testing.T) {
+	for _, root := range []string{"v1/gateway=x", "v1/run=x", "v1/source=x", "v1/symbol=x"} {
+		if _, err := PublicationRunRoot(root, "gateway", "run"); err == nil {
+			t.Fatalf("publication run root accepted generated segment in %q", root)
+		}
 	}
 }
 
