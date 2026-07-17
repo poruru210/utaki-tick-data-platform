@@ -225,6 +225,7 @@ func TestPruneLocalCompletionRecorderConvergesAfterCrashBeforeJournalRecord(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer journal.Stop(context.Background())
 	recovered, err := retention.InventoryPruneCompletions(rawRoot, retention.ArtifactRawOutbox, 10, 1<<20)
 	if err != nil || len(recovered) != 1 {
 		t.Fatalf("completion inventory after restart = %+v err=%v", recovered, err)

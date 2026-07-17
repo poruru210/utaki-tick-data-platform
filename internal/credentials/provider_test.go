@@ -179,5 +179,6 @@ func writeCredentialFixture(t *testing.T, body string) string {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	secureCredentialFixtureForTest(t, path)
 	return path
 }

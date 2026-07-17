@@ -17,6 +17,7 @@ func TestFileProviderWindowsNativeACLFixture(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"format_version":1,"access_key_id":"a","secret_access_key":"b"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	secureCredentialFixtureForTest(t, path)
 	provider, err := NewFileProvider(FileConfig{Path: path, Protection: ProtectionNativeACL})
 	if err != nil {
 		t.Fatal(err)
