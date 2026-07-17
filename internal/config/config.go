@@ -77,7 +77,6 @@ type Config struct {
 	GatewayInstanceID       string `toml:"gateway_instance_id"`
 	WALRoot                 string `toml:"wal_root"`
 	RawOutboxRoot           string `toml:"raw_outbox_root"`
-	OutboxRoot              string `toml:"outbox_root"`
 	JournalPath             string `toml:"journal_path"`
 	MaxFrameBytes           uint32 `toml:"max_frame_bytes"`
 	MaxRecords              uint32 `toml:"max_records"`
@@ -104,11 +103,6 @@ type Config struct {
 	PublisherID             string `toml:"publisher_id"`
 	PublisherEpoch          uint64 `toml:"publisher_epoch"`
 
-	// These fields retain parsing compatibility for the older smoke fixture.
-	// They are not used by the production R2 runtime.
-	R2BucketEnv string `toml:"r2_bucket_env"`
-	R2Prefix    string `toml:"r2_prefix"`
-
 	Credentials CredentialsConfig `toml:"credentials"`
 	R2          R2Config          `toml:"r2"`
 	Publication PublicationConfig `toml:"publication"`
@@ -130,9 +124,6 @@ func Load(path string) (Config, error) {
 	}
 	if override, ok := os.LookupEnv(CredentialsPathEnv); ok && strings.TrimSpace(override) != "" {
 		config.Credentials.Path = override
-	}
-	if config.RawOutboxRoot == "" {
-		config.RawOutboxRoot = config.OutboxRoot
 	}
 	if err := config.Validate(); err != nil {
 		return Config{}, err

@@ -79,6 +79,21 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsRemovedRuntimeCompatibilityFields(t *testing.T) {
+	for _, field := range []string{
+		"outbox_root = \"./outbox\"",
+		"r2_bucket_env = \"TICK_R2_BUCKET\"",
+		"r2_prefix = \"smoke/v1\"",
+	} {
+		t.Run(strings.Split(field, " ")[0], func(t *testing.T) {
+			path := writeConfig(t, "listen_address = \"127.0.0.1:1\"\n"+field+"\n")
+			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "decode gateway config") {
+				t.Fatalf("removed field %q was accepted: %v", field, err)
+			}
+		})
+	}
+}
+
 func TestValidateForRunRejectsIncompletePublication(t *testing.T) {
 	config := Config{ListenAddress: "127.0.0.1:1", WALRoot: "wal", RawOutboxRoot: "outbox", JournalPath: "journal", Credentials: CredentialsConfig{Provider: "file", Path: "credentials"}}
 	if err := config.ValidateForRun(); err == nil || !strings.Contains(err.Error(), "R2") {

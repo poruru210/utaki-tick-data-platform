@@ -24,3 +24,27 @@ day_definition_id = "utc-day-v1"
 settle_policy = "manual-v1"
 publisher_id = "publisher-local-01"
 publisher_epoch = 1
+
+[credentials]
+provider = "file"
+path = "./secrets/tick-gateway-r2.json"
+protection = "native-acl"
+
+[r2]
+endpoint = "https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
+bucket = "replace-with-r2-bucket"
+region = "auto"
+immutable_root = "v1"
+
+[publication]
+catalog_path = "./publication/catalog.sqlite"
+remote_journal_path = "./publication/remote.sqlite"
+manifest_root = "./publication/manifests"
+receipt_root = "./publication/receipts"
+seal_max_bytes = 67108864
+seal_interval_ms = 60000
+scan_interval_ms = 1000
+retry_min_ms = 1000
+retry_max_ms = 300000
+max_pending_segments = 1000
+max_pending_bytes = 1099511627776
